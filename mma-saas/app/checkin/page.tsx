@@ -17,22 +17,7 @@ type Stage =
   | { type: "selected"; member: Member }
   | { type: "success"; firstName: string };
 
-const AVATAR_COLORS = [
-  "bg-blue-700", "bg-purple-700", "bg-emerald-700",
-  "bg-rose-700", "bg-amber-700", "bg-cyan-700",
-];
-
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return (parts[0][0] ?? "?").toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function getAvatarColor(name: string) {
-  let hash = 0;
-  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
+import { getInitials, getAvatarColor } from "../lib/avatar";
 
 export default function CheckInPage() {
   const members = useQuery(api.members.getAll);
@@ -63,52 +48,54 @@ export default function CheckInPage() {
     setStage({ type: "success", firstName: member.name.trim().split(/\s+/)[0] });
   }
 
-  // Success screen
   if (stage.type === "success") {
     return (
-      <div className="h-screen bg-zinc-950 flex flex-col items-center justify-center text-center px-8">
-        <div className="w-28 h-28 rounded-full bg-green-500/20 flex items-center justify-center mb-8">
-          <svg
-            className="w-14 h-14 text-green-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
+      <div className="h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#0D0D0D" }}>
+        <div className="w-28 h-28 rounded-full flex items-center justify-center mb-8" style={{ backgroundColor: "rgba(74,222,128,0.1)" }}>
+          <svg className="w-14 h-14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ color: "#4ADE80" }}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h1 className="text-6xl font-extrabold text-white mb-4 tracking-tight">
+        <h1 className="text-6xl font-extrabold mb-4 tracking-tight" style={{ color: "#FFFFFF" }}>
           Welcome, {stage.firstName}!
         </h1>
-        <p className="text-2xl text-zinc-400">Enjoy your training session.</p>
+        <p className="text-2xl" style={{ color: "#888888" }}>Enjoy your training session.</p>
       </div>
     );
   }
 
-  // Confirmation screen
   if (stage.type === "selected") {
     const m = stage.member;
     return (
-      <div className="h-screen bg-zinc-950 flex flex-col items-center justify-center text-center px-8">
+      <div className="h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#0D0D0D" }}>
         <button
           onClick={() => setStage({ type: "idle" })}
-          className="absolute top-8 left-8 text-zinc-400 hover:text-white text-xl flex items-center gap-2 transition-colors py-3 px-4 rounded-xl hover:bg-zinc-800"
+          className="absolute top-8 left-8 text-xl flex items-center gap-2 transition-colors py-3 px-4 rounded-xl"
+          style={{ color: "#888888" }}
+          onMouseEnter={e => {
+            e.currentTarget.style.color = "#FFFFFF";
+            e.currentTarget.style.backgroundColor = "#1A1A1A";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.color = "#888888";
+            e.currentTarget.style.backgroundColor = "transparent";
+          }}
         >
           ← Back
         </button>
-        <div
-          className={`w-28 h-28 rounded-full flex items-center justify-center text-4xl font-extrabold mb-6 ${getAvatarColor(m.name)}`}
-        >
+        <div className={`w-28 h-28 rounded-full flex items-center justify-center text-4xl font-extrabold mb-6 ${getAvatarColor(m.name)}`}>
           {getInitials(m.name)}
         </div>
-        <h2 className="text-5xl font-extrabold text-white mb-3 tracking-tight">{m.name}</h2>
-        <p className="text-xl text-zinc-400 mb-14">
+        <h2 className="text-5xl font-extrabold mb-3 tracking-tight" style={{ color: "#FFFFFF" }}>{m.name}</h2>
+        <p className="text-xl mb-14" style={{ color: "#888888" }}>
           {m.plan}{m.beltRank ? ` · ${m.beltRank}` : ""}
         </p>
         <button
           onClick={() => confirmCheckIn(m)}
-          className="w-full max-w-sm rounded-2xl bg-green-500 hover:bg-green-400 active:scale-95 text-white text-2xl font-bold py-6 transition-all"
+          className="w-full max-w-sm rounded-2xl text-white text-2xl font-bold py-6 transition-all active:scale-95"
+          style={{ backgroundColor: "#E02020" }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = "#B91C1C")}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = "#E02020")}
         >
           Check In
         </button>
@@ -116,15 +103,14 @@ export default function CheckInPage() {
     );
   }
 
-  // Idle / search screen
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
+    <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
       <div className="max-w-lg mx-auto px-6 pt-20 pb-10">
         <div className="text-center mb-14">
-          <p className="text-zinc-500 text-sm font-semibold uppercase tracking-widest mb-3">
-            MatFlow
+          <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#E02020" }}>
+            KombatDesk
           </p>
-          <h1 className="text-5xl font-extrabold tracking-tight">Check In</h1>
+          <h1 className="text-5xl font-extrabold tracking-tight" style={{ color: "#FFFFFF" }}>Check In</h1>
         </div>
 
         <input
@@ -133,7 +119,12 @@ export default function CheckInPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           autoFocus
-          className="w-full rounded-2xl border border-zinc-700 bg-zinc-900 px-6 py-5 text-2xl text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-white/20"
+          className="w-full rounded-2xl px-6 py-5 text-2xl text-white focus:outline-none"
+          style={{
+            backgroundColor: "#222222",
+            border: "1px solid #333333",
+            color: "#FFFFFF",
+          }}
         />
 
         {results.length > 0 && (
@@ -142,16 +133,23 @@ export default function CheckInPage() {
               <button
                 key={m._id}
                 onClick={() => setStage({ type: "selected", member: m })}
-                className="flex items-center gap-5 w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-6 py-5 hover:bg-zinc-800 hover:border-zinc-600 active:scale-[0.99] transition-all text-left"
+                className="flex items-center gap-5 w-full rounded-2xl px-6 py-5 active:scale-[0.99] transition-all text-left"
+                style={{ backgroundColor: "#222222", border: "1px solid #333333" }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor = "#1A1A1A";
+                  e.currentTarget.style.borderColor = "#555555";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = "#222222";
+                  e.currentTarget.style.borderColor = "#333333";
+                }}
               >
-                <div
-                  className={`w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold shrink-0 ${getAvatarColor(m.name)}`}
-                >
+                <div className={`w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold shrink-0 ${getAvatarColor(m.name)}`}>
                   {getInitials(m.name)}
                 </div>
                 <div>
-                  <p className="text-white text-xl font-semibold leading-tight">{m.name}</p>
-                  <p className="text-zinc-500 text-base mt-0.5">
+                  <p className="text-xl font-semibold leading-tight" style={{ color: "#FFFFFF" }}>{m.name}</p>
+                  <p className="text-base mt-0.5" style={{ color: "#555555" }}>
                     {m.plan}{m.beltRank ? ` · ${m.beltRank}` : ""}
                   </p>
                 </div>
@@ -161,7 +159,7 @@ export default function CheckInPage() {
         )}
 
         {search.trim().length > 0 && results.length === 0 && members !== undefined && (
-          <p className="text-center text-zinc-500 mt-10 text-xl">No active members found.</p>
+          <p className="text-center mt-10 text-xl" style={{ color: "#555555" }}>No active members found.</p>
         )}
       </div>
     </div>

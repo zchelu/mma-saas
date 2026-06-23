@@ -18,7 +18,7 @@ export default defineSchema({
     time: v.string(),
   }),
   invoices: defineTable({
-    memberName: v.string(),
+    memberId: v.id("members"),
     amount: v.number(),
     status: v.union(v.literal("paid"), v.literal("unpaid")),
     dueDate: v.string(),

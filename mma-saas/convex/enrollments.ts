@@ -33,6 +33,8 @@ export const getEnrollmentCounts = query({
 export const enroll = mutation({
   args: { memberId: v.id("members"), classId: v.id("classes") },
   handler: async (ctx, { memberId, classId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     const existing = await ctx.db
       .query("enrollments")
       .withIndex("by_class", (q) => q.eq("classId", classId))
@@ -46,6 +48,8 @@ export const enroll = mutation({
 export const unenroll = mutation({
   args: { memberId: v.id("members"), classId: v.id("classes") },
   handler: async (ctx, { memberId, classId }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     const enrollment = await ctx.db
       .query("enrollments")
       .withIndex("by_class", (q) => q.eq("classId", classId))

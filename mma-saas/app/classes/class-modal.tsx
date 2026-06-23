@@ -42,9 +42,9 @@ export default function ClassModal({ gymClass, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-8">
-        <h2 className="text-xl font-bold mb-6 text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.75)" }}>
+      <div className="w-full max-w-md rounded-xl p-8" style={{ backgroundColor: "#222222", border: "1px solid #333333" }}>
+        <h2 className="text-xl mb-6" style={{ color: "#FFFFFF", fontWeight: 500 }}>
           {gymClass ? "Edit Class" : "Add Class"}
         </h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -64,10 +64,24 @@ export default function ClassModal({ gymClass, onClose }: Props) {
           </Field>
 
           <div className="flex gap-3 mt-2">
-            <button type="submit" disabled={saving} className="flex-1 rounded-lg bg-white text-black font-semibold py-2 hover:bg-zinc-200 transition-colors disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 rounded-lg font-semibold py-2 transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+              onMouseEnter={e => { if (!saving) e.currentTarget.style.backgroundColor = "#B91C1C"; }}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "#E02020")}
+            >
               {saving ? "Saving…" : gymClass ? "Save Changes" : "Add Class"}
             </button>
-            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-zinc-700 text-zinc-300 font-semibold py-2 hover:bg-zinc-800 transition-colors">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-lg font-semibold py-2 transition-colors"
+              style={{ backgroundColor: "#1A1A1A", color: "#FFFFFF", border: "0.5px solid #333333" }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "#222222")}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "#1A1A1A")}
+            >
               Cancel
             </button>
           </div>
@@ -80,7 +94,7 @@ export default function ClassModal({ gymClass, onClose }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs text-zinc-400 uppercase tracking-wider">{label}</label>
+      <label className="text-xs uppercase tracking-wider" style={{ color: "#555555" }}>{label}</label>
       {children}
     </div>
   );

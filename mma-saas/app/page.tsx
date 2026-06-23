@@ -2,19 +2,21 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col">
-      <header className="flex items-center justify-between px-8 py-5 border-b border-zinc-800">
-        <span className="text-xl font-bold tracking-tight">MatFlow</span>
+    <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
+      <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
+        <span className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>KombatDesk</span>
         <div className="flex gap-3">
           <Link
             href="/sign-in"
-            className="text-sm text-zinc-400 hover:text-white px-4 py-2 transition-colors"
+            className="text-sm px-4 py-2 transition-colors"
+            style={{ color: "#888888" }}
           >
             Sign in
           </Link>
           <Link
             href="/sign-up"
-            className="text-sm font-semibold bg-white text-black px-4 py-2 rounded-lg hover:bg-zinc-200 transition-colors"
+            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
             Get started
           </Link>
@@ -23,28 +25,23 @@ export default function Home() {
 
       <main className="flex flex-col items-center text-center px-8 flex-1">
         <div className="mt-32 mb-16 max-w-2xl">
-          <div className="inline-block text-xs font-semibold tracking-widest uppercase text-zinc-400 border border-zinc-700 rounded-full px-4 py-1 mb-6">
+          <div className="inline-block text-xs font-semibold tracking-widest uppercase px-4 py-1 mb-6 rounded-full" style={{ color: "#888888", border: "1px solid #333333" }}>
             Built for MMA &amp; BJJ gyms
           </div>
-          <h1 className="text-5xl font-extrabold leading-tight tracking-tight mb-6">
+          <h1 className="text-5xl font-extrabold leading-tight tracking-tight mb-6" style={{ color: "#FFFFFF", fontWeight: 500 }}>
             Run your gym.<br />
-            <span className="text-zinc-400">Not spreadsheets.</span>
+            <span style={{ color: "#888888" }}>Not spreadsheets.</span>
           </h1>
-          <p className="text-lg text-zinc-400 mb-10 max-w-lg mx-auto">
-            MatFlow gives coaches and gym owners one place to manage members, track attendance, and handle billing — without the chaos.
+          <p className="text-lg mb-10 max-w-lg mx-auto" style={{ color: "#888888" }}>
+            Check-ins, member tracking, classes, and billing — all in one place. KombatDesk handles the admin so you can spend more time on the mats.
           </p>
-          <div className="flex gap-4 justify-center">
+          <div className="flex justify-center">
             <Link
-              href="/sign-up"
-              className="rounded-lg bg-white text-black font-semibold px-6 py-3 hover:bg-zinc-200 transition-colors"
+              href="/signup"
+              className="rounded-lg font-semibold px-6 py-3 transition-colors"
+              style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
-              Start free
-            </Link>
-            <Link
-              href="/sign-in"
-              className="rounded-lg border border-zinc-700 text-zinc-300 font-semibold px-6 py-3 hover:bg-zinc-800 transition-colors"
-            >
-              Sign in
+              Set up my gym
             </Link>
           </div>
         </div>
@@ -65,8 +62,8 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="border-t border-zinc-800 px-8 py-5 text-center text-xs text-zinc-600">
-        © {new Date().getFullYear()} MatFlow. All rights reserved.
+      <footer className="px-8 py-5 text-center text-xs" style={{ borderTop: "1px solid #333333", color: "#555555" }}>
+        © {new Date().getFullYear()} KombatDesk. All rights reserved.
       </footer>
     </div>
   );
@@ -74,9 +71,9 @@ export default function Home() {
 
 function FeatureCard({ title, description }: { title: string; description: string }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-left">
-      <h3 className="font-semibold text-white mb-2">{title}</h3>
-      <p className="text-sm text-zinc-400 leading-relaxed">{description}</p>
+    <div className="rounded-xl p-6 text-left" style={{ backgroundColor: "#222222", border: "1px solid #333333" }}>
+      <h3 className="font-medium mb-2" style={{ color: "#FFFFFF" }}>{title}</h3>
+      <p className="text-sm leading-relaxed" style={{ color: "#888888" }}>{description}</p>
     </div>
   );
 }

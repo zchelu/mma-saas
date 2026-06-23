@@ -18,9 +18,9 @@ export default function StatsGrid() {
 
 function StatCard({ label, value }: { label: string; value: number | undefined }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-      <p className="text-sm text-zinc-400 mb-1">{label}</p>
-      <p className="text-4xl font-bold">{value === undefined ? "…" : value}</p>
+    <div className="rounded-xl p-6" style={{ backgroundColor: "#222222", border: "1px solid #333333" }}>
+      <p className="text-sm mb-1" style={{ color: "#888888" }}>{label}</p>
+      <p className="text-4xl font-bold" style={{ color: "#FFFFFF" }}>{value === undefined ? "…" : value}</p>
     </div>
   );
 }

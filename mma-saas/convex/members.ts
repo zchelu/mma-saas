@@ -31,6 +31,8 @@ const memberFields = {
 export const add = mutation({
   args: memberFields,
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     return await ctx.db.insert("members", args);
   },
 });
@@ -38,6 +40,8 @@ export const add = mutation({
 export const update = mutation({
   args: { id: v.id("members"), ...memberFields },
   handler: async (ctx, { id, ...fields }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     await ctx.db.patch(id, fields);
   },
 });
@@ -45,10 +49,17 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("members") },
   handler: async (ctx, { id }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const enrollments = await ctx.db.query("enrollments").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
+    for (const e of enrollments) await ctx.db.delete(e._id);
+    const attendance = await ctx.db.query("attendance").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
+    for (const a of attendance) await ctx.db.delete(a._id);
     await ctx.db.delete(id);
   },
 });
 
+// No auth — intentionally public for the kiosk check-in screen
 export const checkIn = mutation({
   args: { id: v.id("members") },
   handler: async (ctx, { id }) => {

@@ -47,6 +47,8 @@ export const logAttendance = mutation({
     memberIds: v.array(v.id("members")),
   },
   handler: async (ctx, { classId, date, memberIds }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     const checkedInAt = new Date().toISOString();
     for (const memberId of memberIds) {
       const existing = await ctx.db
