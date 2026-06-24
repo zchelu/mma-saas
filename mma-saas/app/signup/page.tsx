@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { sendLead } from "@/app/actions/sendLead";
 
 const CHALLENGE_OPTIONS = [
   {
@@ -73,6 +74,8 @@ export default function SignupPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [custom, setCustom] = useState("");
   const [challengeOpen, setChallengeOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -88,9 +91,19 @@ export default function SignupPage() {
     if (e.target.value) setSelected(null);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/signup/gym");
+    setLoading(true);
+    setError(null);
+    const name = `${form.firstName} ${form.lastName}`;
+    const contact = contactMode === "phone" ? form.phone : form.email;
+    const result = await sendLead(name, contact);
+    if (result.success) {
+      router.push("/thank-you");
+    } else {
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    }
   }
 
   const contactFilled = contactMode === "phone" ? form.phone : form.email;
@@ -295,19 +308,25 @@ export default function SignupPage() {
             .
           </p>
 
+          {error && (
+            <p className="text-sm text-center" style={{ color: "#E02020" }}>{error}</p>
+          )}
+
           {/* CTA */}
           <button
             type="submit"
-            disabled={!ready}
+            disabled={!ready || loading}
             className="w-full flex items-center justify-center gap-2 rounded-lg px-6 py-3.5 text-sm font-semibold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ backgroundColor: "#E02020" }}
-            onMouseEnter={e => { if (ready) e.currentTarget.style.backgroundColor = "#B91C1C"; }}
+            onMouseEnter={e => { if (ready && !loading) e.currentTarget.style.backgroundColor = "#B91C1C"; }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#E02020"; }}
           >
-            I&apos;m ready to get started
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            {loading ? "Sending…" : "I’m ready to get started"}
+            {!loading && (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
           </button>
         </form>
       </div>

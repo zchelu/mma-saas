@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node --max-old-space-size=4096 node_modules/.bin/next.cmd dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -14,7 +14,8 @@
     "next": "16.2.9",
     "posthog-js": "^1.392.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "resend": "^6.14.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
