@@ -14,7 +14,7 @@ export default function Home() {
             Sign in
           </Link>
           <Link
-            href="/sign-up"
+            href="/signup"
             className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
             style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
