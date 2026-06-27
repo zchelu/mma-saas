@@ -97,7 +97,10 @@ export default function SignupPage() {
     setError(null);
     const name = `${form.firstName} ${form.lastName}`;
     const contact = contactMode === "phone" ? form.phone : form.email;
-    const result = await sendLead(name, contact);
+    const challenge = selected
+      ? CHALLENGE_OPTIONS.find((o) => o.id === selected)?.label
+      : custom || undefined;
+    const result = await sendLead(name, contact, challenge);
     if (result.success) {
       router.push("/thank-you");
     } else {
