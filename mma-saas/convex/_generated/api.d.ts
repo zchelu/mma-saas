@@ -14,6 +14,7 @@ import type * as crons from "../crons.js";
 import type * as enrollments from "../enrollments.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
+import type * as sendRetentionTexts from "../sendRetentionTexts.js";
 
 import type {
   ApiFromModules,
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   enrollments: typeof enrollments;
   invoices: typeof invoices;
   members: typeof members;
+  sendRetentionTexts: typeof sendRetentionTexts;
 }>;
 
 /**
