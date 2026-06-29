@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import MemberModal from "./member-modal";
+import CheckInHistoryDrawer from "./check-in-history-drawer";
 
 type Member = {
   _id: Id<"members">;
@@ -43,6 +44,7 @@ export default function MembersPage() {
   const remove = useMutation(api.members.remove);
 
   const [modal, setModal] = useState<null | "add" | Member>(null);
+  const [historyMember, setHistoryMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [sortCol, setSortCol] = useState<SortCol>(null);
@@ -212,6 +214,13 @@ export default function MembersPage() {
                     <td className="px-6 py-4">
                       <div className="flex gap-3 justify-end">
                         <button
+                          onClick={() => setHistoryMember(m)}
+                          className="text-xs transition-colors hover:text-white"
+                          style={{ color: "#888888" }}
+                        >
+                          History
+                        </button>
+                        <button
                           onClick={() => setModal(m)}
                           className="text-xs transition-colors hover:text-white"
                           style={{ color: "#888888" }}
@@ -241,6 +250,14 @@ export default function MembersPage() {
         <MemberModal
           member={modal === "add" ? undefined : modal}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {historyMember !== null && (
+        <CheckInHistoryDrawer
+          memberId={historyMember._id}
+          memberName={historyMember.name}
+          onClose={() => setHistoryMember(null)}
         />
       )}
     </div>

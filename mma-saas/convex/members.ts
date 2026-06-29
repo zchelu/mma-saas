@@ -63,7 +63,33 @@ export const remove = mutation({
 export const checkIn = mutation({
   args: { id: v.id("members") },
   handler: async (ctx, { id }) => {
-    await ctx.db.patch(id, { lastVisit: new Date().toISOString(), status: "active" });
+    const now = Date.now();
+    await ctx.db.patch(id, { lastVisit: new Date(now).toISOString(), status: "active" });
+    await ctx.db.insert("checkIns", { memberId: id, timestamp: now });
+  },
+});
+
+export const getCheckInHistory = query({
+  args: { memberId: v.id("members") },
+  handler: async (ctx, { memberId }) => {
+    const rows = await ctx.db
+      .query("checkIns")
+      .withIndex("by_member", (q) => q.eq("memberId", memberId))
+      .collect();
+    return rows.sort((a, b) => b.timestamp - a.timestamp);
+  },
+});
+
+export const getAtRiskMembers = query({
+  args: {},
+  handler: async (ctx) => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const threshold = sevenDaysAgo.toISOString();
+    const all = await ctx.db.query("members").collect();
+    return all.filter(
+      (m) => m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
+    );
   },
 });
 

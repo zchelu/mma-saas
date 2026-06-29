@@ -38,4 +38,15 @@ export default defineSchema({
     .index("by_class_date", ["classId", "date"])
     .index("by_class", ["classId"])
     .index("by_member", ["memberId"]),
+  checkIns: defineTable({
+    memberId: v.id("members"),
+    timestamp: v.number(),
+  }).index("by_member", ["memberId"]),
+  gyms: defineTable({
+    clerkUserId: v.string(),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    plan: v.optional(v.string()),
+    planStatus: v.optional(v.string()),
+  }).index("by_clerk_user", ["clerkUserId"]),
 });

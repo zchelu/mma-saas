@@ -15,6 +15,7 @@ import type * as enrollments from "../enrollments.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
+import type * as subscriptions from "../subscriptions.js";
 
 import type {
   ApiFromModules,
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   invoices: typeof invoices;
   members: typeof members;
   sendRetentionTexts: typeof sendRetentionTexts;
+  subscriptions: typeof subscriptions;
 }>;
 
 /**

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PricingCards from "./components/pricing-cards";
 
 export default function Home() {
   return (
@@ -46,7 +47,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-3 gap-6 pb-24">
+        <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-3 gap-6 mb-32">
           <FeatureCard
             title="Member Management"
             description="Add, edit, and track every athlete. See who's active, on what plan, and when they last trained."
@@ -58,6 +59,27 @@ export default function Home() {
           <FeatureCard
             title="Billing & Invoices"
             description="Send invoices and track payments without leaving the platform. Get paid on time, every time."
+          />
+        </div>
+
+        <div className="w-full max-w-3xl pb-24">
+          <div className="text-center mb-14">
+            <div
+              className="inline-block text-xs font-semibold tracking-widest uppercase px-4 py-1 mb-6 rounded-full"
+              style={{ color: "#888888", border: "1px solid #333333" }}
+            >
+              Simple pricing
+            </div>
+            <h2 className="text-4xl font-extrabold tracking-tight mb-4" style={{ color: "#FFFFFF" }}>
+              Pick your plan
+            </h2>
+            <p className="text-lg" style={{ color: "#888888" }}>
+              No contracts. Cancel anytime.
+            </p>
+          </div>
+          <PricingCards
+            starterPriceId={process.env.STRIPE_STARTER_PRICE_ID ?? ""}
+            proPriceId={process.env.STRIPE_PRO_PRICE_ID ?? ""}
           />
         </div>
       </main>

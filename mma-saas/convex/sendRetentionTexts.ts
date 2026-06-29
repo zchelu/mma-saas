@@ -6,6 +6,7 @@
 import { internalAction, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 
+
 const GYM_NAME = "KombatDesk";
 
 export const getAtRiskMembers = internalQuery({
@@ -24,6 +25,12 @@ export const getAtRiskMembers = internalQuery({
 export const sendRetentionTextsSMS = internalAction({
   args: {},
   handler: async (ctx) => {
+    const isPro = await ctx.runQuery(internal.subscriptions.hasProGym);
+    if (!isPro) {
+      console.log("No active Pro gym — skipping automated retention texts");
+      return;
+    }
+
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_PHONE_NUMBER;
