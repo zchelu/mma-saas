@@ -62,7 +62,7 @@ export default function Home() {
           />
         </div>
 
-        <div className="w-full max-w-3xl pb-24">
+        <div className="w-full max-w-6xl pb-24">
           <div className="text-center mb-14">
             <div
               className="inline-block text-xs font-semibold tracking-widest uppercase px-4 py-1 mb-6 rounded-full"
@@ -80,6 +80,7 @@ export default function Home() {
           <PricingCards
             starterPriceId={process.env.STRIPE_STARTER_PRICE_ID ?? ""}
             proPriceId={process.env.STRIPE_PRO_PRICE_ID ?? ""}
+            elitePriceId={process.env.STRIPE_ELITE_PRICE_ID ?? ""}
           />
         </div>
       </main>

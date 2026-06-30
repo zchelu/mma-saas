@@ -27,14 +27,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
   }
 
-  const starterPriceId = process.env.STRIPE_STARTER_PRICE_ID!;
   const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
+  const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
   const priceId = sub.items.data[0]?.price.id;
-  const plan = priceId === proPriceId ? "pro" : "starter";
+  const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-
-  // suppress unused var warning — starterPriceId is used implicitly via fallback
-  void starterPriceId;
 
   switch (event.type) {
     case "customer.subscription.created":

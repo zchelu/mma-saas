@@ -51,12 +51,15 @@ export const getSubscription = query({
 export const hasProGym = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const proGym = await ctx.db
+    const gym = await ctx.db
       .query("gyms")
       .filter((q) =>
-        q.and(q.eq(q.field("plan"), "pro"), q.eq(q.field("planStatus"), "active"))
+        q.and(
+          q.or(q.eq(q.field("plan"), "pro"), q.eq(q.field("plan"), "elite")),
+          q.eq(q.field("planStatus"), "active")
+        )
       )
       .first();
-    return proGym !== null;
+    return gym !== null;
   },
 });

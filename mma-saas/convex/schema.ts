@@ -10,6 +10,7 @@ export default defineSchema({
     phone: v.optional(v.string()),
     beltRank: v.optional(v.string()),
     lastVisit: v.optional(v.string()),
+    lastRetentionTextAt: v.optional(v.number()),
   }),
   classes: defineTable({
     name: v.string(),

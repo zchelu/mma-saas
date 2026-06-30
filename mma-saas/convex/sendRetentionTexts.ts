@@ -3,8 +3,9 @@
 //   TWILIO_AUTH_TOKEN
 //   TWILIO_PHONE_NUMBER
 
-import { internalAction, internalQuery, mutation } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { v } from "convex/values";
 
 
 const GYM_NAME = "KombatDesk";
@@ -12,13 +13,22 @@ const GYM_NAME = "KombatDesk";
 export const getAtRiskMembers = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const threshold = sevenDaysAgo.toISOString();
+    const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const sevenDaysAgoISO = new Date(sevenDaysAgoMs).toISOString();
     const all = await ctx.db.query("members").collect();
-    return all.filter(
-      (m) => !!m.phone && m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
-    );
+    return all.filter((m) => {
+      if (!m.phone) return false;
+      const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
+      const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
+      return inactiveEnough && notRecentlyTexted;
+    });
+  },
+});
+
+export const recordRetentionText = internalMutation({
+  args: { memberId: v.id("members") },
+  handler: async (ctx, { memberId }) => {
+    await ctx.db.patch(memberId, { lastRetentionTextAt: Date.now() });
   },
 });
 
@@ -60,6 +70,7 @@ export const sendRetentionTextsSMS = internalAction({
 
         if (res.ok) {
           console.log(`SMS sent to ${member.name} (${member.phone})`);
+          await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, { memberId: member._id });
         } else {
           const text = await res.text();
           console.error(`Failed for ${member.name}: ${text}`);

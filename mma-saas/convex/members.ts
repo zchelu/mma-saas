@@ -64,7 +64,7 @@ export const checkIn = mutation({
   args: { id: v.id("members") },
   handler: async (ctx, { id }) => {
     const now = Date.now();
-    await ctx.db.patch(id, { lastVisit: new Date(now).toISOString(), status: "active" });
+    await ctx.db.patch(id, { lastVisit: new Date(now).toISOString(), status: "active", lastRetentionTextAt: undefined });
     await ctx.db.insert("checkIns", { memberId: id, timestamp: now });
   },
 });
