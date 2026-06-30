@@ -17,7 +17,7 @@ export const getAtRiskMembers = internalQuery({
     const sevenDaysAgoISO = new Date(sevenDaysAgoMs).toISOString();
     const all = await ctx.db.query("members").collect();
     return all.filter((m) => {
-      if (!m.phone) return false;
+      if (!m.phone || m.status !== "active") return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
       const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
       return inactiveEnough && notRecentlyTexted;
