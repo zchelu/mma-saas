@@ -3,9 +3,8 @@ import Stripe from "stripe";
 import { fetchMutation } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
 export async function POST(request: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const rawBody = await request.text();
   const signature = request.headers.get("stripe-signature");
 
