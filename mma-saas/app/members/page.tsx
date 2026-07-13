@@ -16,6 +16,8 @@ type Member = {
   phone?: string;
   beltRank?: string;
   lastVisit?: string;
+  smsConsentConfirmed?: boolean;
+  smsConsentConfirmedAt?: number;
 };
 
 type SortCol = "name" | "plan" | null;

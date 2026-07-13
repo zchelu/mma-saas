@@ -26,13 +26,22 @@ const memberFields = {
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
   beltRank: v.optional(v.string()),
+  smsConsentConfirmed: v.optional(v.boolean()),
+  smsConsentConfirmedAt: v.optional(v.number()),
 };
+
+function assertSmsConsent(fields: { phone?: string; smsConsentConfirmed?: boolean }) {
+  if (fields.phone && !fields.smsConsentConfirmed) {
+    throw new Error("SMS consent must be confirmed before saving a phone number");
+  }
+}
 
 export const add = mutation({
   args: memberFields,
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
+    assertSmsConsent(args);
     return await ctx.db.insert("members", args);
   },
 });
@@ -42,6 +51,7 @@ export const update = mutation({
   handler: async (ctx, { id, ...fields }) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
+    assertSmsConsent(fields);
     await ctx.db.patch(id, fields);
   },
 });

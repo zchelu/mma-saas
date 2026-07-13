@@ -12,6 +12,8 @@ type Member = {
   email?: string;
   phone?: string;
   beltRank?: string;
+  smsConsentConfirmed?: boolean;
+  smsConsentConfirmedAt?: number;
 };
 
 type Props = {
@@ -29,19 +31,43 @@ export default function MemberModal({ member, onClose }: Props) {
   const [email, setEmail] = useState(member?.email ?? "");
   const [phone, setPhone] = useState(member?.phone ?? "");
   const [beltRank, setBeltRank] = useState(member?.beltRank ?? "");
+  const [smsConsent, setSmsConsent] = useState(false);
+  const [consentError, setConsentError] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const trimmedPhone = phone.trim();
+  const originalPhone = member?.phone ?? "";
+  const alreadyConfirmedForThisPhone =
+    !!member?.smsConsentConfirmed && trimmedPhone === originalPhone;
+  const needsConsent = trimmedPhone !== "" && !alreadyConfirmedForThisPhone;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (needsConsent && !smsConsent) {
+      setConsentError(true);
+      return;
+    }
+
     setSaving(true);
     try {
+      const smsConsentConfirmed = trimmedPhone === "" ? false : true;
+      const smsConsentConfirmedAt =
+        trimmedPhone === ""
+          ? undefined
+          : needsConsent
+          ? Date.now()
+          : member?.smsConsentConfirmedAt;
+
       const fields = {
         name,
         plan,
         status,
         email: email || undefined,
-        phone: phone || undefined,
+        phone: trimmedPhone || undefined,
         beltRank: beltRank || undefined,
+        smsConsentConfirmed,
+        smsConsentConfirmedAt,
       };
       if (member) {
         await update({ id: member._id, ...fields });
@@ -70,9 +96,44 @@ export default function MemberModal({ member, onClose }: Props) {
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="john@email.com" />
             </Field>
             <Field label="Phone">
-              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="(720) 555-0100" />
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setConsentError(false);
+                }}
+                className="input"
+                placeholder="(720) 555-0100"
+              />
             </Field>
           </div>
+
+          {needsConsent && (
+            <div className="flex flex-col gap-1.5 rounded-lg p-3" style={{ backgroundColor: "#1A1A1A", border: "0.5px solid #333333" }}>
+              <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: "#CCCCCC" }}>
+                <input
+                  type="checkbox"
+                  checked={smsConsent}
+                  onChange={(e) => {
+                    setSmsConsent(e.target.checked);
+                    if (e.target.checked) setConsentError(false);
+                  }}
+                  className="mt-0.5 shrink-0"
+                  style={{ accentColor: "#E02020" }}
+                />
+                <span>
+                  I confirm this member has consented to receive text messages regarding
+                  their membership and attendance, per KombatDesk&apos;s Terms of Service.
+                </span>
+              </label>
+              {consentError && (
+                <p className="text-xs" style={{ color: "#E02020" }}>
+                  You must confirm SMS consent before saving a phone number.
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Plan">
               <input required value={plan} onChange={(e) => setPlan(e.target.value)} className="input" placeholder="BJJ Monthly" />

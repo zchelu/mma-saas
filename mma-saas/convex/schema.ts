@@ -11,6 +11,8 @@ export default defineSchema({
     beltRank: v.optional(v.string()),
     lastVisit: v.optional(v.string()),
     lastRetentionTextAt: v.optional(v.number()),
+    smsConsentConfirmed: v.optional(v.boolean()),
+    smsConsentConfirmedAt: v.optional(v.number()),
   }),
   classes: defineTable({
     name: v.string(),
