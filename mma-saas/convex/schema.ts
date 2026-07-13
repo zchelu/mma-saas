@@ -49,5 +49,7 @@ export default defineSchema({
     stripeSubscriptionId: v.optional(v.string()),
     plan: v.optional(v.string()),
     planStatus: v.optional(v.string()),
-  }).index("by_clerk_user", ["clerkUserId"]),
+  })
+    .index("by_clerk_user", ["clerkUserId"])
+    .index("by_stripe_customer", ["stripeCustomerId"]),
 });

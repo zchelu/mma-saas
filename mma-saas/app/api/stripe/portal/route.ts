@@ -1,0 +1,25 @@
+import { NextRequest, NextResponse } from "next/server";
+import Stripe from "stripe";
+import { currentUser } from "@clerk/nextjs/server";
+import { fetchQuery } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
+
+export async function POST(request: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+
+  const subscription = await fetchQuery(api.subscriptions.getSubscription, { clerkUserId: user.id });
+  if (!subscription.stripeCustomerId) {
+    return NextResponse.json({ error: "No billing account found" }, { status: 400 });
+  }
+
+  const origin = new URL(request.url).origin;
+
+  const session = await stripe.billingPortal.sessions.create({
+    customer: subscription.stripeCustomerId,
+    return_url: `${origin}/billing`,
+  });
+
+  return NextResponse.json({ url: session.url });
+}

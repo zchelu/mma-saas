@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
     success_url: `${origin}/dashboard?upgraded=true`,
     cancel_url: `${origin}/pricing`,
     customer_email: user.emailAddresses[0]?.emailAddress,
+    billing_address_collection: "required",
+    automatic_tax: { enabled: true },
     subscription_data: {
       metadata: { clerkUserId: user.id },
     },

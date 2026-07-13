@@ -19,39 +19,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid webhook signature" }, { status: 400 });
   }
 
-  const sub = event.data.object as Stripe.Subscription;
-  const clerkUserId = sub.metadata?.clerkUserId;
-
-  if (!clerkUserId) {
-    return NextResponse.json({ received: true });
-  }
-
-  const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
-  const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
-  const priceId = sub.items.data[0]?.price.id;
-  const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
-  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-
   switch (event.type) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
+    case "customer.subscription.deleted": {
+      const sub = event.data.object as Stripe.Subscription;
+      const clerkUserId = sub.metadata?.clerkUserId;
+      if (!clerkUserId) break;
+
+      const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
+      const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
+      const priceId = sub.items.data[0]?.price.id;
+      const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
+      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+
       await fetchMutation(api.subscriptions.upsertSubscription, {
         clerkUserId,
         stripeCustomerId: customerId,
         stripeSubscriptionId: sub.id,
         plan,
-        planStatus: sub.status,
+        planStatus: event.type === "customer.subscription.deleted" ? "canceled" : sub.status,
       });
       break;
-    case "customer.subscription.deleted":
-      await fetchMutation(api.subscriptions.upsertSubscription, {
-        clerkUserId,
+    }
+    case "invoice.payment_failed":
+    case "invoice.payment_succeeded": {
+      const invoice = event.data.object as Stripe.Invoice;
+      const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
+      if (!customerId) break;
+
+      await fetchMutation(api.subscriptions.updatePlanStatusByCustomer, {
         stripeCustomerId: customerId,
-        stripeSubscriptionId: sub.id,
-        plan,
-        planStatus: "canceled",
+        planStatus: event.type === "invoice.payment_failed" ? "past_due" : "active",
       });
       break;
+    }
   }
 
   return NextResponse.json({ received: true });

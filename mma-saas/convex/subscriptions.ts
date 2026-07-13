@@ -44,7 +44,21 @@ export const getSubscription = query({
     return {
       plan: gym?.plan ?? null,
       planStatus: gym?.planStatus ?? null,
+      stripeCustomerId: gym?.stripeCustomerId ?? null,
     };
+  },
+});
+
+export const updatePlanStatusByCustomer = mutation({
+  args: { stripeCustomerId: v.string(), planStatus: v.string() },
+  handler: async (ctx, { stripeCustomerId, planStatus }) => {
+    const gym = await ctx.db
+      .query("gyms")
+      .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", stripeCustomerId))
+      .unique();
+    if (gym) {
+      await ctx.db.patch(gym._id, { planStatus });
+    }
   },
 });
 

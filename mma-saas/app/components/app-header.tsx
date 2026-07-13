@@ -8,6 +8,7 @@ const links = [
   { href: "/members", label: "Members" },
   { href: "/classes", label: "Classes" },
   { href: "/invoices", label: "Invoices" },
+  { href: "/billing", label: "Billing" },
 ];
 
 export default function AppHeader() {
