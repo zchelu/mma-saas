@@ -6,16 +6,18 @@
 import { internalAction, internalMutation, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-
-
-const GYM_NAME = "KombatDesk";
+import { requireGym } from "./gyms";
+import { isProPlan } from "./subscriptions";
 
 export const getAtRiskMembers = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const sevenDaysAgoISO = new Date(sevenDaysAgoMs).toISOString();
-    const all = await ctx.db.query("members").collect();
+    const all = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gymId))
+      .collect();
     return all.filter((m) => {
       if (!m.phone || m.status !== "active") return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
@@ -32,14 +34,15 @@ export const recordRetentionText = internalMutation({
   },
 });
 
-export const sendRetentionTextsSMS = internalAction({
-  args: {},
-  handler: async (ctx) => {
-    const isPro = await ctx.runQuery(internal.subscriptions.hasProGym);
-    if (!isPro) {
-      console.log("No active Pro gym — skipping automated retention texts");
+export const sendRetentionTextsForGym = internalAction({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
+    if (!gym || !isProPlan(gym)) {
+      console.log(`Gym ${gymId} is not an active Pro/Elite gym — skipping automated retention texts`);
       return;
     }
+    const gymName = gym.name ?? "your gym";
 
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -50,13 +53,13 @@ export const sendRetentionTextsSMS = internalAction({
       return;
     }
 
-    const members = await ctx.runQuery(internal.sendRetentionTexts.getAtRiskMembers);
+    const members = await ctx.runQuery(internal.sendRetentionTexts.getAtRiskMembers, { gymId });
     const credentials = btoa(`${accountSid}:${authToken}`);
     const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
 
     await Promise.all(members.map(async (member) => {
       const firstName = member.name.trim().split(/\s+/)[0];
-      const body = `Hey ${firstName}, we missed you at the gym! Come back this week and keep that momentum going. - ${GYM_NAME}. Reply STOP to opt out.`;
+      const body = `Hey ${firstName}, we missed you at the gym! Come back this week and keep that momentum going. - ${gymName}. Reply STOP to opt out.`;
 
       try {
         const res = await fetch(url, {
@@ -82,11 +85,23 @@ export const sendRetentionTextsSMS = internalAction({
   },
 });
 
+// Cron entry point — fans out to every active Pro/Elite gym individually so
+// one gym's plan never gates or blends into another gym's retention texts.
+export const sendRetentionTextsSMS = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const proGyms = await ctx.runQuery(internal.subscriptions.listProGyms);
+    for (const gym of proGyms) {
+      await ctx.runAction(internal.sendRetentionTexts.sendRetentionTextsForGym, { gymId: gym._id });
+    }
+  },
+});
+
+// Manual "Send Retention Texts" button — scoped to the caller's own gym only.
 export const triggerRetentionTexts = mutation({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    await ctx.scheduler.runAfter(0, internal.sendRetentionTexts.sendRetentionTextsSMS);
+    const gym = await requireGym(ctx);
+    await ctx.scheduler.runAfter(0, internal.sendRetentionTexts.sendRetentionTextsForGym, { gymId: gym._id });
   },
 });

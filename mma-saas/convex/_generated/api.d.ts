@@ -12,8 +12,10 @@ import type * as attendance from "../attendance.js";
 import type * as classes from "../classes.js";
 import type * as crons from "../crons.js";
 import type * as enrollments from "../enrollments.js";
+import type * as gyms from "../gyms.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
+import type * as migrations from "../migrations.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
 import type * as subscriptions from "../subscriptions.js";
 
@@ -28,8 +30,10 @@ declare const fullApi: ApiFromModules<{
   classes: typeof classes;
   crons: typeof crons;
   enrollments: typeof enrollments;
+  gyms: typeof gyms;
   invoices: typeof invoices;
   members: typeof members;
+  migrations: typeof migrations;
   sendRetentionTexts: typeof sendRetentionTexts;
   subscriptions: typeof subscriptions;
 }>;

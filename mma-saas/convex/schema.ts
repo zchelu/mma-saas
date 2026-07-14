@@ -13,7 +13,10 @@ export default defineSchema({
     lastRetentionTextAt: v.optional(v.number()),
     smsConsentConfirmed: v.optional(v.boolean()),
     smsConsentConfirmedAt: v.optional(v.number()),
-  }),
+    // Optional until the backfill migration (convex/migrations.ts) has run for
+    // every existing row — see convex/migrations.ts for the tighten-to-required follow-up.
+    gymId: v.optional(v.id("gyms")),
+  }).index("by_gym", ["gymId"]),
   classes: defineTable({
     name: v.string(),
     instructor: v.string(),
@@ -47,10 +50,12 @@ export default defineSchema({
   }).index("by_member", ["memberId"]),
   gyms: defineTable({
     clerkUserId: v.string(),
+    name: v.optional(v.string()),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
     plan: v.optional(v.string()),
     planStatus: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
   })
     .index("by_clerk_user", ["clerkUserId"])
     .index("by_stripe_customer", ["stripeCustomerId"]),

@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -20,7 +21,28 @@ type Stage =
 import { getInitials, getAvatarColor } from "../lib/avatar";
 
 export default function CheckInPage() {
-  const members = useQuery(api.members.getAll);
+  return (
+    <Suspense fallback={null}>
+      <CheckInPageInner />
+    </Suspense>
+  );
+}
+
+// Convex document IDs are base32-ish strings; this isn't a full validator,
+// just a sanity gate so an obviously-malformed URL fails soft instead of
+// throwing a server-side ArgumentValidationError that crashes the kiosk.
+const CONVEX_ID_SHAPE = /^[a-z0-9]{20,40}$/;
+
+function CheckInPageInner() {
+  const searchParams = useSearchParams();
+  const rawGymId = searchParams.get("gym");
+  const gymId =
+    rawGymId && CONVEX_ID_SHAPE.test(rawGymId) ? (rawGymId as Id<"gyms">) : null;
+
+  const members = useQuery(
+    api.members.getActiveForGym,
+    gymId ? { gymId } : "skip"
+  );
   const checkIn = useMutation(api.members.checkIn);
 
   const [search, setSearch] = useState("");
@@ -44,8 +66,22 @@ export default function CheckInPage() {
   }, [members, search]);
 
   async function confirmCheckIn(member: Member) {
-    await checkIn({ id: member._id });
+    if (!gymId) return;
+    await checkIn({ id: member._id, gymId });
     setStage({ type: "success", firstName: member.name.trim().split(/\s+/)[0] });
+  }
+
+  if (!gymId) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#0D0D0D" }}>
+        <h1 className="text-3xl font-bold mb-3" style={{ color: "#FFFFFF" }}>Kiosk not configured</h1>
+        <p className="text-lg max-w-md" style={{ color: "#888888" }}>
+          This check-in page is missing a gym ID. Bookmark this device to
+          <code className="mx-1" style={{ color: "#E02020" }}>/checkin?gym=&lt;your gym ID&gt;</code>
+          from your dashboard.
+        </p>
+      </div>
+    );
   }
 
   if (stage.type === "success") {

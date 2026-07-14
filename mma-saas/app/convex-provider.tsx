@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
-const PUBLIC_PATHS = ["/", "/signup", "/sign-in", "/sign-up", "/thank-you"];
+const PUBLIC_PATHS = ["/", "/signup", "/sign-in", "/sign-up", "/thank-you", "/checkin"];
 
 export function ConvexClientProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

@@ -63,18 +63,27 @@ export const updatePlanStatusByCustomer = mutation({
   },
 });
 
-export const hasProGym = internalQuery({
+export function isProPlan(gym: { plan?: string; planStatus?: string } | null): boolean {
+  return (
+    !!gym &&
+    (gym.plan === "pro" || gym.plan === "elite") &&
+    gym.planStatus === "active"
+  );
+}
+
+export const getGymById = internalQuery({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    return await ctx.db.get(gymId);
+  },
+});
+
+// Used by the retention-text cron dispatcher to fan out per gym instead of
+// treating "any gym anywhere is Pro" as license to text every gym's members.
+export const listProGyms = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const gym = await ctx.db
-      .query("gyms")
-      .filter((q) =>
-        q.and(
-          q.or(q.eq(q.field("plan"), "pro"), q.eq(q.field("plan"), "elite")),
-          q.eq(q.field("planStatus"), "active")
-        )
-      )
-      .first();
-    return gym !== null;
+    const gyms = await ctx.db.query("gyms").collect();
+    return gyms.filter(isProPlan);
   },
 });
