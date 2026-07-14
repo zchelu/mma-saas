@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { currentUser } from "@clerk/nextjs/server";
 import PricingCards from "../components/pricing-cards";
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  const user = await currentUser();
+
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
@@ -9,11 +12,11 @@ export default function PricingPage() {
           KombatDesk
         </Link>
         <Link
-          href="/sign-in"
+          href={user ? "/dashboard" : "/sign-in"}
           className="text-sm px-4 py-2"
           style={{ color: "#888888" }}
         >
-          Sign in
+          {user ? "Dashboard" : "Sign in"}
         </Link>
       </header>
 

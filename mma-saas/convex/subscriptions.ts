@@ -45,6 +45,7 @@ export const getSubscription = query({
       plan: gym?.plan ?? null,
       planStatus: gym?.planStatus ?? null,
       stripeCustomerId: gym?.stripeCustomerId ?? null,
+      stripeSubscriptionId: gym?.stripeSubscriptionId ?? null,
     };
   },
 });

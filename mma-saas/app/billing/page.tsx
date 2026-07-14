@@ -17,15 +17,20 @@ export default async function BillingPage() {
   if (!user) redirect("/sign-in");
 
   const subscription = await fetchQuery(api.subscriptions.getSubscription, { clerkUserId: user.id });
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
   const invoices = subscription.stripeCustomerId
     ? (
-        await new Stripe(process.env.STRIPE_SECRET_KEY!).invoices.list({
+        await stripe.invoices.list({
           customer: subscription.stripeCustomerId,
           limit: 12,
         })
       ).data
     : [];
+
+  const cancelAt = subscription.stripeSubscriptionId
+    ? (await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)).cancel_at
+    : null;
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
@@ -45,6 +50,16 @@ export default async function BillingPage() {
             {subscription.planStatus ?? "—"}
           </span>
         </p>
+
+        {cancelAt && (
+          <div
+            className="mb-10 rounded-lg px-4 py-3 text-sm"
+            style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E", color: "#F87171" }}
+          >
+            Your subscription is canceled and will end on{" "}
+            {new Date(cancelAt * 1000).toLocaleDateString()}. You'll keep access until then.
+          </div>
+        )}
 
         <h2 className="text-sm uppercase tracking-widest mb-4" style={{ color: "#888888" }}>
           Invoice history
