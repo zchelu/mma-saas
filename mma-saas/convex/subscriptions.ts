@@ -34,6 +34,32 @@ export const upsertSubscription = mutation({
   },
 });
 
+// Called from the dashboard the moment a Clerk-authenticated user reaches an
+// authenticated page. Ensures every gym owner has a gyms row before any
+// gymId-scoped query runs, independent of whether they've ever completed
+// Stripe checkout — decouples multi-tenant scoping from billing state.
+// Safe to call on every load: existing rows (matched by clerkUserId) are
+// returned as-is, never duplicated or overwritten.
+export const getOrCreateGym = mutation({
+  args: { clerkUserId: v.string(), defaultName: v.optional(v.string()) },
+  handler: async (ctx, { clerkUserId, defaultName }) => {
+    const existing = await ctx.db
+      .query("gyms")
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", clerkUserId))
+      .unique();
+    if (existing) return existing;
+
+    const gymId = await ctx.db.insert("gyms", {
+      clerkUserId,
+      name: defaultName ?? "My Gym",
+      plan: "starter",
+      planStatus: "inactive",
+      createdAt: Date.now(),
+    });
+    return await ctx.db.get(gymId);
+  },
+});
+
 export const getSubscription = query({
   args: { clerkUserId: v.string() },
   handler: async (ctx, { clerkUserId }) => {
