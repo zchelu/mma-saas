@@ -3,13 +3,15 @@ import Stripe from "stripe";
 import { currentUser } from "@clerk/nextjs/server";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
+import { getConvexToken } from "@/lib/convex-auth";
 
 export async function POST(request: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
-  const subscription = await fetchQuery(api.subscriptions.getSubscription, { clerkUserId: user.id });
+  const token = await getConvexToken();
+  const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
   if (!subscription.stripeCustomerId) {
     return NextResponse.json({ error: "No billing account found" }, { status: 400 });
   }

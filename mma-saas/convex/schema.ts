@@ -22,13 +22,17 @@ export default defineSchema({
     instructor: v.string(),
     dayOfWeek: v.string(),
     time: v.string(),
-  }),
+    // Optional until backfilled — see convex/migrations.ts.
+    gymId: v.optional(v.id("gyms")),
+  }).index("by_gym", ["gymId"]),
   invoices: defineTable({
     memberId: v.id("members"),
     amount: v.number(),
     status: v.union(v.literal("paid"), v.literal("unpaid")),
     dueDate: v.string(),
-  }),
+    // Optional until backfilled — see convex/migrations.ts.
+    gymId: v.optional(v.id("gyms")),
+  }).index("by_gym", ["gymId"]),
   enrollments: defineTable({
     memberId: v.id("members"),
     classId: v.id("classes"),

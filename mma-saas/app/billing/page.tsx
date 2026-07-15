@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { fetchQuery } from "convex/nextjs";
 import Stripe from "stripe";
 import { api } from "@/convex/_generated/api";
+import { getConvexToken } from "@/lib/convex-auth";
 import AppHeader from "../components/app-header";
 import ManageSubscriptionButton from "./manage-subscription-button";
 
@@ -16,7 +17,8 @@ export default async function BillingPage() {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const subscription = await fetchQuery(api.subscriptions.getSubscription, { clerkUserId: user.id });
+  const token = await getConvexToken();
+  const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
   const invoices = subscription.stripeCustomerId

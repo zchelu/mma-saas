@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireGym, requireOwnMember } from "./gyms";
 
 const invoiceFields = {
   memberId: v.id("members"),
@@ -11,7 +12,11 @@ const invoiceFields = {
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
-    const invoices = await ctx.db.query("invoices").collect();
+    const gym = await requireGym(ctx);
+    const invoices = await ctx.db
+      .query("invoices")
+      .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
+      .collect();
     return await Promise.all(
       invoices.map(async (inv) => {
         const member = await ctx.db.get(inv.memberId);
@@ -24,8 +29,10 @@ export const getAll = query({
 export const getUnpaidCount = query({
   args: {},
   handler: async (ctx) => {
+    const gym = await requireGym(ctx);
     const unpaid = await ctx.db
       .query("invoices")
+      .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .filter((q) => q.eq(q.field("status"), "unpaid"))
       .collect();
     return unpaid.length;
@@ -35,17 +42,21 @@ export const getUnpaidCount = query({
 export const add = mutation({
   args: invoiceFields,
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    return ctx.db.insert("invoices", args);
+    const gym = await requireGym(ctx);
+    await requireOwnMember(ctx, gym._id, args.memberId);
+    return ctx.db.insert("invoices", { ...args, gymId: gym._id });
   },
 });
 
 export const update = mutation({
   args: { id: v.id("invoices"), ...invoiceFields },
   handler: async (ctx, { id, ...fields }) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    const gym = await requireGym(ctx);
+    const [existing] = await Promise.all([
+      ctx.db.get(id),
+      requireOwnMember(ctx, gym._id, fields.memberId),
+    ]);
+    if (!existing || existing.gymId !== gym._id) throw new Error("Invoice not found");
     return ctx.db.patch(id, fields);
   },
 });
@@ -53,8 +64,9 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("invoices") },
   handler: async (ctx, { id }) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    const gym = await requireGym(ctx);
+    const existing = await ctx.db.get(id);
+    if (!existing || existing.gymId !== gym._id) throw new Error("Invoice not found");
     return ctx.db.delete(id);
   },
 });

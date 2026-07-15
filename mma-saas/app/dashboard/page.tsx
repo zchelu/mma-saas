@@ -2,6 +2,7 @@ import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchQuery, fetchMutation } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
+import { getConvexToken } from "@/lib/convex-auth";
 import AppHeader from "../components/app-header";
 import StatsGrid from "./stats";
 import RetentionButton from "./retention-button";
@@ -18,7 +19,8 @@ export default async function DashboardPage() {
     defaultName: user.firstName ? `${user.firstName}'s Gym` : undefined,
   });
 
-  const subscription = await fetchQuery(api.subscriptions.getSubscription, { clerkUserId: user.id });
+  const token = await getConvexToken();
+  const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
   if (!subscription.plan || subscription.planStatus !== "active") redirect("/pricing");
 
   return (
@@ -29,7 +31,7 @@ export default async function DashboardPage() {
           <h1 className="text-3xl" style={{ color: "#FFFFFF", fontWeight: 500 }}>
             Welcome back, {user.firstName ?? "Coach"}
           </h1>
-          <RetentionButton />
+          {subscription.plan === "elite" && <RetentionButton />}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
         <StatsGrid />

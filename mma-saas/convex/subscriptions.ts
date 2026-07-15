@@ -60,12 +60,19 @@ export const getOrCreateGym = mutation({
   },
 });
 
+// Identity-derived, not client-supplied — a plain clerkUserId arg here would
+// let any authenticated caller read another gym's plan/Stripe IDs by calling
+// this function directly with an arbitrary id.
 export const getSubscription = query({
-  args: { clerkUserId: v.string() },
-  handler: async (ctx, { clerkUserId }) => {
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { plan: null, planStatus: null, stripeCustomerId: null, stripeSubscriptionId: null };
+    }
     const gym = await ctx.db
       .query("gyms")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", clerkUserId))
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", identity.subject))
       .unique();
     return {
       plan: gym?.plan ?? null,
@@ -95,6 +102,10 @@ export function isProPlan(gym: { plan?: string; planStatus?: string } | null): b
     (gym.plan === "pro" || gym.plan === "elite") &&
     gym.planStatus === "active"
   );
+}
+
+export function isElitePlan(gym: { plan?: string; planStatus?: string } | null): boolean {
+  return !!gym && gym.plan === "elite" && gym.planStatus === "active";
 }
 
 export const getGymById = internalQuery({

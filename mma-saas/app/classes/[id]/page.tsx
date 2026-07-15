@@ -72,13 +72,21 @@ export default function ClassDetailPage() {
 
   async function handleEnroll() {
     if (!addMemberId) return;
-    await enroll({ memberId: addMemberId as Id<"members">, classId });
-    setAddMemberId("");
+    try {
+      await enroll({ memberId: addMemberId as Id<"members">, classId });
+      setAddMemberId("");
+    } catch {
+      alert("Couldn't add that member — try refreshing the page.");
+    }
   }
 
   async function handleUnenroll(memberId: Id<"members">) {
     if (!confirm("Remove this member from the class?")) return;
-    await unenroll({ memberId, classId });
+    try {
+      await unenroll({ memberId, classId });
+    } catch {
+      alert("Couldn't remove that member — try refreshing the page.");
+    }
   }
 
   async function handleLogAttendance() {

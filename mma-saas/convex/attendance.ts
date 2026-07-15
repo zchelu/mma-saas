@@ -1,9 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireGym, requireOwnClass, requireOwnMember } from "./gyms";
 
 export const getByClassAndDate = query({
   args: { classId: v.id("classes"), date: v.string() },
   handler: async (ctx, { classId, date }) => {
+    const gym = await requireGym(ctx);
+    const cls = await ctx.db.get(classId);
+    if (!cls || cls.gymId !== gym._id) return [];
     return await ctx.db
       .query("attendance")
       .withIndex("by_class_date", (q) => q.eq("classId", classId).eq("date", date))
@@ -14,6 +18,9 @@ export const getByClassAndDate = query({
 export const getSessionDates = query({
   args: { classId: v.id("classes") },
   handler: async (ctx, { classId }) => {
+    const gym = await requireGym(ctx);
+    const cls = await ctx.db.get(classId);
+    if (!cls || cls.gymId !== gym._id) return [];
     const records = await ctx.db
       .query("attendance")
       .withIndex("by_class", (q) => q.eq("classId", classId))
@@ -32,6 +39,8 @@ export const getSessionDates = query({
 export const getByMember = query({
   args: { memberId: v.id("members") },
   handler: async (ctx, { memberId }) => {
+    const gym = await requireGym(ctx);
+    await requireOwnMember(ctx, gym._id, memberId);
     return await ctx.db
       .query("attendance")
       .withIndex("by_member", (q) => q.eq("memberId", memberId))
@@ -47,8 +56,9 @@ export const logAttendance = mutation({
     memberIds: v.array(v.id("members")),
   },
   handler: async (ctx, { classId, date, memberIds }) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    const gym = await requireGym(ctx);
+    await requireOwnClass(ctx, gym._id, classId);
+    await Promise.all(memberIds.map((memberId) => requireOwnMember(ctx, gym._id, memberId)));
     const checkedInAt = new Date().toISOString();
     for (const memberId of memberIds) {
       const existing = await ctx.db
