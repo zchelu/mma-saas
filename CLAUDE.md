@@ -137,6 +137,31 @@ INFRASTRUCTURE STATUS
   this Vercel project.
 
 ====================================================================
+DECISIONS / KNOWN HISTORY
+====================================================================
+
+- STRIPE WEBHOOK HANDLING LIVES IN THE NEXT.JS ROUTE ON VERCEL, BY
+  DECISION (July 2026) — app/api/stripe/webhook/route.ts is the one
+  real handler, registered as the live endpoint in Stripe at
+  https://kombatdesk.com/api/stripe/webhook. It reads STRIPE_SECRET_KEY
+  and STRIPE_WEBHOOK_SECRET from Vercel's env, not Convex's.
+
+  A separate attempt to move webhook handling into Convex itself
+  (convex/http.ts + convex/stripeWebhookAction.ts, an httpAction meant
+  to receive Stripe POSTs directly at the Convex deployment URL) was
+  found mid-flight, untracked and uncommitted in the local working
+  tree, and was REMOVED as broken/abandoned — it mixed "use node" with
+  httpAction, which Convex disallows outright, and failed every dev
+  sync with an InvalidModules error. It was never committed, never
+  successfully deployed to dev or prod, and never received real
+  traffic (confirmed by a direct POST to both deployments' /stripe/
+  webhook path returning 404 before deletion).
+
+  If a Convex-side webhook migration is wanted later, it should be
+  scoped and built deliberately from scratch — do not re-infer this as
+  missing/interrupted work to resume; the artifact is gone on purpose.
+
+====================================================================
 KNOWN ISSUES, NOT YET FIXED (decisions needed, not urgent)
 ====================================================================
 

@@ -27,16 +27,20 @@ export async function POST(request: NextRequest) {
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: user
-        ? `${origin}/dashboard?upgraded=true`
-        : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      // Both signed-in and guest buyers land on /welcome. It re-verifies the
+      // session with Stripe directly and activates the plan synchronously —
+      // never send a paying customer straight to /dashboard, since that
+      // trusts the async webhook to have already landed, which caused
+      // real customers to get bounced back to /pricing right after paying.
+      success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
       // Signed-in: prefill email and tag the subscription so the webhook can
-      // link it immediately. Guest: leave both unset — Stripe's hosted page
-      // collects the email itself, and /welcome links the account after
-      // signup via claimGymBySessionId (see convex/subscriptions.ts).
+      // also link it (redundant with claimGymBySessionId, harmless). Guest:
+      // leave both unset — Stripe's hosted page collects the email itself,
+      // and /welcome links the account after signup via claimGymBySessionId
+      // (see convex/subscriptions.ts).
       ...(user
         ? {
             customer_email: user.emailAddresses[0]?.emailAddress,

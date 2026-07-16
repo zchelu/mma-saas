@@ -7,6 +7,7 @@ import AppHeader from "../components/app-header";
 import StatsGrid from "./stats";
 import RetentionButton from "./retention-button";
 import AtRiskPanel from "./at-risk";
+import SettlingGate from "./settling-gate";
 
 export default async function DashboardPage() {
   const user = await currentUser();
@@ -21,7 +22,14 @@ export default async function DashboardPage() {
 
   const token = await getConvexToken();
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
-  if (!subscription.plan || subscription.planStatus !== "active") redirect("/pricing");
+  // Not active yet doesn't necessarily mean no plan exists — a checkout may
+  // still be settling (claimGymBySessionId / webhook write racing this
+  // request). Let the client reactively wait rather than hard-bouncing a
+  // paying customer to /pricing; SettlingGate itself redirects to /pricing
+  // once it can tell there's genuinely no plan, or after a timeout.
+  if (!subscription.plan || subscription.planStatus !== "active") {
+    return <SettlingGate />;
+  }
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
