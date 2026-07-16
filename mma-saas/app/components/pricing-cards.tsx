@@ -2,6 +2,47 @@
 
 import { useState } from "react";
 
+const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
+
+function useCheckout(priceId: string) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleCheckout() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceId }),
+      });
+      const data = (await res.json().catch(() => null)) as { url?: string; error?: string } | null;
+
+      if (!res.ok || !data?.url) {
+        setError(data?.error ?? GENERIC_ERROR);
+        setLoading(false);
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch {
+      setError(GENERIC_ERROR);
+      setLoading(false);
+    }
+  }
+
+  return { loading, error, handleCheckout };
+}
+
+function CheckoutError({ message }: { message: string }) {
+  return (
+    <p className="text-xs text-center" style={{ color: "#FF6B6B" }}>
+      {message}
+    </p>
+  );
+}
+
 const STARTER_FEATURES = [
   "Add, edit, and track every member",
   "Members check themselves in at the front desk",
@@ -39,24 +80,7 @@ function PricingCard({
   checkColor?: string;
   guarantee?: string;
 }) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleCheckout() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
-      });
-      const data = await res.json() as { url?: string; error?: string };
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { loading, error, handleCheckout } = useCheckout(priceId);
 
   return (
     <div
@@ -138,6 +162,7 @@ function PricingCard({
         )}
         {ctaLabel}
       </button>
+      {error && <CheckoutError message={error} />}
     </div>
   );
 }
@@ -150,22 +175,7 @@ const PRO_VALUE_STACK = [
 ];
 
 function ProCard({ priceId }: { priceId: string }) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleCheckout() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
-      });
-      const data = await res.json() as { url?: string; error?: string };
-      if (data.url) window.location.href = data.url;
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { loading, error, handleCheckout } = useCheckout(priceId);
 
   return (
     <div
@@ -234,6 +244,7 @@ function ProCard({ priceId }: { priceId: string }) {
           )}
           I&apos;m Ready to Stop the Bleeding — $89/mo
         </button>
+        {error && <CheckoutError message={error} />}
       </div>
     </div>
   );
@@ -249,22 +260,7 @@ const ELITE_VALUE_STACK = [
 ];
 
 function EliteCard({ priceId }: { priceId: string }) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleCheckout() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
-      });
-      const data = await res.json() as { url?: string; error?: string };
-      if (data.url) window.location.href = data.url;
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { loading, error, handleCheckout } = useCheckout(priceId);
 
   return (
     <div
@@ -312,6 +308,7 @@ function EliteCard({ priceId }: { priceId: string }) {
           )}
           I Want the Full Corner — $149/mo
         </button>
+        {error && <CheckoutError message={error} />}
       </div>
     </div>
   );

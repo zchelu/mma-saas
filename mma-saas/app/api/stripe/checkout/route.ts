@@ -15,24 +15,35 @@ export async function POST(request: NextRequest) {
     process.env.STRIPE_ELITE_PRICE_ID,
   ];
   if (!allowedPriceIds.includes(priceId)) {
-    return NextResponse.json({ error: "Invalid priceId" }, { status: 400 });
+    return NextResponse.json(
+      { error: "That plan isn't available right now. Please refresh and try again." },
+      { status: 400 }
+    );
   }
 
   const origin = new URL(request.url).origin;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    payment_method_types: ["card"],
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${origin}/dashboard?upgraded=true`,
-    cancel_url: `${origin}/pricing`,
-    customer_email: user.emailAddresses[0]?.emailAddress,
-    billing_address_collection: "required",
-    automatic_tax: { enabled: true },
-    subscription_data: {
-      metadata: { clerkUserId: user.id },
-    },
-  });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${origin}/dashboard?upgraded=true`,
+      cancel_url: `${origin}/pricing`,
+      customer_email: user.emailAddresses[0]?.emailAddress,
+      billing_address_collection: "required",
+      automatic_tax: { enabled: true },
+      subscription_data: {
+        metadata: { clerkUserId: user.id },
+      },
+    });
 
-  return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url });
+  } catch (err) {
+    console.error("Stripe checkout session creation failed:", err);
+    return NextResponse.json(
+      { error: "Something went wrong — please try again or contact us." },
+      { status: 500 }
+    );
+  }
 }
