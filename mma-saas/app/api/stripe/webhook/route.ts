@@ -25,21 +25,32 @@ export async function POST(request: NextRequest) {
     case "customer.subscription.deleted": {
       const sub = event.data.object as Stripe.Subscription;
       const clerkUserId = sub.metadata?.clerkUserId;
-      if (!clerkUserId) break;
 
       const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
       const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
       const priceId = sub.items.data[0]?.price.id;
       const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
       const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+      const planStatus = event.type === "customer.subscription.deleted" ? "canceled" : sub.status;
 
-      await fetchMutation(api.subscriptions.upsertSubscription, {
-        clerkUserId,
-        stripeCustomerId: customerId,
-        stripeSubscriptionId: sub.id,
-        plan,
-        planStatus: event.type === "customer.subscription.deleted" ? "canceled" : sub.status,
-      });
+      if (clerkUserId) {
+        await fetchMutation(api.subscriptions.upsertSubscription, {
+          clerkUserId,
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: sub.id,
+          plan,
+          planStatus,
+        });
+      } else {
+        // Guest checkout — no Clerk account yet. Persist by customer id;
+        // claimGymBySessionId links clerkUserId once they sign up.
+        await fetchMutation(api.subscriptions.upsertUnclaimedSubscription, {
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: sub.id,
+          plan,
+          planStatus,
+        });
+      }
       break;
     }
     case "invoice.payment_failed":

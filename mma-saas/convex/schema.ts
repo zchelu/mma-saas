@@ -53,7 +53,9 @@ export default defineSchema({
     timestamp: v.number(),
   }).index("by_member", ["memberId"]),
   gyms: defineTable({
-    clerkUserId: v.string(),
+    // Optional: guest-checkout rows exist between payment and account
+    // creation before being claimed — see convex/subscriptions.ts claim flow.
+    clerkUserId: v.optional(v.string()),
     name: v.optional(v.string()),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),

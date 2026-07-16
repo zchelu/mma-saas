@@ -1,8 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
 
@@ -15,22 +14,14 @@ export default function CheckoutPage() {
 }
 
 function CheckoutPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const priceId = searchParams.get("priceId");
-  const { isLoaded, isSignedIn } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const fired = useRef(false);
 
   useEffect(() => {
-    if (!isLoaded || !priceId || fired.current) return;
+    if (!priceId || fired.current) return;
     fired.current = true;
-
-    if (!isSignedIn) {
-      const redirectUrl = `/checkout?priceId=${encodeURIComponent(priceId)}`;
-      router.replace(`/sign-up?redirect_url=${encodeURIComponent(redirectUrl)}`);
-      return;
-    }
 
     (async () => {
       try {
@@ -51,7 +42,7 @@ function CheckoutPageInner() {
         setError(GENERIC_ERROR);
       }
     })();
-  }, [isLoaded, isSignedIn, priceId, router]);
+  }, [priceId]);
 
   return (
     <div

@@ -5,7 +5,6 @@ import { currentUser } from "@clerk/nextjs/server";
 export async function POST(request: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
   const { priceId } = await request.json() as { priceId: string };
 
@@ -28,14 +27,22 @@ export async function POST(request: NextRequest) {
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/dashboard?upgraded=true`,
+      success_url: user
+        ? `${origin}/dashboard?upgraded=true`
+        : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
-      customer_email: user.emailAddresses[0]?.emailAddress,
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
-      subscription_data: {
-        metadata: { clerkUserId: user.id },
-      },
+      // Signed-in: prefill email and tag the subscription so the webhook can
+      // link it immediately. Guest: leave both unset — Stripe's hosted page
+      // collects the email itself, and /welcome links the account after
+      // signup via claimGymBySessionId (see convex/subscriptions.ts).
+      ...(user
+        ? {
+            customer_email: user.emailAddresses[0]?.emailAddress,
+            subscription_data: { metadata: { clerkUserId: user.id } },
+          }
+        : {}),
     });
 
     return NextResponse.json({ url: session.url });

@@ -1,4 +1,5 @@
-import { internalQuery, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 export const upsertSubscription = mutation({
@@ -31,6 +32,133 @@ export const upsertSubscription = mutation({
         planStatus: args.planStatus,
       });
     }
+  },
+});
+
+// Called from the webhook for subscription events with no clerkUserId in
+// metadata — a guest checkout. Creates or updates a gym row keyed only by
+// stripeCustomerId; clerkUserId is attached later by claimGymByCustomer.
+// Never touches clerkUserId on an existing row, since a claim may have
+// already landed before this event does.
+export const upsertUnclaimedSubscription = mutation({
+  args: {
+    stripeCustomerId: v.string(),
+    stripeSubscriptionId: v.string(),
+    plan: v.string(),
+    planStatus: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("gyms")
+      .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", args.stripeCustomerId))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        plan: args.plan,
+        planStatus: args.planStatus,
+      });
+    } else {
+      await ctx.db.insert("gyms", {
+        stripeCustomerId: args.stripeCustomerId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        plan: args.plan,
+        planStatus: args.planStatus,
+        createdAt: Date.now(),
+      });
+    }
+  },
+});
+
+// Public entry point for linking a guest checkout's paid subscription to the
+// Clerk account created right after payment. Never trusts a client-supplied
+// Stripe customer id — re-verifies the checkout session against Stripe
+// itself server-side, so the caller can't hijack someone else's subscription
+// by guessing/reusing an id. Called from app/welcome/page.tsx.
+export const claimGymBySessionId = action({
+  args: { sessionId: v.string() },
+  handler: async (ctx, { sessionId }): Promise<{ gymId: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+
+    const res = await fetch(
+      `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`,
+      { headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}` } }
+    );
+    if (!res.ok) throw new Error("Could not verify checkout session");
+    const session = await res.json();
+
+    if (session.mode !== "subscription" || session.payment_status !== "paid") {
+      throw new Error("Checkout session is not a completed subscription payment");
+    }
+    const stripeCustomerId =
+      typeof session.customer === "string" ? session.customer : session.customer?.id;
+    if (!stripeCustomerId) throw new Error("Checkout session has no customer");
+
+    return await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
+      clerkUserId: identity.subject,
+      stripeCustomerId,
+    });
+  },
+});
+
+// Internal — unreachable from any client, only from claimGymBySessionId
+// above, which has already verified the caller owns this checkout session.
+export const claimGymByCustomer = internalMutation({
+  args: { clerkUserId: v.string(), stripeCustomerId: v.string() },
+  handler: async (ctx, { clerkUserId, stripeCustomerId }) => {
+    const [gymByCustomer, gymByUser] = await Promise.all([
+      ctx.db
+        .query("gyms")
+        .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", stripeCustomerId))
+        .unique(),
+      ctx.db
+        .query("gyms")
+        .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", clerkUserId))
+        .unique(),
+    ]);
+
+    if (gymByCustomer?.clerkUserId && gymByCustomer.clerkUserId !== clerkUserId) {
+      throw new Error("This subscription is already linked to a different account.");
+    }
+
+    if (gymByUser) {
+      // gymByUser is canonical — it may already own gymId-scoped members/
+      // classes/invoices (e.g. from the getOrCreateGym dashboard-load race).
+      // Fold Stripe fields onto it rather than the reverse. gymByCustomer,
+      // if present, is guaranteed a bare billing shell (unclaimed rows never
+      // get gym-scoped data written to them), so deleting it is safe.
+      if (gymByCustomer && gymByCustomer._id !== gymByUser._id) {
+        await ctx.db.patch(gymByUser._id, {
+          stripeCustomerId: gymByCustomer.stripeCustomerId,
+          stripeSubscriptionId: gymByCustomer.stripeSubscriptionId,
+          plan: gymByCustomer.plan,
+          planStatus: gymByCustomer.planStatus,
+        });
+        await ctx.db.delete(gymByCustomer._id);
+      } else if (!gymByUser.stripeCustomerId) {
+        await ctx.db.patch(gymByUser._id, { stripeCustomerId });
+      }
+      return { gymId: gymByUser._id };
+    }
+
+    if (gymByCustomer) {
+      await ctx.db.patch(gymByCustomer._id, { clerkUserId });
+      return { gymId: gymByCustomer._id };
+    }
+
+    // Webhook hasn't landed yet — create a placeholder; upsertUnclaimedSubscription
+    // will find it by stripeCustomerId shortly and fill in plan/status without
+    // touching clerkUserId.
+    const gymId = await ctx.db.insert("gyms", {
+      clerkUserId,
+      stripeCustomerId,
+      plan: "starter",
+      planStatus: "inactive",
+      createdAt: Date.now(),
+    });
+    return { gymId };
   },
 });
 
