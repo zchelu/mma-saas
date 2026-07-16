@@ -1,48 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
-const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
-
-function useCheckout(priceId: string) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleCheckout() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
-      });
-      const data = (await res.json().catch(() => null)) as { url?: string; error?: string } | null;
-
-      if (!res.ok || !data?.url) {
-        setError(data?.error ?? GENERIC_ERROR);
-        setLoading(false);
-        return;
-      }
-
-      window.location.href = data.url;
-    } catch {
-      setError(GENERIC_ERROR);
-      setLoading(false);
-    }
-  }
-
-  return { loading, error, handleCheckout };
-}
-
-function CheckoutError({ message }: { message: string }) {
-  return (
-    <p className="text-xs text-center" style={{ color: "#FF6B6B" }}>
-      {message}
-    </p>
-  );
-}
-
 const STARTER_FEATURES = [
   "Add, edit, and track every member",
   "Members check themselves in at the front desk",
@@ -80,8 +37,6 @@ function PricingCard({
   checkColor?: string;
   guarantee?: string;
 }) {
-  const { loading, error, handleCheckout } = useCheckout(priceId);
-
   return (
     <div
       className="rounded-xl flex flex-col gap-5 relative"
@@ -147,22 +102,17 @@ function PricingCard({
         </p>
       )}
 
-      <button
-        onClick={handleCheckout}
-        disabled={loading}
-        className="mt-auto rounded-lg font-semibold px-6 py-3 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 text-sm"
+      <a
+        href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+        className="mt-auto rounded-lg font-semibold px-6 py-3 transition-opacity flex items-center justify-center gap-2 text-sm"
         style={{
           backgroundColor: highlighted ? "#E02020" : "#1A1A1A",
           color: highlighted ? "#FFFFFF" : "#AAAAAA",
           border: highlighted ? "none" : "1px solid #333333",
         }}
       >
-        {loading && (
-          <span className="inline-block w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-        )}
         {ctaLabel}
-      </button>
-      {error && <CheckoutError message={error} />}
+      </a>
     </div>
   );
 }
@@ -175,8 +125,6 @@ const PRO_VALUE_STACK = [
 ];
 
 function ProCard({ priceId }: { priceId: string }) {
-  const { loading, error, handleCheckout } = useCheckout(priceId);
-
   return (
     <div
       className="rounded-xl flex flex-col relative overflow-hidden"
@@ -233,18 +181,13 @@ function ProCard({ priceId }: { priceId: string }) {
         </div>
 
         {/* CTA */}
-        <button
-          onClick={handleCheckout}
-          disabled={loading}
-          className="rounded-lg font-bold px-6 py-4 text-base transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+        <a
+          href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+          className="rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
         >
-          {loading && (
-            <span className="inline-block w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-          )}
           I&apos;m Ready to Stop the Bleeding — $89/mo
-        </button>
-        {error && <CheckoutError message={error} />}
+        </a>
       </div>
     </div>
   );
@@ -260,8 +203,6 @@ const ELITE_VALUE_STACK = [
 ];
 
 function EliteCard({ priceId }: { priceId: string }) {
-  const { loading, error, handleCheckout } = useCheckout(priceId);
-
   return (
     <div
       className="rounded-xl flex flex-col"
@@ -297,18 +238,13 @@ function EliteCard({ priceId }: { priceId: string }) {
           </ul>
         </div>
 
-        <button
-          onClick={handleCheckout}
-          disabled={loading}
-          className="mt-auto rounded-lg font-bold px-6 py-4 text-base transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+        <a
+          href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+          className="mt-auto rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#3B82F6", color: "#FFFFFF" }}
         >
-          {loading && (
-            <span className="inline-block w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-          )}
           I Want the Full Corner — $149/mo
-        </button>
-        {error && <CheckoutError message={error} />}
+        </a>
       </div>
     </div>
   );
