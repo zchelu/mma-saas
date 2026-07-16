@@ -7,7 +7,7 @@ const STARTER_FEATURES = [
   "Members check themselves in at the front desk",
   "See who's showing up and who isn't",
   "Spot members going cold — when you remember to check",
-  "You hit the button to text them yourself, one batch at a time",
+  "Upgrade to Pro or Elite for automatic weekly retention texts",
 ];
 
 const PRO_FEATURES = [
@@ -241,6 +241,7 @@ function ProCard({ priceId }: { priceId: string }) {
 
 const ELITE_VALUE_STACK = [
   "Everything in Pro, plus:",
+  "Automatic weekly retention texts — PLUS UNLIMITED MANUAL sends, anytime you want",
   "Skip the line — your questions get answered first, always",
   "We set up your gym with you on a 1-on-1 call",
   "A clear monthly breakdown of who you saved and who's at risk",
