@@ -8,15 +8,15 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <Link
             href="/pricing"
-            className="text-sm px-4 py-2 transition-colors"
-            style={{ color: "#888888" }}
+            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
           >
             Pricing
           </Link>
           <Link
             href="/sign-in"
-            className="text-sm px-4 py-2 transition-colors"
-            style={{ color: "#888888" }}
+            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
           >
             Sign in
           </Link>
