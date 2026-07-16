@@ -1,12 +1,18 @@
 import Link from "next/link";
-import PricingCards from "./components/pricing-cards";
 
 export default function Home() {
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
         <span className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>KombatDesk</span>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/pricing"
+            className="text-sm px-4 py-2 transition-colors"
+            style={{ color: "#888888" }}
+          >
+            Pricing
+          </Link>
           <Link
             href="/sign-in"
             className="text-sm px-4 py-2 transition-colors"
@@ -25,16 +31,16 @@ export default function Home() {
       </header>
 
       <main className="flex flex-col items-center text-center px-8 flex-1">
-        <div className="mt-32 mb-16 max-w-2xl">
+        <div className="mt-32 mb-24 max-w-2xl">
           <div className="inline-block text-xs font-semibold tracking-widest uppercase px-4 py-1 mb-6 rounded-full" style={{ color: "#888888", border: "1px solid #333333" }}>
             Built for MMA &amp; BJJ gyms
           </div>
           <h1 className="text-5xl font-extrabold leading-tight tracking-tight mb-6" style={{ color: "#FFFFFF", fontWeight: 500 }}>
-            Run your gym.<br />
-            <span style={{ color: "#888888" }}>Not spreadsheets.</span>
+            Members don&apos;t quit your gym.<br />
+            <span style={{ color: "#888888" }}>They just stop showing up.</span>
           </h1>
           <p className="text-lg mb-10 max-w-lg mx-auto" style={{ color: "#888888" }}>
-            Check-ins, member tracking, classes, and billing — all in one place. KombatDesk handles the admin so you can spend more time on the mats.
+            KombatDesk spots members going cold and texts them back through your door — automatically.
           </p>
           <div className="flex justify-center">
             <Link
@@ -47,56 +53,79 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-3 gap-6 mb-32">
-          <FeatureCard
-            title="Member Management"
-            description="Add, edit, and track every athlete. See who's active, on what plan, and when they last trained."
+        <div className="w-full max-w-xl pb-24">
+          <p className="text-lg leading-relaxed" style={{ color: "#AAAAAA" }}>
+            A member&apos;s last check-in was three weeks ago. You were busy coaching. By the
+            time you noticed, they&apos;d already canceled. That&apos;s how most gyms lose
+            members — not to competitors, to silence.
+          </p>
+        </div>
+
+        <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-3 gap-6 pb-24">
+          <HowItWorksStep
+            number={1}
+            description="Members check in at the front desk — takes two seconds."
           />
-          <FeatureCard
-            title="Attendance Tracking"
-            description="Log class attendance in seconds. Know exactly who's showing up and who's gone cold."
+          <HowItWorksStep
+            number={2}
+            description="KombatDesk flags anyone going cold before they're gone."
           />
-          <FeatureCard
-            title="Billing & Invoices"
-            description="Send invoices and track payments without leaving the platform. Get paid on time, every time."
+          <HowItWorksStep
+            number={3}
+            description="Automatic weekly texts bring them back through your door."
           />
         </div>
 
-        <div className="w-full max-w-6xl pb-24">
-          <div className="text-center mb-14">
-            <div
-              className="inline-block text-xs font-semibold tracking-widest uppercase px-4 py-1 mb-6 rounded-full"
-              style={{ color: "#888888", border: "1px solid #333333" }}
-            >
-              Simple pricing
-            </div>
-            <h2 className="text-4xl font-extrabold tracking-tight mb-4" style={{ color: "#FFFFFF" }}>
-              Pick your plan
-            </h2>
-            <p className="text-lg" style={{ color: "#888888" }}>
-              No contracts. Cancel anytime.
+        <div className="w-full max-w-2xl pb-24">
+          <div
+            className="rounded-xl px-8 py-10 text-center"
+            style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
+          >
+            <p className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
+              If KombatDesk doesn&apos;t save you at least one member in your first 30 days,
+              it&apos;s free.
+            </p>
+            <p className="text-sm" style={{ color: "#AAAAAA" }}>
+              One saved member pays for KombatDesk. Everything after that is profit you were
+              losing to silence.
             </p>
           </div>
-          <PricingCards
-            starterPriceId={process.env.STRIPE_STARTER_PRICE_ID ?? ""}
-            proPriceId={process.env.STRIPE_PRO_PRICE_ID ?? ""}
-            elitePriceId={process.env.STRIPE_ELITE_PRICE_ID ?? ""}
-          />
+        </div>
+
+        <div className="w-full max-w-2xl pb-24">
+          <h2 className="text-3xl font-extrabold tracking-tight mb-8" style={{ color: "#FFFFFF" }}>
+            Stop losing members to silence.
+          </h2>
+          <Link
+            href="/signup"
+            className="inline-block rounded-lg font-semibold px-6 py-3 transition-colors"
+            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+          >
+            Set up my gym
+          </Link>
         </div>
       </main>
 
-      <footer className="px-8 py-5 text-center text-xs" style={{ borderTop: "1px solid #333333", color: "#555555" }}>
-        © {new Date().getFullYear()} KombatDesk. All rights reserved.
+      <footer
+        className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 px-8 py-5 text-center text-xs"
+        style={{ borderTop: "1px solid #333333", color: "#555555" }}
+      >
+        <span>© {new Date().getFullYear()} KombatDesk. All rights reserved.</span>
       </footer>
     </div>
   );
 }
 
-function FeatureCard({ title, description }: { title: string; description: string }) {
+function HowItWorksStep({ number, description }: { number: number; description: string }) {
   return (
     <div className="rounded-xl p-6 text-left" style={{ backgroundColor: "#222222", border: "1px solid #333333" }}>
-      <h3 className="font-medium mb-2" style={{ color: "#FFFFFF" }}>{title}</h3>
-      <p className="text-sm leading-relaxed" style={{ color: "#888888" }}>{description}</p>
+      <div
+        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mb-4"
+        style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+      >
+        {number}
+      </div>
+      <p className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>{description}</p>
     </div>
   );
 }

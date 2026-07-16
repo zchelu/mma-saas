@@ -9,6 +9,15 @@ export async function POST(request: NextRequest) {
 
   const { priceId } = await request.json() as { priceId: string };
 
+  const allowedPriceIds = [
+    process.env.STRIPE_STARTER_PRICE_ID,
+    process.env.STRIPE_PRO_PRICE_ID,
+    process.env.STRIPE_ELITE_PRICE_ID,
+  ];
+  if (!allowedPriceIds.includes(priceId)) {
+    return NextResponse.json({ error: "Invalid priceId" }, { status: 400 });
+  }
+
   const origin = new URL(request.url).origin;
 
   const session = await stripe.checkout.sessions.create({
