@@ -52,6 +52,12 @@ export default defineSchema({
     memberId: v.id("members"),
     timestamp: v.number(),
   }).index("by_member", ["memberId"]),
+  recoveryTokens: defineTable({
+    token: v.string(),
+    stripeCustomerId: v.string(),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  }).index("by_token", ["token"]),
   gyms: defineTable({
     // Optional: guest-checkout rows exist between payment and account
     // creation before being claimed — see convex/subscriptions.ts claim flow.
