@@ -13,10 +13,12 @@ import type * as classes from "../classes.js";
 import type * as crons from "../crons.js";
 import type * as enrollments from "../enrollments.js";
 import type * as gyms from "../gyms.js";
+import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
 import type * as migrations from "../migrations.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
+import type * as stripeWebhookAction from "../stripeWebhookAction.js";
 import type * as subscriptions from "../subscriptions.js";
 
 import type {
@@ -31,10 +33,12 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   enrollments: typeof enrollments;
   gyms: typeof gyms;
+  http: typeof http;
   invoices: typeof invoices;
   members: typeof members;
   migrations: typeof migrations;
   sendRetentionTexts: typeof sendRetentionTexts;
+  stripeWebhookAction: typeof stripeWebhookAction;
   subscriptions: typeof subscriptions;
 }>;
 
