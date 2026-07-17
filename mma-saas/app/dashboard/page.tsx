@@ -13,14 +13,18 @@ export default async function DashboardPage() {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
+  const token = await getConvexToken();
+
   // First authenticated page a new sign-up ever reaches — provisions this
   // owner's gyms row if one doesn't exist yet. No-op for existing owners.
-  await fetchMutation(api.subscriptions.getOrCreateGym, {
-    clerkUserId: user.id,
-    defaultName: user.firstName ? `${user.firstName}'s Gym` : undefined,
-  });
+  // clerkUserId is identity-derived inside the mutation from this token, not
+  // passed as an argument — see convex/subscriptions.ts.
+  await fetchMutation(
+    api.subscriptions.getOrCreateGym,
+    { defaultName: user.firstName ? `${user.firstName}'s Gym` : undefined },
+    { token }
+  );
 
-  const token = await getConvexToken();
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
   // Not active yet doesn't necessarily mean no plan exists — a checkout may
   // still be settling (claimGymBySessionId / webhook write racing this

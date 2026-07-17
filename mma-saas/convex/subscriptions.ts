@@ -263,9 +263,19 @@ export const claimGymByRecoveryToken = action({
 // Stripe checkout — decouples multi-tenant scoping from billing state.
 // Safe to call on every load: existing rows (matched by clerkUserId) are
 // returned as-is, never duplicated or overwritten.
+//
+// clerkUserId is identity-derived, not a client-supplied argument — a plain
+// clerkUserId arg here would let any authenticated caller create or read
+// another user's gym row by calling this function directly with an arbitrary
+// id. Callers must pass a Convex auth token (see lib/convex-auth.ts) for
+// ctx.auth.getUserIdentity() to resolve.
 export const getOrCreateGym = mutation({
-  args: { clerkUserId: v.string(), defaultName: v.optional(v.string()) },
-  handler: async (ctx, { clerkUserId, defaultName }) => {
+  args: { defaultName: v.optional(v.string()) },
+  handler: async (ctx, { defaultName }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const clerkUserId = identity.subject;
+
     const existing = await ctx.db
       .query("gyms")
       .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", clerkUserId))
