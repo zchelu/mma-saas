@@ -127,14 +127,17 @@ INFRASTRUCTURE STATUS
 - Vercel: project mma-saas-xyr1 (team "SaaS MMA"), connected to the
   GitHub repo, Root Directory correctly set to mma-saas, all env vars
   entered directly by Zain (never through an AI tool — secrets should
-  never be typed by an agent). Latest deploy succeeded post-Twilio-fix.
-  Reachable only at auto-generated *.vercel.app URLs right now —
-  kombatdesk.com is NOT pointed at it yet. This is the biggest open
-  item.
-- DNS: kombatdesk.com managed at Namecheap (confirmed via nameserver
-  lookup). Was suspended earlier for ICANN WHOIS verification —
-  resolved, domain is live and resolving, just not yet pointed at
-  this Vercel project.
+  never be typed by an agent).
+- DNS/domain: STALE NOTE CORRECTED (July 2026, terminal session) —
+  kombatdesk.com IS now pointed at Vercel and serving the live app.
+  Verified directly: `curl -IL https://kombatdesk.com/` returns a 308
+  from the apex to https://www.kombatdesk.com/, which returns 200 with
+  Server: Vercel / X-Vercel-Id headers. This was previously the
+  biggest open item and is done — don't re-flag it as missing.
+  (This apex→www redirect is almost certainly what broke live Stripe
+  webhook delivery earlier — Stripe was hitting the apex URL and not
+  following the 308 on POST. Endpoint/URL should be double-checked
+  against www.kombatdesk.com if webhook issues recur.)
 
 ====================================================================
 DECISIONS / KNOWN HISTORY
