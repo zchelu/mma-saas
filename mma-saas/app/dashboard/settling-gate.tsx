@@ -33,12 +33,21 @@ export default function SettlingGate() {
       return;
     }
 
+    // Hard navigation (not router.replace) - this fires the instant the
+    // reactive query resolves, right on top of the /dashboard navigation
+    // that's still in flight. Stacking a second client-router transition
+    // there was a likely contributor to the intermittent RSC-navigation
+    // 503s (confirmed absent once accounts stop hitting this path at all -
+    // see 2026-07-20 investigation). A full page load can't race the
+    // in-flight client-side transition the way router.replace can.
     if (!hasBilling) {
-      router.replace("/pricing");
+      window.location.href = "/pricing";
       return;
     }
 
-    const timer = setTimeout(() => router.replace("/pricing"), MAX_WAIT_MS);
+    const timer = setTimeout(() => {
+      window.location.href = "/pricing";
+    }, MAX_WAIT_MS);
     return () => clearTimeout(timer);
   }, [subscription, isActive, hasBilling, router]);
 
