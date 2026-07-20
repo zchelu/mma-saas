@@ -248,12 +248,17 @@ export const claimGymByRecoveryToken = action({
     if (record.usedAt) throw new Error("This recovery link has already been used.");
     if (record.expiresAt < Date.now()) throw new Error("This recovery link has expired.");
 
-    await ctx.runMutation(internal.subscriptions.markRecoveryTokenUsed, { tokenId: record._id });
-
-    return await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
+    // Claim first, only mark the token used once the claim actually succeeds
+    // — otherwise a failure here (or two racing clicks) permanently burns a
+    // single-use link without ever linking the account.
+    const result = await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
       clerkUserId: identity.subject,
       stripeCustomerId: record.stripeCustomerId,
     });
+
+    await ctx.runMutation(internal.subscriptions.markRecoveryTokenUsed, { tokenId: record._id });
+
+    return result;
   },
 });
 
