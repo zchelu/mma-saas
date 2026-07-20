@@ -205,6 +205,23 @@ export const claimGymByCustomer = internalMutation({
   },
 });
 
+// Called from app/api/recover/route.ts to pick the right Stripe customer when
+// an email has more than one (e.g. a guest checkout retried after an earlier
+// attempt never got claimed). Stripe's customers.list returns newest-first,
+// so without this check the route would always resolve to the most recent
+// customer and could never recover an older, still-unclaimed purchase sitting
+// behind a newer already-claimed one under the same email.
+export const isCustomerClaimed = query({
+  args: { stripeCustomerId: v.string() },
+  handler: async (ctx, { stripeCustomerId }) => {
+    const gym = await ctx.db
+      .query("gyms")
+      .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", stripeCustomerId))
+      .unique();
+    return !!gym?.clerkUserId;
+  },
+});
+
 // Called from app/api/recover/route.ts after it has independently verified
 // via the Stripe API that this email belongs to a paying customer. Storing
 // the mapping here (rather than trusting a customerId embedded in the emailed
