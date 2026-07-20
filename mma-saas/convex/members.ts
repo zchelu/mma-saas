@@ -1,6 +1,6 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym } from "./gyms";
+import { requireGym, tryGetGym } from "./gyms";
 
 export const getAll = query({
   args: {},
@@ -17,7 +17,8 @@ export const getAll = query({
 export const getActiveCount = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetGym(ctx);
+    if (!gym) return 0;
     const active = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
@@ -121,7 +122,8 @@ export const getCheckInHistory = query({
 export const getAtRiskMembers = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetGym(ctx);
+    if (!gym) return [];
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const threshold = sevenDaysAgo.toISOString();

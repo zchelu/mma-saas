@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass } from "./gyms";
+import { requireGym, requireOwnClass, tryGetGym } from "./gyms";
 
 const classFields = {
   name: v.string(),
@@ -33,7 +33,8 @@ export const getById = query({
 export const getCount = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetGym(ctx);
+    if (!gym) return 0;
     const classes = await ctx.db
       .query("classes")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))

@@ -19,6 +19,23 @@ export async function requireGym(
   return gym;
 }
 
+// Non-throwing counterpart to requireGym, for dashboard stat-card reads that
+// fire during the brief window right after a Stripe->/welcome->/dashboard
+// redirect, before Clerk's client-side session has finished hydrating. An
+// unauthenticated instant there is expected, not exceptional — throwing
+// crashes the whole page with no loading state or error boundary to catch it.
+export async function tryGetGym(
+  ctx: QueryCtx | MutationCtx
+): Promise<Doc<"gyms"> | null> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) return null;
+
+  return await ctx.db
+    .query("gyms")
+    .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", identity.subject))
+    .unique();
+}
+
 // Shared ownership checks — throw for mutations and any read where a missing/
 // foreign-gym doc should hard-fail. Read paths that need to degrade
 // gracefully (e.g. a page that already handles "not found" for a sibling

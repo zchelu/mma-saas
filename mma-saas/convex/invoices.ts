@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnMember } from "./gyms";
+import { requireGym, requireOwnMember, tryGetGym } from "./gyms";
 
 const invoiceFields = {
   memberId: v.id("members"),
@@ -29,7 +29,8 @@ export const getAll = query({
 export const getUnpaidCount = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetGym(ctx);
+    if (!gym) return 0;
     const unpaid = await ctx.db
       .query("invoices")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
