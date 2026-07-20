@@ -149,20 +149,31 @@ DECISIONS / KNOWN HISTORY
   https://kombatdesk.com/api/stripe/webhook. It reads STRIPE_SECRET_KEY
   and STRIPE_WEBHOOK_SECRET from Vercel's env, not Convex's.
 
-  A separate attempt to move webhook handling into Convex itself
-  (convex/http.ts + convex/stripeWebhookAction.ts, an httpAction meant
-  to receive Stripe POSTs directly at the Convex deployment URL) was
-  found mid-flight, untracked and uncommitted in the local working
-  tree, and was REMOVED as broken/abandoned — it mixed "use node" with
-  httpAction, which Convex disallows outright, and failed every dev
-  sync with an InvalidModules error. It was never committed, never
-  successfully deployed to dev or prod, and never received real
-  traffic (confirmed by a direct POST to both deployments' /stripe/
-  webhook path returning 404 before deletion).
+  A FIRST attempt to move webhook handling into Convex itself mixed
+  "use node" with httpAction (which Convex disallows outright) and was
+  removed as broken/abandoned, never committed.
 
-  If a Convex-side webhook migration is wanted later, it should be
-  scoped and built deliberately from scratch — do not re-infer this as
-  missing/interrupted work to resume; the artifact is gone on purpose.
+  UPDATE (commit 1e5dc4e, 2026-07-16, supersedes the paragraph above):
+  a SECOND, correctly-scoped attempt is now committed and pushed to
+  master — convex/http.ts (default runtime, delegates via
+  ctx.runAction) + convex/stripeWebhookAction.ts ("use node", does the
+  actual Stripe signature verification). This is Phase 1 of a
+  deliberate two-phase cutover: the new endpoint
+  (<deployment>.convex.site/stripe/webhook) runs ALONGSIDE the
+  existing Next.js route, unchanged, receiving no real traffic yet —
+  Stripe's dashboard endpoint has NOT been repointed. Phase 2 (not yet
+  done): once the Convex endpoint is verified against real Stripe
+  events, manually repoint the Stripe dashboard endpoint to it, then
+  convert upsertSubscription/upsertUnclaimedSubscription/
+  updatePlanStatusByCustomer to internalMutation and remove the old
+  Next.js route (those mutations are otherwise callable directly by
+  any signed-in browser, bypassing webhook signature verification).
+
+  Do not re-remove convex/http.ts or convex/stripeWebhookAction.ts as
+  if they were the abandoned first attempt — they're live, intentional
+  Phase 1 work. Before touching Stripe webhook config in the dashboard,
+  confirm which phase this is currently in (check for a Phase 2 commit
+  first).
 
 ====================================================================
 KNOWN ISSUES, NOT YET FIXED (decisions needed, not urgent)

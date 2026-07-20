@@ -31,7 +31,7 @@ export default async function DashboardPage() {
   // request). Let the client reactively wait rather than hard-bouncing a
   // paying customer to /pricing; SettlingGate itself redirects to /pricing
   // once it can tell there's genuinely no plan, or after a timeout.
-  if (!subscription.plan || subscription.planStatus !== "active") {
+  if (!subscription.plan || (subscription.planStatus !== "active" && subscription.planStatus !== "trialing")) {
     return <SettlingGate />;
   }
 

@@ -19,7 +19,10 @@ export default function SettlingGate() {
   const router = useRouter();
   const refreshed = useRef(false);
 
-  const isActive = !!(subscription?.plan && subscription.planStatus === "active");
+  const isActive = !!(
+    subscription?.plan &&
+    (subscription.planStatus === "active" || subscription.planStatus === "trialing")
+  );
   const hasBilling = !!subscription?.stripeCustomerId;
 
   useEffect(() => {

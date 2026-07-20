@@ -9,6 +9,7 @@ import ManageSubscriptionButton from "./manage-subscription-button";
 
 function statusColor(status: string | null) {
   if (status === "active") return "#4ADE80";
+  if (status === "trialing") return "#3B82F6";
   if (status === "past_due") return "#F87171";
   return "#888888";
 }

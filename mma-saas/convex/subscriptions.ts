@@ -355,12 +355,16 @@ export function isProPlan(gym: { plan?: string; planStatus?: string } | null): b
   return (
     !!gym &&
     (gym.plan === "pro" || gym.plan === "elite") &&
-    gym.planStatus === "active"
+    (gym.planStatus === "active" || gym.planStatus === "trialing")
   );
 }
 
 export function isElitePlan(gym: { plan?: string; planStatus?: string } | null): boolean {
-  return !!gym && gym.plan === "elite" && gym.planStatus === "active";
+  return (
+    !!gym &&
+    gym.plan === "elite" &&
+    (gym.planStatus === "active" || gym.planStatus === "trialing")
+  );
 }
 
 export const getGymById = internalQuery({

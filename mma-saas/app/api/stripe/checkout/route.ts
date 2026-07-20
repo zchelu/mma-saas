@@ -36,17 +36,19 @@ export async function POST(request: NextRequest) {
       cancel_url: `${origin}/pricing`,
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
-      // Signed-in: prefill email and tag the subscription so the webhook can
-      // also link it (redundant with claimGymBySessionId, harmless). Guest:
-      // leave both unset — Stripe's hosted page collects the email itself,
-      // and /welcome links the account after signup via claimGymBySessionId
-      // (see convex/subscriptions.ts).
-      ...(user
-        ? {
-            customer_email: user.emailAddresses[0]?.emailAddress,
-            subscription_data: { metadata: { clerkUserId: user.id } },
-          }
-        : {}),
+      // 14-day trial on all plans, guest or signed-in alike — don't
+      // special-case by priceId.
+      subscription_data: {
+        trial_period_days: 14,
+        // Signed-in: tag the subscription so the webhook can also link it
+        // (redundant with claimGymBySessionId, harmless). Guest: leave
+        // clerkUserId unset — Stripe's hosted page collects the email
+        // itself, and /welcome links the account after signup via
+        // claimGymBySessionId (see convex/subscriptions.ts).
+        ...(user ? { metadata: { clerkUserId: user.id } } : {}),
+      },
+      // Signed-in: prefill email.
+      ...(user ? { customer_email: user.emailAddresses[0]?.emailAddress } : {}),
     });
 
     return NextResponse.json({ url: session.url });
