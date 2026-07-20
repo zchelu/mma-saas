@@ -23,6 +23,7 @@ export default function AppHeader() {
             <Link
               key={href}
               href={href}
+              prefetch={false}
               className="text-sm px-3 py-1.5 rounded-lg transition-colors"
               style={
                 pathname === href
