@@ -11,14 +11,16 @@ export default async function PricingPage() {
         <Link href="/" className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>
           KombatDesk
         </Link>
-        <Link
+        {/* Plain <a>, not Link - see app/page.tsx for why: diagnosed a
+            client-router bug landing on the wrong route with zero failed
+            fetches, so this bypasses the client router entirely. */}
+        <a
           href={user ? "/dashboard" : "/sign-in"}
-          prefetch={false}
           className="text-sm px-4 py-2"
           style={{ color: "#888888" }}
         >
           {user ? "Dashboard" : "Sign in"}
-        </Link>
+        </a>
       </header>
 
       <main className="flex flex-col items-center px-8 py-24 flex-1">

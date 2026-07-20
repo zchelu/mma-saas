@@ -17,24 +17,28 @@ export default async function Home() {
             Pricing
           </Link>
           {user ? (
-            <Link
+            // Plain <a>, not Link: forces a full page load instead of a
+            // client-side RSC transition. Diagnosed live (browser-extension
+            // session) landing on the wrong route with zero failed fetches -
+            // a client router bug, not a server error - so the fix is to
+            // bypass the client router for this jump into the authenticated
+            // app rather than keep chasing the router internals.
+            <a
               href="/dashboard"
-              prefetch={false}
               className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
               style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
               Dashboard
-            </Link>
+            </a>
           ) : (
             <>
-              <Link
+              <a
                 href="/sign-in"
-                prefetch={false}
                 className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
                 style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
               >
                 Sign in
-              </Link>
+              </a>
               <Link
                 href="/signup"
                 className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
