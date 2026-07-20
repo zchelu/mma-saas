@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { currentUser } from "@clerk/nextjs/server";
 
-export default function Home() {
+export default async function Home() {
+  const user = await currentUser();
+
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
@@ -13,20 +16,34 @@ export default function Home() {
           >
             Pricing
           </Link>
-          <Link
-            href="/sign-in"
-            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-            style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
-          >
-            Get started
-          </Link>
+          {user ? (
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+              style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+            >
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/sign-in"
+                prefetch={false}
+                className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+              >
+                Get started
+              </Link>
+            </>
+          )}
         </div>
       </header>
 

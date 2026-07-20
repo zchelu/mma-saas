@@ -13,6 +13,7 @@ export default async function PricingPage() {
         </Link>
         <Link
           href={user ? "/dashboard" : "/sign-in"}
+          prefetch={false}
           className="text-sm px-4 py-2"
           style={{ color: "#888888" }}
         >
