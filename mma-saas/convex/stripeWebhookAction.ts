@@ -1,15 +1,23 @@
 "use node";
 
 import Stripe from "stripe";
-import { internalAction } from "./_generated/server";
-import { api } from "./_generated/api"; // Phase 2: import { internal } from "./_generated/api";
+import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
-// Only callable via ctx.runAction from convex/http.ts's httpAction — this
-// file must stay Node-runtime-only for the stripe SDK's constructEvent, but
-// httpAction handlers can't live in a "use node" file, so the HTTP entry
-// point and the verification/processing logic are split across two files.
-export const verifyAndProcess = internalAction({
+// Phase 2 complete: upsertSubscription/upsertUnclaimedSubscription/
+// updatePlanStatusByCustomer are now internalMutation — unreachable by any
+// client except via ctx.runMutation from a trusted Convex function. This
+// action is deliberately public (not internalAction) so BOTH callers can
+// reach it: convex/http.ts's httpAction (ctx.runAction, for the Convex-
+// native shadow endpoint) and app/api/stripe/webhook/route.ts (fetchAction,
+// for the live Vercel-registered endpoint) — Stripe's signature check right
+// below is the real trust boundary either way, not the public/internal
+// distinction. This file must also stay Node-runtime-only for the stripe
+// SDK's constructEvent, but httpAction handlers can't live in a "use node"
+// file, so the HTTP entry point and this verification/processing logic stay
+// split across two files.
+export const verifyAndProcess = action({
   args: { signature: v.string(), payload: v.string() },
   handler: async (ctx, { signature, payload }): Promise<{ success: boolean }> => {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -37,7 +45,7 @@ export const verifyAndProcess = internalAction({
         const planStatus = event.type === "customer.subscription.deleted" ? "canceled" : sub.status;
 
         if (clerkUserId) {
-          await ctx.runMutation(api.subscriptions.upsertSubscription, {
+          await ctx.runMutation(internal.subscriptions.upsertSubscription, {
             clerkUserId,
             stripeCustomerId: customerId,
             stripeSubscriptionId: sub.id,
@@ -47,7 +55,7 @@ export const verifyAndProcess = internalAction({
         } else {
           // Guest checkout — no Clerk account yet. Persist by customer id;
           // claimGymBySessionId links clerkUserId once they sign up.
-          await ctx.runMutation(api.subscriptions.upsertUnclaimedSubscription, {
+          await ctx.runMutation(internal.subscriptions.upsertUnclaimedSubscription, {
             stripeCustomerId: customerId,
             stripeSubscriptionId: sub.id,
             plan,
@@ -61,7 +69,7 @@ export const verifyAndProcess = internalAction({
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
         if (customerId) {
-          await ctx.runMutation(api.subscriptions.updatePlanStatusByCustomer, {
+          await ctx.runMutation(internal.subscriptions.updatePlanStatusByCustomer, {
             stripeCustomerId: customerId,
             planStatus: event.type === "invoice.payment_failed" ? "past_due" : "active",
           });

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type GymClass = {
   _id: Id<"classes">;
@@ -28,17 +29,24 @@ export default function ClassModal({ gymClass, onClose }: Props) {
   const [dayOfWeek, setDayOfWeek] = useState(gymClass?.dayOfWeek ?? "Monday");
   const [time, setTime] = useState(gymClass?.time ?? "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const fields = { name, instructor, dayOfWeek, time };
-    if (gymClass) {
-      await update({ id: gymClass._id, ...fields });
-    } else {
-      await add(fields);
+    setSaveError(null);
+    try {
+      const fields = { name, instructor, dayOfWeek, time };
+      if (gymClass) {
+        await update({ id: gymClass._id, ...fields });
+      } else {
+        await add(fields);
+      }
+      onClose();
+    } catch (err) {
+      setSaveError(getErrorMessage(err, "Couldn't save this class — try refreshing the page."));
+      setSaving(false);
     }
-    onClose();
   }
 
   return (
@@ -63,6 +71,7 @@ export default function ClassModal({ gymClass, onClose }: Props) {
             <input required value={time} onChange={(e) => setTime(e.target.value)} className="input" placeholder="6:00 PM" />
           </Field>
 
+          {saveError && <ErrorToast message={saveError} />}
           <div className="flex gap-3 mt-2">
             <button
               type="submit"

@@ -20,7 +20,7 @@ export const getAtRiskMembers = internalQuery({
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     return all.filter((m) => {
-      if (!m.phone || m.status !== "active") return false;
+      if (!m.phone || m.status !== "active" || m.smsOptedOut) return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
       const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
       return inactiveEnough && notRecentlyTexted;
@@ -39,6 +39,32 @@ export const recordRetentionText = internalMutation({
 // at-risk backlog gets spread across subsequent runs instead of firing
 // unbounded SMS in one shot — real cost and Twilio rate-limit protection.
 const MAX_TEXTS_PER_RUN = 200;
+
+// Minimum time between actual send runs for a single gym, regardless of
+// trigger path. Defense in depth beneath both the per-member 7-day
+// lastRetentionTextAt gate and the daily cron schedule itself — protects
+// against a double-fired cron, a scripted/looped call to the manual
+// mutation, or two racing manual triggers, any of which would otherwise
+// re-run the at-risk query and could send duplicate texts (real Twilio cost,
+// and a TCPA problem if it defeats the per-member 7-day cap).
+const RETENTION_RUN_COOLDOWN_MS = 15 * 60 * 1000;
+
+// Atomically checks and claims the per-gym run lock in one transaction —
+// Convex serializes mutations touching the same document, so two concurrent
+// callers can't both read "not cooling down" before either writes the claim.
+export const claimRetentionRunLock = internalMutation({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    const gym = await ctx.db.get(gymId);
+    if (!gym) return false;
+    const now = Date.now();
+    if (gym.lastRetentionRunAt && now - gym.lastRetentionRunAt < RETENTION_RUN_COOLDOWN_MS) {
+      return false;
+    }
+    await ctx.db.patch(gymId, { lastRetentionRunAt: now });
+    return true;
+  },
+});
 
 async function sendRetentionTextsCore(ctx: ActionCtx, gymId: Id<"gyms">, gymName: string) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -96,6 +122,11 @@ export const sendRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId} is not an active Pro/Elite gym — skipping automated retention texts`);
       return;
     }
+    const claimed = await ctx.runMutation(internal.sendRetentionTexts.claimRetentionRunLock, { gymId });
+    if (!claimed) {
+      console.log(`Gym ${gymId}: retention run cooldown active — skipping automated run`);
+      return;
+    }
     await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
   },
 });
@@ -138,6 +169,19 @@ export const triggerRetentionTexts = mutation({
     if (!isElitePlan(gym)) {
       throw new Error("Manual retention texts are an Elite-plan feature");
     }
+
+    // Claimed synchronously here (not left to the scheduled action) so a
+    // double-click or a scripted loop gets an immediate rejection instead of
+    // silently no-op-ing after the fact, and so two racing calls can't both
+    // pass the check before either claims — this mutation and the doc it
+    // patches are the same transaction.
+    const now = Date.now();
+    if (gym.lastRetentionRunAt && now - gym.lastRetentionRunAt < RETENTION_RUN_COOLDOWN_MS) {
+      const waitMin = Math.ceil((RETENTION_RUN_COOLDOWN_MS - (now - gym.lastRetentionRunAt)) / 60_000);
+      throw new Error(`Retention texts were just sent — please wait ${waitMin} more minute(s) before sending again.`);
+    }
+    await ctx.db.patch(gym._id, { lastRetentionRunAt: now });
+
     await ctx.scheduler.runAfter(0, internal.sendRetentionTexts.sendManualRetentionTextsForGym, { gymId: gym._id });
   },
 });

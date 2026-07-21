@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { currentUser } from "@clerk/nextjs/server";
-import { fetchQuery } from "convex/nextjs";
+import { fetchAction, fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 
@@ -9,6 +9,20 @@ export async function POST(request: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+
+  // checkRateLimit is internalMutation now — this goes through the
+  // checkRateLimitAction wrapper instead of fetchMutation. See
+  // convex/rateLimit.ts for why.
+  const allowed = await fetchAction(api.rateLimit.checkRateLimitAction, {
+    bucket: "portal",
+    identifier: `user:${user.id}`,
+  });
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many requests — please wait a bit and try again." },
+      { status: 429 }
+    );
+  }
 
   const token = await getConvexToken();
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });

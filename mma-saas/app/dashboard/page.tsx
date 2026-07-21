@@ -26,12 +26,16 @@ export default async function DashboardPage() {
   );
 
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
-  // Not active yet doesn't necessarily mean no plan exists — a checkout may
-  // still be settling (claimGymBySessionId / webhook write racing this
-  // request). Let the client reactively wait rather than hard-bouncing a
-  // paying customer to /pricing; SettlingGate itself redirects to /pricing
-  // once it can tell there's genuinely no plan, or after a timeout.
-  if (!subscription.plan || (subscription.planStatus !== "active" && subscription.planStatus !== "trialing")) {
+  // Mirrors requireGym's read-access gate (convex/gyms.ts): only "inactive"/
+  // no plan at all is blocked here. canceled/past_due gyms keep a read-only
+  // grace period and should reach the real dashboard, not bounce to
+  // /pricing — SettlingGate used to gate on active/trialing only, which
+  // meant a canceled or past_due gym got stuck "finalizing" for 8s and then
+  // got hard-redirected to /pricing despite requireGym allowing it through.
+  // A checkout may still be settling too (claimGymBySessionId / webhook
+  // write racing this request) — SettlingGate itself handles that case,
+  // waiting on the reactive query before deciding there's genuinely no plan.
+  if (!subscription.planStatus || subscription.planStatus === "inactive") {
     return <SettlingGate />;
   }
 

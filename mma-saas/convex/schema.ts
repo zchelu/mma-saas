@@ -13,6 +13,7 @@ export default defineSchema({
     lastRetentionTextAt: v.optional(v.number()),
     smsConsentConfirmed: v.optional(v.boolean()),
     smsConsentConfirmedAt: v.optional(v.number()),
+    smsOptedOut: v.optional(v.boolean()),
     // Optional until the backfill migration (convex/migrations.ts) has run for
     // every existing row — see convex/migrations.ts for the tighten-to-required follow-up.
     gymId: v.optional(v.id("gyms")),
@@ -68,7 +69,20 @@ export default defineSchema({
     plan: v.optional(v.string()),
     planStatus: v.optional(v.string()),
     createdAt: v.optional(v.number()),
+    // Set by convex/sendRetentionTexts.ts:claimRetentionRunLock. Shared by
+    // both the automated cron path and the manual Elite button — a single
+    // per-gym cooldown floor beneath both, independent of the per-member
+    // lastRetentionTextAt gate on the members table.
+    lastRetentionRunAt: v.optional(v.number()),
   })
     .index("by_clerk_user", ["clerkUserId"])
     .index("by_stripe_customer", ["stripeCustomerId"]),
+  // Generic fixed-window rate limiter backing convex/rateLimit.ts. `key` is
+  // "<bucket>:<identifier>" (e.g. "checkout:203.0.113.4") so unrelated
+  // buckets never collide even if an identifier repeats across them.
+  rateLimits: defineTable({
+    key: v.string(),
+    windowStart: v.number(),
+    count: v.number(),
+  }).index("by_key", ["key"]),
 });

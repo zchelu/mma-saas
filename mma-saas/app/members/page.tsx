@@ -6,6 +6,7 @@ import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import MemberModal from "./member-modal";
 import CheckInHistoryDrawer from "./check-in-history-drawer";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type Member = {
   _id: Id<"members">;
@@ -46,6 +47,7 @@ export default function MembersPage() {
   const remove = useMutation(api.members.remove);
 
   const [modal, setModal] = useState<null | "add" | Member>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -88,7 +90,12 @@ export default function MembersPage() {
 
   async function handleDelete(id: Id<"members">) {
     if (!confirm("Delete this member?")) return;
-    await remove({ id });
+    setDeleteError(null);
+    try {
+      await remove({ id });
+    } catch (err) {
+      setDeleteError(getErrorMessage(err, "Couldn't delete that member — try refreshing the page."));
+    }
   }
 
   return (
@@ -108,6 +115,8 @@ export default function MembersPage() {
             + Add Member
           </button>
         </div>
+
+        {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
 
         {members !== undefined && (
           <div className="flex gap-6 mb-6 pb-6" style={{ borderBottom: "1px solid #333333" }}>

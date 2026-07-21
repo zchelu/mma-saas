@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, tryGetGym } from "./gyms";
+import { requireGym, requireOwnClass, requireWriteAccess, tryGetGym } from "./gyms";
+import { assertMaxLength } from "./validate";
 
 const classFields = {
   name: v.string(),
@@ -8,6 +9,13 @@ const classFields = {
   dayOfWeek: v.string(),
   time: v.string(),
 };
+
+function validateClassFields(fields: { name: string; instructor: string; dayOfWeek: string; time: string }) {
+  assertMaxLength(fields.name, 200, "Name");
+  assertMaxLength(fields.instructor, 200, "Instructor");
+  assertMaxLength(fields.dayOfWeek, 20, "Day of week");
+  assertMaxLength(fields.time, 20, "Time");
+}
 
 export const getAll = query({
   args: {},
@@ -47,6 +55,8 @@ export const add = mutation({
   args: classFields,
   handler: async (ctx, args) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    validateClassFields(args);
     return ctx.db.insert("classes", { ...args, gymId: gym._id });
   },
 });
@@ -55,7 +65,9 @@ export const update = mutation({
   args: { id: v.id("classes"), ...classFields },
   handler: async (ctx, { id, ...fields }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     await requireOwnClass(ctx, gym._id, id);
+    validateClassFields(fields);
     return ctx.db.patch(id, fields);
   },
 });
@@ -64,6 +76,7 @@ export const remove = mutation({
   args: { id: v.id("classes") },
   handler: async (ctx, { id }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     await requireOwnClass(ctx, gym._id, id);
     const enrollments = await ctx.db.query("enrollments").withIndex("by_class", (q) => q.eq("classId", id)).collect();
     for (const e of enrollments) await ctx.db.delete(e._id);

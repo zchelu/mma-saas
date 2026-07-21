@@ -1,6 +1,8 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, tryGetGym } from "./gyms";
+import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
+import { assertMaxLength, assertEmailFormat } from "./validate";
+import { consumeRateLimit } from "./rateLimit";
 
 export const getAll = query({
   args: {},
@@ -45,10 +47,27 @@ function assertSmsConsent(fields: { phone?: string; smsConsentConfirmed?: boolea
   }
 }
 
+function validateMemberFields(fields: {
+  name: string;
+  plan: string;
+  email?: string;
+  phone?: string;
+  beltRank?: string;
+}) {
+  assertMaxLength(fields.name, 200, "Name");
+  assertMaxLength(fields.plan, 100, "Plan");
+  assertMaxLength(fields.email, 254, "Email");
+  assertEmailFormat(fields.email, "Email");
+  assertMaxLength(fields.phone, 30, "Phone");
+  assertMaxLength(fields.beltRank, 100, "Belt rank");
+}
+
 export const add = mutation({
   args: memberFields,
   handler: async (ctx, args) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    validateMemberFields(args);
     assertSmsConsent(args);
     return await ctx.db.insert("members", { ...args, gymId: gym._id });
   },
@@ -58,10 +77,20 @@ export const update = mutation({
   args: { id: v.id("members"), ...memberFields },
   handler: async (ctx, { id, ...fields }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     const existing = await ctx.db.get(id);
     if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
+    validateMemberFields(fields);
     assertSmsConsent(fields);
-    await ctx.db.patch(id, fields);
+    // A prior opt-out is tied to the phone number that opted out, not the
+    // member record — if the number changes, the old opt-out no longer
+    // applies to whoever holds the new number, and assertSmsConsent above
+    // already forces fresh consent to be re-confirmed for it. Without this,
+    // a member who opted out on an old number would stay silently excluded
+    // from texts on a new number they never opted out on, with no UI to
+    // notice or fix it.
+    const phoneChanged = fields.phone !== existing.phone;
+    await ctx.db.patch(id, { ...fields, ...(phoneChanged ? { smsOptedOut: false } : {}) });
   },
 });
 
@@ -69,6 +98,7 @@ export const remove = mutation({
   args: { id: v.id("members") },
   handler: async (ctx, { id }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     const existing = await ctx.db.get(id);
     if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
     const enrollments = await ctx.db.query("enrollments").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
@@ -79,24 +109,41 @@ export const remove = mutation({
   },
 });
 
-// No auth — public kiosk search, scoped by the gymId the kiosk page passes in.
+// No auth — public kiosk search, scoped by the gymId the kiosk page passes
+// in. Returns only the fields app/checkin/page.tsx actually renders
+// (_id/name/plan/status/beltRank) — previously returned full member docs
+// including phone, email, and SMS-consent fields to this unauthenticated
+// endpoint, which the kiosk UI never used.
 export const getActiveForGym = query({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
-    return await ctx.db
+    const members = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .filter((q) => q.eq(q.field("status"), "active"))
       .collect();
+    return members.map((m) => ({
+      _id: m._id,
+      name: m.name,
+      plan: m.plan,
+      status: m.status,
+      beltRank: m.beltRank,
+    }));
   },
 });
 
 // No auth — intentionally public for the kiosk check-in screen.
 // gymId is required so a stale/spoofed member id from another gym can't be checked in
-// through this gym's kiosk.
+// through this gym's kiosk. Rate-limited per gym (not per caller — there's no
+// reliable caller identity on a public kiosk mutation) so a scripted loop
+// against one kiosk can't hammer the table; 60/5min is far above any real
+// kiosk's walk-in rate.
 export const checkIn = mutation({
   args: { id: v.id("members"), gymId: v.id("gyms") },
   handler: async (ctx, { id, gymId }) => {
+    const allowed = await consumeRateLimit(ctx, "checkin", gymId);
+    if (!allowed) throw new Error("Too many check-ins right now — please try again in a few minutes.");
+
     const member = await ctx.db.get(id);
     if (!member || member.gymId !== gymId) throw new Error("Member not found");
     const now = Date.now();
@@ -134,6 +181,33 @@ export const getAtRiskMembers = query({
     return all.filter(
       (m) => m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
     );
+  },
+});
+
+function normalizePhoneDigits(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+}
+
+// Internal — only reachable via ctx.runMutation from
+// convex/twilioWebhookAction.ts, after it verifies Twilio's request
+// signature (see convex/http.ts's /twilio/inbound route). Not a public
+// mutation: nothing outside that trusted call chain can flip a member's
+// opt-out flag. Matches on stripped digits, not exact string equality,
+// because member phone numbers are stored as free-typed text (e.g.
+// "(720) 555-0100") while Twilio's inbound "From" is E.164
+// (+17205550100) — an exact match would never fire.
+export const setSmsOptOutByPhone = internalMutation({
+  args: { phone: v.string(), optedOut: v.boolean() },
+  handler: async (ctx, { phone, optedOut }) => {
+    const target = normalizePhoneDigits(phone);
+    if (!target) return;
+    const all = await ctx.db.query("members").collect();
+    for (const m of all) {
+      if (m.phone && normalizePhoneDigits(m.phone) === target) {
+        await ctx.db.patch(m._id, { smsOptedOut: optedOut });
+      }
+    }
   },
 });
 

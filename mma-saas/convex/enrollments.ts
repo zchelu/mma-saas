@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireOwnMember } from "./gyms";
+import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess } from "./gyms";
 
 export const getByClass = query({
   args: { classId: v.id("classes") },
@@ -46,6 +46,7 @@ export const enroll = mutation({
   args: { memberId: v.id("members"), classId: v.id("classes") },
   handler: async (ctx, { memberId, classId }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     await Promise.all([
       requireOwnClass(ctx, gym._id, classId),
       requireOwnMember(ctx, gym._id, memberId),
@@ -64,6 +65,7 @@ export const unenroll = mutation({
   args: { memberId: v.id("members"), classId: v.id("classes") },
   handler: async (ctx, { memberId, classId }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     await Promise.all([
       requireOwnClass(ctx, gym._id, classId),
       requireOwnMember(ctx, gym._id, memberId),

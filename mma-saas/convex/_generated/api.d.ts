@@ -17,9 +17,13 @@ import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
 import type * as migrations from "../migrations.js";
+import type * as rateLimit from "../rateLimit.js";
+import type * as recoveryAction from "../recoveryAction.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
 import type * as stripeWebhookAction from "../stripeWebhookAction.js";
 import type * as subscriptions from "../subscriptions.js";
+import type * as twilioWebhookAction from "../twilioWebhookAction.js";
+import type * as validate from "../validate.js";
 
 import type {
   ApiFromModules,
@@ -37,9 +41,13 @@ declare const fullApi: ApiFromModules<{
   invoices: typeof invoices;
   members: typeof members;
   migrations: typeof migrations;
+  rateLimit: typeof rateLimit;
+  recoveryAction: typeof recoveryAction;
   sendRetentionTexts: typeof sendRetentionTexts;
   stripeWebhookAction: typeof stripeWebhookAction;
   subscriptions: typeof subscriptions;
+  twilioWebhookAction: typeof twilioWebhookAction;
+  validate: typeof validate;
 }>;
 
 /**

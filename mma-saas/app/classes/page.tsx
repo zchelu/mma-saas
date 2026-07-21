@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import ClassModal from "./class-modal";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type GymClass = {
   _id: Id<"classes">;
@@ -20,11 +21,17 @@ export default function ClassesPage() {
   const enrollmentCounts = useQuery(api.enrollments.getEnrollmentCounts);
   const remove = useMutation(api.classes.remove);
   const [modal, setModal] = useState<null | "add" | GymClass>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleDelete(id: Id<"classes">) {
     if (!confirm("Delete this class?")) return;
-    await remove({ id });
+    setDeleteError(null);
+    try {
+      await remove({ id });
+    } catch (err) {
+      setDeleteError(getErrorMessage(err, "Couldn't delete that class — try refreshing the page."));
+    }
   }
 
   return (
@@ -43,6 +50,8 @@ export default function ClassesPage() {
             + Add Class
           </button>
         </div>
+
+        {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
 
         <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #333333" }}>
           <table className="w-full text-sm">

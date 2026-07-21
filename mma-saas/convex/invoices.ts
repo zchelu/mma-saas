@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnMember, tryGetGym } from "./gyms";
+import { requireGym, requireOwnMember, requireWriteAccess, tryGetGym } from "./gyms";
+import { assertMaxLength, assertInRange } from "./validate";
 
 const invoiceFields = {
   memberId: v.id("members"),
@@ -8,6 +9,11 @@ const invoiceFields = {
   status: v.union(v.literal("paid"), v.literal("unpaid")),
   dueDate: v.string(),
 };
+
+function validateInvoiceFields(fields: { amount: number; dueDate: string }) {
+  assertInRange(fields.amount, 0, 1_000_000, "Amount");
+  assertMaxLength(fields.dueDate, 40, "Due date");
+}
 
 export const getAll = query({
   args: {},
@@ -44,6 +50,8 @@ export const add = mutation({
   args: invoiceFields,
   handler: async (ctx, args) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    validateInvoiceFields(args);
     await requireOwnMember(ctx, gym._id, args.memberId);
     return ctx.db.insert("invoices", { ...args, gymId: gym._id });
   },
@@ -53,6 +61,8 @@ export const update = mutation({
   args: { id: v.id("invoices"), ...invoiceFields },
   handler: async (ctx, { id, ...fields }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    validateInvoiceFields(fields);
     const [existing] = await Promise.all([
       ctx.db.get(id),
       requireOwnMember(ctx, gym._id, fields.memberId),
@@ -66,6 +76,7 @@ export const remove = mutation({
   args: { id: v.id("invoices") },
   handler: async (ctx, { id }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
     const existing = await ctx.db.get(id);
     if (!existing || existing.gymId !== gym._id) throw new Error("Invoice not found");
     return ctx.db.delete(id);

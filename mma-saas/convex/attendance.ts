@@ -1,6 +1,11 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireOwnMember } from "./gyms";
+import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess } from "./gyms";
+import { assertMaxArrayLength } from "./validate";
+
+// Well above any real class roster — bounds the Promise.all fan-out below
+// against a payload of thousands of ids in one call.
+const MAX_ATTENDANCE_MEMBERS = 500;
 
 export const getByClassAndDate = query({
   args: { classId: v.id("classes"), date: v.string() },
@@ -57,6 +62,8 @@ export const logAttendance = mutation({
   },
   handler: async (ctx, { classId, date, memberIds }) => {
     const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    assertMaxArrayLength(memberIds, MAX_ATTENDANCE_MEMBERS, "Member list");
     await requireOwnClass(ctx, gym._id, classId);
     await Promise.all(memberIds.map((memberId) => requireOwnMember(ctx, gym._id, memberId)));
     const checkedInAt = new Date().toISOString();

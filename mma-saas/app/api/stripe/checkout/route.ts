@@ -1,12 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { currentUser } from "@clerk/nextjs/server";
+import { fetchAction } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
+import { clientIp } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/http";
 
 export async function POST(request: NextRequest) {
+  // checkRateLimit is internalMutation now — this goes through the
+  // checkRateLimitAction wrapper instead of fetchMutation. See
+  // convex/rateLimit.ts for why.
+  const allowed = await fetchAction(api.rateLimit.checkRateLimitAction, {
+    bucket: "checkout",
+    identifier: clientIp(request),
+  });
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many requests — please wait a bit and try again." },
+      { status: 429 }
+    );
+  }
+
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const user = await currentUser();
 
-  const { priceId } = await request.json() as { priceId: string };
+  const body = await readJsonBody<{ priceId?: string }>(request);
+  if (!body || typeof body.priceId !== "string") {
+    return NextResponse.json({ error: "Malformed request." }, { status: 400 });
+  }
+  const { priceId } = body;
 
   const allowedPriceIds = [
     process.env.STRIPE_STARTER_PRICE_ID,

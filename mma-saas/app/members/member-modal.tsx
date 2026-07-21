@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type Member = {
   _id: Id<"members">;
@@ -34,6 +35,7 @@ export default function MemberModal({ member, onClose }: Props) {
   const [smsConsent, setSmsConsent] = useState(false);
   const [consentError, setConsentError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const trimmedPhone = phone.trim();
   const originalPhone = member?.phone ?? "";
@@ -50,6 +52,7 @@ export default function MemberModal({ member, onClose }: Props) {
     }
 
     setSaving(true);
+    setSaveError(null);
     try {
       const smsConsentConfirmed = trimmedPhone === "" ? false : true;
       const smsConsentConfirmedAt =
@@ -76,7 +79,7 @@ export default function MemberModal({ member, onClose }: Props) {
       }
       onClose();
     } catch (err) {
-      console.error("Failed to save member:", err);
+      setSaveError(getErrorMessage(err, "Couldn't save this member — try refreshing the page."));
       setSaving(false);
     }
   }
@@ -148,6 +151,7 @@ export default function MemberModal({ member, onClose }: Props) {
               <option value="inactive">Inactive</option>
             </select>
           </Field>
+          {saveError && <ErrorToast message={saveError} />}
           <div className="flex gap-3 mt-2">
             <button
               type="submit"

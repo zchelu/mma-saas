@@ -1,4 +1,4 @@
-import { mutation, MutationCtx } from "./_generated/server";
+import { internalMutation, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
@@ -32,8 +32,15 @@ async function backfillGymId(
 // gym's data. If that ever legitimately happens, backfill by hand per table
 // instead of via this mutation.
 //
-// Run via: npx convex run migrations:backfillFirstGym '{"clerkUserId":"user_xxx","gymName":"KombatDesk"}'
-export const backfillFirstGym = mutation({
+// Internal — was a public mutation with no auth check, taking an arbitrary
+// clerkUserId as a plain argument. The single-gym refusal guard below is a
+// fragile safety net on its own (only holds until a second gym exists); this
+// should never have been client-callable in the first place. Still runnable
+// exactly the same way via the CLI: npx convex run
+// migrations:backfillFirstGym '{"clerkUserId":"user_xxx","gymName":"KombatDesk"}'
+// — the Convex CLI has deploy-admin access and can invoke internal functions
+// directly, unlike the public client API.
+export const backfillFirstGym = internalMutation({
   args: { clerkUserId: v.string(), gymName: v.string() },
   handler: async (ctx, { clerkUserId, gymName }) => {
     const allGyms = await ctx.db.query("gyms").collect();

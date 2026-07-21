@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import InvoiceModal from "./invoice-modal";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type Invoice = {
   _id: Id<"invoices">;
@@ -19,10 +20,16 @@ export default function InvoicesPage() {
   const invoices = useQuery(api.invoices.getAll);
   const remove = useMutation(api.invoices.remove);
   const [modal, setModal] = useState<null | "add" | Invoice>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function handleDelete(id: Id<"invoices">) {
     if (!confirm("Delete this invoice?")) return;
-    await remove({ id });
+    setDeleteError(null);
+    try {
+      await remove({ id });
+    } catch (err) {
+      setDeleteError(getErrorMessage(err, "Couldn't delete that invoice — try refreshing the page."));
+    }
   }
 
   return (
@@ -41,6 +48,8 @@ export default function InvoicesPage() {
             + New Invoice
           </button>
         </div>
+
+        {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
 
         <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #333333" }}>
           <table className="w-full text-sm">

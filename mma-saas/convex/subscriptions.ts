@@ -1,8 +1,10 @@
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { assertMaxLength } from "./validate";
+import { consumeRateLimit } from "./rateLimit";
 
-export const upsertSubscription = mutation({
+export const upsertSubscription = internalMutation({
   args: {
     clerkUserId: v.string(),
     stripeCustomerId: v.string(),
@@ -40,7 +42,7 @@ export const upsertSubscription = mutation({
 // stripeCustomerId; clerkUserId is attached later by claimGymByCustomer.
 // Never touches clerkUserId on an existing row, since a claim may have
 // already landed before this event does.
-export const upsertUnclaimedSubscription = mutation({
+export const upsertUnclaimedSubscription = internalMutation({
   args: {
     stripeCustomerId: v.string(),
     stripeSubscriptionId: v.string(),
@@ -91,6 +93,16 @@ export const claimGymBySessionId = action({
   handler: async (ctx, { sessionId }): Promise<{ gymId: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
+
+    // Shares the "auth" bucket/ceiling with claimGymByRecoveryToken below —
+    // both verify a credential against Stripe on the caller's behalf, so a
+    // scripted loop guessing/retrying session ids or tokens is bounded
+    // across either path, not just one.
+    const allowed = await ctx.runMutation(internal.rateLimit.checkRateLimit, {
+      bucket: "auth",
+      identifier: `user:${identity.subject}`,
+    });
+    if (!allowed) throw new Error("Too many attempts — please wait a few minutes and try again.");
 
     const res = await fetch(
       `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription`,
@@ -205,13 +217,15 @@ export const claimGymByCustomer = internalMutation({
   },
 });
 
-// Called from app/api/recover/route.ts to pick the right Stripe customer when
-// an email has more than one (e.g. a guest checkout retried after an earlier
-// attempt never got claimed). Stripe's customers.list returns newest-first,
-// so without this check the route would always resolve to the most recent
-// customer and could never recover an older, still-unclaimed purchase sitting
-// behind a newer already-claimed one under the same email.
-export const isCustomerClaimed = query({
+// Internal — only reachable via ctx.runQuery from convex/recoveryAction.ts,
+// which performs the actual Stripe ownership verification. Used to pick the
+// right Stripe customer when an email has more than one (e.g. a guest
+// checkout retried after an earlier attempt never got claimed). Stripe's
+// customers.list returns newest-first, so without this check the action
+// would always resolve to the most recent customer and could never recover
+// an older, still-unclaimed purchase sitting behind a newer already-claimed
+// one under the same email.
+export const isCustomerClaimed = internalQuery({
   args: { stripeCustomerId: v.string() },
   handler: async (ctx, { stripeCustomerId }) => {
     const gym = await ctx.db
@@ -222,13 +236,22 @@ export const isCustomerClaimed = query({
   },
 });
 
-// Called from app/api/recover/route.ts after it has independently verified
-// via the Stripe API that this email belongs to a paying customer. Storing
-// the mapping here (rather than trusting a customerId embedded in the emailed
-// link itself) means the token is opaque and single-use-checkable server-side.
-export const createRecoveryToken = mutation({
+// Internal — only reachable via ctx.runMutation from
+// convex/recoveryAction.ts, after it independently verifies via the Stripe
+// API that this email belongs to a paying, unclaimed customer. Previously a
+// public mutation trusting whatever stripeCustomerId it was handed with no
+// verification at all — anyone could mint a token for ANY customer id
+// (including a real paying customer's) and use it via
+// claimGymByRecoveryToken to link that customer's gym/subscription to their
+// own Clerk account, stealing it before the real owner ever claimed it. The
+// rate limit below is still worth keeping as defense in depth even though
+// this is internal now — it bounds repeated token-minting for the same
+// Stripe customer regardless of caller.
+export const createRecoveryToken = internalMutation({
   args: { token: v.string(), stripeCustomerId: v.string(), expiresAt: v.number() },
   handler: async (ctx, args) => {
+    const allowed = await consumeRateLimit(ctx, "auth", `mint:${args.stripeCustomerId}`);
+    if (!allowed) throw new Error("Too many requests for this account — please try again later.");
     await ctx.db.insert("recoveryTokens", args);
   },
 });
@@ -259,6 +282,12 @@ export const claimGymByRecoveryToken = action({
   handler: async (ctx, { token }): Promise<{ gymId: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
+
+    const allowed = await ctx.runMutation(internal.rateLimit.checkRateLimit, {
+      bucket: "auth",
+      identifier: `user:${identity.subject}`,
+    });
+    if (!allowed) throw new Error("Too many attempts — please wait a few minutes and try again.");
 
     const record = await ctx.runQuery(internal.subscriptions.getRecoveryToken, { token });
     if (!record) throw new Error("This recovery link is invalid.");
@@ -297,6 +326,7 @@ export const getOrCreateGym = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
     const clerkUserId = identity.subject;
+    assertMaxLength(defaultName, 200, "Gym name");
 
     const existing = await ctx.db
       .query("gyms")
@@ -338,7 +368,7 @@ export const getSubscription = query({
   },
 });
 
-export const updatePlanStatusByCustomer = mutation({
+export const updatePlanStatusByCustomer = internalMutation({
   args: { stripeCustomerId: v.string(), planStatus: v.string() },
   handler: async (ctx, { stripeCustomerId, planStatus }) => {
     const gym = await ctx.db

@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../components/app-header";
+import { ErrorToast, getErrorMessage } from "../../components/error-toast";
 
 import { getInitials, getAvatarColor } from "../../lib/avatar";
 
@@ -41,6 +42,7 @@ export default function ClassDetailPage() {
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [addMemberId, setAddMemberId] = useState("");
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const enrolledIds = useMemo(
     () => new Set((enrolled ?? []).map((m) => m._id)),
@@ -72,20 +74,22 @@ export default function ClassDetailPage() {
 
   async function handleEnroll() {
     if (!addMemberId) return;
+    setActionError(null);
     try {
       await enroll({ memberId: addMemberId as Id<"members">, classId });
       setAddMemberId("");
-    } catch {
-      alert("Couldn't add that member — try refreshing the page.");
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Couldn't add that member — try refreshing the page."));
     }
   }
 
   async function handleUnenroll(memberId: Id<"members">) {
     if (!confirm("Remove this member from the class?")) return;
+    setActionError(null);
     try {
       await unenroll({ memberId, classId });
-    } catch {
-      alert("Couldn't remove that member — try refreshing the page.");
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Couldn't remove that member — try refreshing the page."));
     }
   }
 
@@ -93,8 +97,11 @@ export default function ClassDetailPage() {
     const newIds = [...checked].filter((id) => !alreadyLoggedIds.has(id as Id<"members">)) as Id<"members">[];
     if (newIds.length === 0) return;
     setSavingAttendance(true);
+    setActionError(null);
     try {
       await logAttendance({ classId, date: attendanceDate, memberIds: newIds });
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Couldn't save attendance — try refreshing the page."));
     } finally {
       setSavingAttendance(false);
     }
@@ -141,6 +148,8 @@ export default function ClassDetailPage() {
             {gymClass.dayOfWeek} at {gymClass.time} · {gymClass.instructor}
           </p>
         </div>
+
+        {actionError && <div className="mb-8"><ErrorToast message={actionError} /></div>}
 
         <Section title={`Enrolled Members (${enrolled.length})`}>
           {enrolled.length === 0 ? (

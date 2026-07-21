@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type Invoice = {
   _id: Id<"invoices">;
@@ -27,18 +28,25 @@ export default function InvoiceModal({ invoice, onClose }: Props) {
   const [status, setStatus] = useState<"paid" | "unpaid">(invoice?.status ?? "unpaid");
   const [dueDate, setDueDate] = useState(invoice?.dueDate ?? "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!memberId) return;
     setSaving(true);
-    const fields = { memberId: memberId as Id<"members">, amount: Number(amount), status, dueDate };
-    if (invoice) {
-      await update({ id: invoice._id, ...fields });
-    } else {
-      await add(fields);
+    setSaveError(null);
+    try {
+      const fields = { memberId: memberId as Id<"members">, amount: Number(amount), status, dueDate };
+      if (invoice) {
+        await update({ id: invoice._id, ...fields });
+      } else {
+        await add(fields);
+      }
+      onClose();
+    } catch (err) {
+      setSaveError(getErrorMessage(err, "Couldn't save this invoice — try refreshing the page."));
+      setSaving(false);
     }
-    onClose();
   }
 
   return (
@@ -68,6 +76,7 @@ export default function InvoiceModal({ invoice, onClose }: Props) {
           <Field label="Due Date">
             <input required type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
           </Field>
+          {saveError && <ErrorToast message={saveError} />}
           <div className="flex gap-3 mt-2">
             <button
               type="submit"
