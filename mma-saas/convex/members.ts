@@ -149,7 +149,7 @@ export const checkIn = mutation({
     if (!member || member.gymId !== gymId) throw new Error("Member not found");
     const now = Date.now();
     await ctx.db.patch(id, { lastVisit: new Date(now).toISOString(), status: "active", lastRetentionTextAt: undefined });
-    await ctx.db.insert("checkIns", { memberId: id, timestamp: now });
+    await ctx.db.insert("checkIns", { memberId: id, gymId, timestamp: now });
   },
 });
 

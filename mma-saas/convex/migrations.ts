@@ -198,6 +198,59 @@ export const backfillLegacyRanks = internalMutation({
   },
 });
 
+// One-time backfill: populates checkIns.gymId for rows written before the
+// field existed, by resolving each row's memberId to that member's gymId.
+// Unlike backfillFirstGym, this needs no single-tenant safety check — each
+// checkIns row already encodes which member (and thus which gym) it belongs
+// to via memberId, so there's no cross-gym misattribution risk even with
+// multiple gyms now existing. Safe to re-run — only touches rows missing
+// gymId, never overwrites an existing value. A row is left unbackfilled if
+// its member has no gymId of its own yet (predates backfillFirstGym) or was
+// deleted — both counted separately below so a non-zero total is visible
+// rather than silently skipped.
+//
+// Run manually via the CLI:
+//   npx convex run migrations:backfillCheckInsGymId '{}'
+export const backfillCheckInsGymId = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("checkIns").collect();
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+    let skippedNoMember = 0;
+    let skippedMemberNoGymId = 0;
+
+    for (const row of rows) {
+      if (row.gymId !== undefined) {
+        skippedAlreadySet++;
+        continue;
+      }
+
+      const member = await ctx.db.get(row.memberId);
+      if (!member) {
+        skippedNoMember++;
+        continue;
+      }
+      if (!member.gymId) {
+        skippedMemberNoGymId++;
+        continue;
+      }
+
+      await ctx.db.patch(row._id, { gymId: member.gymId });
+      updated++;
+    }
+
+    return {
+      totalCheckIns: rows.length,
+      updated,
+      skippedAlreadySet,
+      skippedNoMember,
+      skippedMemberNoGymId,
+    };
+  },
+});
+
 // Deletes every fake member scripts/seed-legacy-members.js created (matched
 // by its @legacy-seed.test email suffix) along with any ranks rows already
 // backfilled for them. adminImportBatch dedupes by email, so re-running the

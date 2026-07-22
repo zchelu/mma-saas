@@ -57,7 +57,13 @@ export default defineSchema({
   checkIns: defineTable({
     memberId: v.id("members"),
     timestamp: v.number(),
-  }).index("by_member", ["memberId"]),
+    // Optional until a backfill migration runs for pre-existing rows —
+    // see convex/migrations.ts for the same pattern on members/classes/invoices.
+    gymId: v.optional(v.id("gyms")),
+  })
+    .index("by_member", ["memberId"])
+    .index("by_gym", ["gymId"])
+    .index("by_gym_timestamp", ["gymId", "timestamp"]),
   recoveryTokens: defineTable({
     token: v.string(),
     stripeCustomerId: v.string(),

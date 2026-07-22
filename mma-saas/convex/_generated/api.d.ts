@@ -9,6 +9,7 @@
  */
 
 import type * as attendance from "../attendance.js";
+import type * as beltTaxonomy from "../beltTaxonomy.js";
 import type * as classes from "../classes.js";
 import type * as crons from "../crons.js";
 import type * as enrollments from "../enrollments.js";
@@ -17,6 +18,7 @@ import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
 import type * as members from "../members.js";
 import type * as migrations from "../migrations.js";
+import type * as promotionCriteria from "../promotionCriteria.js";
 import type * as rateLimit from "../rateLimit.js";
 import type * as recoveryAction from "../recoveryAction.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
@@ -33,6 +35,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   attendance: typeof attendance;
+  beltTaxonomy: typeof beltTaxonomy;
   classes: typeof classes;
   crons: typeof crons;
   enrollments: typeof enrollments;
@@ -41,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   invoices: typeof invoices;
   members: typeof members;
   migrations: typeof migrations;
+  promotionCriteria: typeof promotionCriteria;
   rateLimit: typeof rateLimit;
   recoveryAction: typeof recoveryAction;
   sendRetentionTexts: typeof sendRetentionTexts;
