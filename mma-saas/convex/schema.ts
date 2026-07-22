@@ -60,10 +60,19 @@ export default defineSchema({
     // Optional until a backfill migration runs for pre-existing rows —
     // see convex/migrations.ts for the same pattern on members/classes/invoices.
     gymId: v.optional(v.id("gyms")),
+    // Set only by offline-queue replays — the moment the member actually
+    // scanned client-side, distinct from `timestamp` (server insert time).
+    // Undefined for live/online kiosk taps.
+    clientScannedAt: v.optional(v.number()),
+    // Client-generated key from the offline check-in queue, so a retried
+    // mutation call after a dropped ack doesn't insert a second row for
+    // the same physical scan. Undefined for live/online taps.
+    idempotencyKey: v.optional(v.string()),
   })
     .index("by_member", ["memberId"])
     .index("by_gym", ["gymId"])
-    .index("by_gym_timestamp", ["gymId", "timestamp"]),
+    .index("by_gym_timestamp", ["gymId", "timestamp"])
+    .index("by_idempotency_key", ["idempotencyKey"]),
   recoveryTokens: defineTable({
     token: v.string(),
     stripeCustomerId: v.string(),

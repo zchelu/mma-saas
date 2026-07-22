@@ -139,17 +139,52 @@ export const getActiveForGym = query({
 // reliable caller identity on a public kiosk mutation) so a scripted loop
 // against one kiosk can't hammer the table; 60/5min is far above any real
 // kiosk's walk-in rate.
+//
+// idempotencyKey/clientScannedAt are only sent by the offline check-in
+// queue — live/online taps omit both and behave exactly as before.
+// idempotencyKey is checked first and short-circuits everything else,
+// including the rate limiter, so a replayed queue item that already
+// succeeded doesn't burn rate-limit budget or re-run side effects.
+// clientScannedAt, when present, is the authoritative event time for the
+// once-per-day check and for lastVisit — using server receive-time instead
+// would misattribute a check-in queued late one day to whichever day it
+// happens to replay on.
 export const checkIn = mutation({
-  args: { id: v.id("members"), gymId: v.id("gyms") },
-  handler: async (ctx, { id, gymId }) => {
+  args: {
+    id: v.id("members"),
+    gymId: v.id("gyms"),
+    idempotencyKey: v.optional(v.string()),
+    clientScannedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, { id, gymId, idempotencyKey, clientScannedAt }) => {
+    if (idempotencyKey) {
+      const existing = await ctx.db
+        .query("checkIns")
+        .withIndex("by_idempotency_key", (q) => q.eq("idempotencyKey", idempotencyKey))
+        .unique();
+      if (existing) return;
+    }
+
     const allowed = await consumeRateLimit(ctx, "checkin", gymId);
     if (!allowed) throw new Error("Too many check-ins right now — please try again in a few minutes.");
 
     const member = await ctx.db.get(id);
     if (!member || member.gymId !== gymId) throw new Error("Member not found");
+
     const now = Date.now();
-    await ctx.db.patch(id, { lastVisit: new Date(now).toISOString(), status: "active", lastRetentionTextAt: undefined });
-    await ctx.db.insert("checkIns", { memberId: id, gymId, timestamp: now });
+    const eventIso = new Date(clientScannedAt ?? now).toISOString();
+    const alreadyVisitedToday =
+      !!member.lastVisit && member.lastVisit.slice(0, 10) === eventIso.slice(0, 10);
+
+    if (!alreadyVisitedToday) {
+      await ctx.db.patch(id, {
+        lastVisit: eventIso,
+        status: "active",
+        lastRetentionTextAt: undefined,
+      });
+    }
+
+    await ctx.db.insert("checkIns", { memberId: id, gymId, timestamp: now, clientScannedAt, idempotencyKey });
   },
 });
 
