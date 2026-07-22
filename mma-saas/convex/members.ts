@@ -178,6 +178,28 @@ export const getActiveForGym = query({
   },
 });
 
+// No auth — public, called by the kiosk before checkIn to resolve a
+// scanned QR/card token to a member. The token itself is the credential
+// (40 random hex chars, effectively unguessable), so this is safe to leave
+// open the same way getActiveForGym/checkIn are. Returns null on no match
+// rather than throwing, since a bad/stale scan is an expected kiosk case,
+// not an error. Also returns null if the matched member has no gymId
+// (pre-multi-tenancy row that predates backfillFirstGym) — there'd be
+// nothing valid to hand back for the kiosk's follow-up checkIn call, and
+// this getting hit at all should be rare-to-impossible on real data since
+// every current member already has a gymId.
+export const resolveCheckInToken = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const member = await ctx.db
+      .query("members")
+      .withIndex("by_check_in_token", (q) => q.eq("checkInToken", token))
+      .unique();
+    if (!member || !member.gymId) return null;
+    return { memberId: member._id, gymId: member.gymId, name: member.name };
+  },
+});
+
 // No auth — intentionally public for the kiosk check-in screen.
 // gymId is required so a stale/spoofed member id from another gym can't be checked in
 // through this gym's kiosk. Rate-limited per gym (not per caller — there's no

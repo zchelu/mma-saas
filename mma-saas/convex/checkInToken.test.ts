@@ -86,3 +86,19 @@ test("after regenerating, the old token no longer resolves via by_check_in_token
 
   expect(matches).toHaveLength(0);
 });
+
+test("resolveCheckInToken returns the correct member for a valid token, null for an unknown one", async () => {
+  const t = convexTest(schema, modules);
+  const { gymId, memberId } = await seedGymAndMember(t);
+
+  const TOKEN = "a-real-token-value";
+  await t.run(async (ctx) => {
+    await ctx.db.patch(memberId, { checkInToken: TOKEN, checkInTokenIssuedAt: Date.now() });
+  });
+
+  const resolved = await t.query(api.members.resolveCheckInToken, { token: TOKEN });
+  expect(resolved).toEqual({ memberId, gymId, name: "Test Member" });
+
+  const unresolved = await t.query(api.members.resolveCheckInToken, { token: "not-a-real-token" });
+  expect(unresolved).toBeNull();
+});
