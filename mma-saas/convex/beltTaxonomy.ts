@@ -50,8 +50,13 @@ export function validateRank(
     return { valid: false, reason: `Unknown discipline "${discipline}"` };
   }
 
-  const trimmed = belt.trim().toLowerCase();
-  const rank = category.ranks.find((r) => r.canonical.toLowerCase() === trimmed);
+  // members.beltRank is always stored in canonicalLabel()'s display format
+  // ("No Rank", "Grey/White"), never the raw canonical key ("no_rank",
+  // "grey_white") — normalize spaces/slashes/dashes back to underscores
+  // before comparing, or every compound-key belt (anything but a single
+  // word) would falsely fail to match its own canonical entry.
+  const normalized = belt.trim().toLowerCase().replace(/[\s/-]+/g, "_");
+  const rank = category.ranks.find((r) => r.canonical.toLowerCase() === normalized);
   if (!rank) {
     return { valid: false, reason: `"${belt}" is not a recognized ${discipline} belt` };
   }

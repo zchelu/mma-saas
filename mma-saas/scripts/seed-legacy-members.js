@@ -32,12 +32,22 @@
 const { execFileSync } = require("child_process");
 const path = require("path");
 
+// Invoke the Convex CLI's JS entrypoint directly with node, instead of
+// "npx convex ...": execFileSync("npx", ...) throws ENOENT on Windows
+// (CreateProcess can't resolve the .cmd extension without a shell), naming
+// npx.cmd directly throws EINVAL instead (.cmd files need cmd.exe to launch
+// them, not a direct process spawn), and shell: true is a JSON-injection/
+// quoting risk — cmd.exe's argument re-joining silently strips the double
+// quotes the JSON payload below relies on. Spawning node on a real .js file
+// with a plain argv array sidesteps all of it, on every platform.
+const CONVEX_BIN = path.join(__dirname, "..", "node_modules", "convex", "bin", "main.js");
+
 const ROWS = [
   // beltRank + plan that maps cleanly to a discipline via detectDiscipline()
   { name: "[SEED] Marcus Fundamentals", email: "marcus.fundamentals@legacy-seed.test", plan: "BJJ Fundamentals", beltRank: "Blue", status: "active" },
   { name: "[SEED] Priya Kids", email: "priya.kids@legacy-seed.test", plan: "BJJ Kids Program", beltRank: "Yellow", status: "active" },
   { name: "[SEED] Devon Thai", email: "devon.thai@legacy-seed.test", plan: "Muay Thai Unlimited", beltRank: "No Rank", status: "active" },
-  { name: "[SEED] Grace Wrestler", email: "grace.wrestler@legacy-seed.test", plan: "Wrestling Club", beltRank: "N/A", status: "active" },
+  { name: "[SEED] Grace Wrestler", email: "grace.wrestler@legacy-seed.test", plan: "Wrestling Club", beltRank: "No Rank", status: "active" },
   { name: "[SEED] Omar Cage", email: "omar.cage@legacy-seed.test", plan: "MMA Unlimited", beltRank: "No Rank", status: "active" },
 
   // beltRank present, but plan has no discipline signal for detectDiscipline()
@@ -72,16 +82,17 @@ function main() {
     console.log(`  - ${row.name} | plan="${row.plan}" | ${beltNote}`);
   }
 
-  const runArgs = ["convex", "run", "members:adminImportBatch", JSON.stringify({ gymId, rows: ROWS })];
+  const payload = JSON.stringify({ gymId, rows: ROWS });
+  const runArgs = [CONVEX_BIN, "run", "members:adminImportBatch", payload];
 
   if (!commit) {
     console.log(`\nDry run only — nothing written. Re-run with --commit to actually seed.`);
-    console.log(`Would run: npx ${runArgs.join(" ")}`);
+    console.log(`Would run: npx convex run members:adminImportBatch '${payload}'`);
     return;
   }
 
   console.log(`\nWriting to dev deployment...`);
-  const out = execFileSync("npx", runArgs, { encoding: "utf8", cwd: path.join(__dirname, "..") });
+  const out = execFileSync(process.execPath, runArgs, { encoding: "utf8", cwd: path.join(__dirname, "..") });
   console.log(out.trim());
 }
 

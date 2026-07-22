@@ -132,6 +132,15 @@ function detectPlatform(headers) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BATCH_SIZE = 25;
+// Invoke the Convex CLI's JS entrypoint directly with node, instead of
+// "npx convex ...": execFileSync("npx", ...) throws ENOENT on Windows
+// (CreateProcess can't resolve the .cmd extension without a shell), naming
+// npx.cmd directly throws EINVAL instead (.cmd files need cmd.exe to launch
+// them, not a direct process spawn), and shell: true is a JSON-injection/
+// quoting risk — cmd.exe's argument re-joining silently strips the double
+// quotes the JSON payload below relies on. Spawning node on a real .js file
+// with a plain argv array sidesteps all of it, on every platform.
+const CONVEX_BIN = path.join(__dirname, "..", "node_modules", "convex", "bin", "main.js");
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -425,14 +434,14 @@ function printSummary({ clean, flagged, skipped, phoneCount, noEmailCount }, fla
 
 function runBatch(gymId, rows, prod) {
   const args = [
-    "convex",
+    CONVEX_BIN,
     "run",
     "members:adminImportBatch",
     JSON.stringify({ gymId, rows }),
     ...(prod ? ["--prod"] : []),
   ];
   try {
-    const out = execFileSync("npx", args, { encoding: "utf8", cwd: path.join(__dirname, "..") });
+    const out = execFileSync(process.execPath, args, { encoding: "utf8", cwd: path.join(__dirname, "..") });
     console.log(out.trim());
     return true;
   } catch (e) {

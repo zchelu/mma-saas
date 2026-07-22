@@ -1,6 +1,7 @@
 import { internalMutation, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { validateRank, type Discipline } from "./beltTaxonomy";
 
 // Shared by every table that has an optional gymId field awaiting backfill.
 async function backfillGymId(
@@ -91,5 +92,139 @@ export const backfillFirstGym = internalMutation({
       invoicesUpdated: invoices.updated,
       totalInvoices: invoices.total,
     };
+  },
+});
+
+// Duplicated from scripts/import-members.js's detectDiscipline() rather than
+// imported from it — that script is a CommonJS CLI entrypoint with Node-only
+// imports at module scope (fs/csv-parse/child_process) that can't be pulled
+// into a Convex function bundle. Keep the keyword list in sync by hand if it
+// ever changes there.
+function detectDiscipline(programRaw: string | undefined): Discipline | undefined {
+  const p = (programRaw || "").toLowerCase();
+  if (p.includes("bjj") && p.includes("kid")) return "bjj_kids";
+  if (p.includes("muay")) return "muay_thai";
+  if (p.includes("wrestl")) return "wrestling";
+  if (p.includes("mma")) return "mma";
+  if (p.includes("bjj")) return "bjj_adult";
+  return undefined;
+}
+
+// One-time backfill: infers a `ranks` row for every existing members row
+// that has a beltRank but predates the ranks table (imported before
+// adminImportBatch started writing ranks rows, or hand-typed via the
+// dashboard, which has never validated beltRank against the taxonomy).
+// Best-effort only, per the decision that scoped this: re-derives discipline
+// from members.plan the same way the CSV importer does, and refuses to
+// guess — a member is left with zero ranks rows (not a guessed one) if:
+//   - plan text doesn't map to a known discipline
+//   - beltRank doesn't validate against that discipline's taxonomy
+//     (validateRank — the same check adminImportBatch uses)
+//   - the member has no gymId yet (predates backfillFirstGym; ranks.gymId
+//     is required, unlike members.gymId)
+// Safe unscoped, same reasoning as markInactiveMembers below: each ranks row
+// only ever uses that member's own gymId, never compares across gyms. Safe
+// to re-run — skips any member that already has a ranks row for the
+// detected discipline.
+//
+// Run manually, like backfillFirstGym above — not wired to any automatic
+// trigger:
+//   npx convex run migrations:backfillLegacyRanks '{}'
+export const backfillLegacyRanks = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const members = await ctx.db.query("members").collect();
+
+    let backfilled = 0;
+    let skippedNoBeltRank = 0;
+    let skippedNoDiscipline = 0;
+    let skippedNoGymId = 0;
+    let skippedInvalidBelt = 0;
+    let skippedAlreadyBackfilled = 0;
+
+    for (const member of members) {
+      if (!member.beltRank) {
+        skippedNoBeltRank++;
+        continue;
+      }
+
+      const discipline = detectDiscipline(member.plan);
+      if (!discipline) {
+        skippedNoDiscipline++;
+        continue;
+      }
+
+      if (!member.gymId) {
+        skippedNoGymId++;
+        continue;
+      }
+
+      const existing = await ctx.db
+        .query("ranks")
+        .withIndex("by_member_discipline", (q) =>
+          q.eq("memberId", member._id).eq("discipline", discipline)
+        )
+        .first();
+      if (existing) {
+        skippedAlreadyBackfilled++;
+        continue;
+      }
+
+      const check = validateRank(discipline, member.beltRank);
+      if (!check.valid) {
+        skippedInvalidBelt++;
+        continue;
+      }
+
+      await ctx.db.insert("ranks", {
+        memberId: member._id,
+        gymId: member.gymId,
+        discipline,
+        currentBelt: check.canonicalBelt,
+        promotionDate: member.beltPromotionDate,
+      });
+      backfilled++;
+    }
+
+    return {
+      totalMembers: members.length,
+      backfilled,
+      skippedNoBeltRank,
+      skippedNoDiscipline,
+      skippedNoGymId,
+      skippedInvalidBelt,
+      skippedAlreadyBackfilled,
+    };
+  },
+});
+
+// Deletes every fake member scripts/seed-legacy-members.js created (matched
+// by its @legacy-seed.test email suffix) along with any ranks rows already
+// backfilled for them. adminImportBatch dedupes by email, so re-running the
+// seed script after editing its ROWS data silently skips already-seeded
+// rows instead of updating them — this clears the slate so a seed +
+// backfill test cycle can be re-run from scratch. Dev-only in practice
+// (nothing outside seed-legacy-members.js ever writes this email suffix),
+// but not gym-scoped — matches every gym, same as markInactiveMembers.
+export const deleteLegacySeedData = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const members = await ctx.db.query("members").collect();
+    const seeded = members.filter((m) => m.email?.endsWith("@legacy-seed.test"));
+
+    let ranksDeleted = 0;
+    for (const member of seeded) {
+      const ranks = await ctx.db
+        .query("ranks")
+        .withIndex("by_member", (q) => q.eq("memberId", member._id))
+        .collect();
+      for (const rank of ranks) {
+        await ctx.db.delete(rank._id);
+        ranksDeleted++;
+      }
+      await ctx.db.delete(member._id);
+    }
+
+    return { membersDeleted: seeded.length, ranksDeleted };
   },
 });
