@@ -182,7 +182,15 @@ export const sendManualRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId} is not an active Elite gym — skipping manual retention texts`);
       return;
     }
-    await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    if (succeeded === 0) {
+      // Mirrors sendRetentionTextsForGym's fix: triggerRetentionTexts claims
+      // the run lock synchronously before scheduling this action, so a
+      // systemic failure here would otherwise burn the manual-send cooldown
+      // the same way it did on the automatic path.
+      console.error(`Gym ${gymId}: manual retention run had ${attempted} attempted sends and 0 successes — releasing run lock`);
+      await ctx.runMutation(internal.sendRetentionTexts.releaseRetentionRunLock, { gymId });
+    }
   },
 });
 
