@@ -3,10 +3,10 @@ import { LegalPage } from "@/app/components/legal-page";
 import { readLegalContent } from "@/app/lib/legal-content";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | KombatDesk",
-  description: "KombatDesk's Privacy Policy.",
+  title: "Cookie Policy | KombatDesk",
+  description: "KombatDesk's Cookie Policy.",
 };
 
-export default function PrivacyPage() {
-  return <LegalPage html={readLegalContent("privacy-policy.html")} />;
+export default function CookiesPage() {
+  return <LegalPage html={readLegalContent("cookie-policy.html")} />;
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import PricingCards from "../components/pricing-cards";
+import { Footer } from "../components/footer";
 
 export default async function PricingPage() {
   const user = await currentUser();
@@ -46,9 +47,7 @@ export default async function PricingPage() {
         />
       </main>
 
-      <footer className="px-8 py-5 text-center text-xs" style={{ borderTop: "1px solid #333333", color: "#555555" }}>
-        © {new Date().getFullYear()} KombatDesk. All rights reserved.
-      </footer>
+      <Footer />
     </div>
   );
 }

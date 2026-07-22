@@ -12,6 +12,7 @@ const isPublicRoute = createRouteMatcher([
   '/recover(.*)',
   '/terms(.*)',
   '/privacy(.*)',
+  '/cookies(.*)',
   '/api/stripe/webhook',
   '/api/stripe/checkout',
   '/api/recover',

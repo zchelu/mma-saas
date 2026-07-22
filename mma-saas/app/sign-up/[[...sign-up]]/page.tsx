@@ -1,4 +1,4 @@
-import { SignUp } from '@clerk/nextjs'
+import { SignUpGate } from "./signup-gate";
 
 export default async function SignUpPage({
   searchParams,
@@ -9,8 +9,8 @@ export default async function SignUpPage({
   const isSafeRedirect = !!redirect_url && redirect_url.startsWith("/") && !redirect_url.startsWith("//");
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <SignUp fallbackRedirectUrl={isSafeRedirect ? redirect_url : "/dashboard"} />
+    <div className="min-h-screen flex items-center justify-center px-6" style={{ backgroundColor: "#0D0D0D" }}>
+      <SignUpGate redirectUrl={isSafeRedirect ? redirect_url : undefined} />
     </div>
   )
 }

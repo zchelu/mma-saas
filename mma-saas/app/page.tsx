@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
+import { Footer } from "./components/footer";
 
 export default async function Home() {
   const user = await currentUser();
@@ -127,12 +128,7 @@ export default async function Home() {
         </div>
       </main>
 
-      <footer
-        className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 px-8 py-5 text-center text-xs"
-        style={{ borderTop: "1px solid #333333", color: "#555555" }}
-      >
-        <span>© {new Date().getFullYear()} KombatDesk. All rights reserved.</span>
-      </footer>
+      <Footer />
     </div>
   );
 }
