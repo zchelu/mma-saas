@@ -73,14 +73,36 @@ export const claimRetentionRunLock = internalMutation({
   },
 });
 
-async function sendRetentionTextsCore(ctx: ActionCtx, gymId: Id<"gyms">, gymName: string) {
+// Counterpart to claimRetentionRunLock — clears the claim so a run that
+// failed systemically (bad/missing Twilio credentials, Twilio outage) doesn't
+// leave a gym locked out of retries for the full cooldown window. Only called
+// when a run achieved zero successful sends; a run with at least one success
+// keeps its claim, since the successful sends are already protected from
+// re-texting by the per-member 7-day cap and don't need an immediate retry.
+export const releaseRetentionRunLock = internalMutation({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    await ctx.db.patch(gymId, { lastRetentionRunAt: undefined });
+  },
+});
+
+// Reports how many sends were attempted vs actually succeeded so callers that
+// hold the run-lock (sendRetentionTextsForGym below) can tell a systemic
+// failure (bad credentials, Twilio outage — zero successes) apart from
+// normal partial failure (a few bad numbers among an otherwise healthy
+// batch), and release the lock only for the former.
+async function sendRetentionTextsCore(
+  ctx: ActionCtx,
+  gymId: Id<"gyms">,
+  gymName: string
+): Promise<{ attempted: number; succeeded: number }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
     console.error("Missing Twilio env vars — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER");
-    return;
+    return { attempted: 0, succeeded: 0 };
   }
 
   const atRisk = await ctx.runQuery(internal.sendRetentionTexts.getAtRiskMembers, { gymId });
@@ -91,6 +113,8 @@ async function sendRetentionTextsCore(ctx: ActionCtx, gymId: Id<"gyms">, gymName
 
   const credentials = btoa(`${accountSid}:${authToken}`);
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+
+  let succeeded = 0;
 
   await Promise.all(members.map(async (member) => {
     const firstName = member.name.trim().split(/\s+/)[0];
@@ -109,6 +133,7 @@ async function sendRetentionTextsCore(ctx: ActionCtx, gymId: Id<"gyms">, gymName
       if (res.ok) {
         console.log(`SMS sent to ${member.name} (${member.phone})`);
         await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, { memberId: member._id });
+        succeeded++;
       } else {
         const text = await res.text();
         console.error(`Failed for ${member.name}: ${text}`);
@@ -117,6 +142,8 @@ async function sendRetentionTextsCore(ctx: ActionCtx, gymId: Id<"gyms">, gymName
       console.error(`Error sending to ${member.name}:`, e);
     }
   }));
+
+  return { attempted: members.length, succeeded };
 }
 
 // Automated cron path — Pro/Elite only. Automation is the paid differentiator;
@@ -134,7 +161,14 @@ export const sendRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId}: retention run cooldown active — skipping automated run`);
       return;
     }
-    await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    if (succeeded === 0) {
+      // Zero successes out of a non-empty attempt (or a config error before
+      // any attempt) means the failure is systemic, not a few bad numbers —
+      // don't let it burn the gym's cooldown and block a legitimate retry.
+      console.error(`Gym ${gymId}: retention run had ${attempted} attempted sends and 0 successes — releasing run lock`);
+      await ctx.runMutation(internal.sendRetentionTexts.releaseRetentionRunLock, { gymId });
+    }
   },
 });
 
