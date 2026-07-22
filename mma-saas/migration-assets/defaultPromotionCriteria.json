@@ -1,0 +1,61 @@
+{
+  "_readme": "Draft default promotion criteria, keyed by the same discipline/canonical-belt values as beltTaxonomy.json. NOT wired to anything live yet - this is data for a future per-gym seed script to copy into the `promotionCriteria` table (which requires a gymId per row; that gets filled in at insert time, not here). 'belt' in each entry is the rank being promoted INTO, matching the convention documented on schema.ts's promotionCriteria table. requiredSessions/requiredDaysAtRank are rough, defensible industry-norm defaults for a typical independent gym - every gym owner should be able to override these per-belt once the real UI for that exists; nothing here is meant to be authoritative.",
+
+  "bjj_adult": {
+    "notes": "Adult BJJ promotion timelines vary a lot by gym/instructor - these are rough averages (rounded), not IBJJF minimums. requiredDaysAtRank is the floor; requiredSessions assumes roughly 2-3x/week average attendance over that period.",
+    "criteria": [
+      { "belt": "white", "requiredSessions": 0, "requiredDaysAtRank": 0 },
+      { "belt": "blue", "requiredSessions": 100, "requiredDaysAtRank": 365 },
+      { "belt": "purple", "requiredSessions": 150, "requiredDaysAtRank": 730 },
+      { "belt": "brown", "requiredSessions": 150, "requiredDaysAtRank": 545 },
+      { "belt": "black", "requiredSessions": 120, "requiredDaysAtRank": 365 }
+    ]
+  },
+
+  "bjj_kids": {
+    "notes": "Kids progress faster and on shorter cycles than adults - evaluation leans more on attendance/behavior/basic skill checks than pure mat time. Numbers below are a flat default across the whole 12-belt IBJJF kids progression; a real gym would likely scale these up slightly for the older orange/green brackets, which this draft doesn't attempt to model.",
+    "criteria": [
+      { "belt": "grey_white", "requiredSessions": 0, "requiredDaysAtRank": 0 },
+      { "belt": "grey", "requiredSessions": 40, "requiredDaysAtRank": 90 },
+      { "belt": "grey_black", "requiredSessions": 40, "requiredDaysAtRank": 90 },
+      { "belt": "yellow_white", "requiredSessions": 40, "requiredDaysAtRank": 90 },
+      { "belt": "yellow", "requiredSessions": 40, "requiredDaysAtRank": 90 },
+      { "belt": "yellow_black", "requiredSessions": 40, "requiredDaysAtRank": 90 },
+      { "belt": "orange_white", "requiredSessions": 45, "requiredDaysAtRank": 100 },
+      { "belt": "orange", "requiredSessions": 45, "requiredDaysAtRank": 100 },
+      { "belt": "orange_black", "requiredSessions": 45, "requiredDaysAtRank": 100 },
+      { "belt": "green_white", "requiredSessions": 50, "requiredDaysAtRank": 120 },
+      { "belt": "green", "requiredSessions": 50, "requiredDaysAtRank": 120 },
+      { "belt": "green_black", "requiredSessions": 50, "requiredDaysAtRank": 120 }
+    ]
+  },
+
+  "muay_thai": {
+    "notes": "Most gyms use no_rank (see beltTaxonomy.json) and have no promotion criteria at all - those rows are included at 0/0 for completeness, not because a real gym would enforce them. The armband progression only applies to gyms that have opted into that optional system.",
+    "criteria": [
+      { "belt": "no_rank", "requiredSessions": 0, "requiredDaysAtRank": 0 },
+      { "belt": "white_armband", "requiredSessions": 0, "requiredDaysAtRank": 0 },
+      { "belt": "yellow_armband", "requiredSessions": 60, "requiredDaysAtRank": 90 },
+      { "belt": "orange_armband", "requiredSessions": 60, "requiredDaysAtRank": 90 },
+      { "belt": "green_armband", "requiredSessions": 70, "requiredDaysAtRank": 120 },
+      { "belt": "blue_armband", "requiredSessions": 70, "requiredDaysAtRank": 120 },
+      { "belt": "brown_armband", "requiredSessions": 80, "requiredDaysAtRank": 150 },
+      { "belt": "red_armband", "requiredSessions": 80, "requiredDaysAtRank": 150 },
+      { "belt": "black_armband", "requiredSessions": 100, "requiredDaysAtRank": 180 }
+    ]
+  },
+
+  "wrestling": {
+    "notes": "No rank system exists in wrestling (see beltTaxonomy.json) - included only so every discipline has a matching entry; a gym should never actually populate this table for wrestling.",
+    "criteria": [
+      { "belt": "no_rank", "requiredSessions": 0, "requiredDaysAtRank": 0 }
+    ]
+  },
+
+  "mma": {
+    "notes": "No rank system exists for MMA itself (see beltTaxonomy.json) - included only so every discipline has a matching entry; a gym should never actually populate this table for MMA.",
+    "criteria": [
+      { "belt": "no_rank", "requiredSessions": 0, "requiredDaysAtRank": 0 }
+    ]
+  }
+}
