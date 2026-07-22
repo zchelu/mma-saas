@@ -2,6 +2,7 @@ import { internalMutation, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { validateRank, type Discipline } from "./beltTaxonomy";
+import { generateUniqueCheckInToken } from "./members";
 
 // Shared by every table that has an optional gymId field awaiting backfill.
 async function backfillGymId(
@@ -92,6 +93,39 @@ export const backfillFirstGym = internalMutation({
       invoicesUpdated: invoices.updated,
       totalInvoices: invoices.total,
     };
+  },
+});
+
+// One-time backfill: assigns a checkInToken/checkInTokenIssuedAt to every
+// existing member missing one — every member seeded/imported before
+// regenerateCheckInToken existed has neither field set. Reuses
+// generateUniqueCheckInToken (convex/members.ts) so the collision-check
+// against by_check_in_token is identical to the one the real mutation uses,
+// not a separate ad-hoc implementation that could drift out of sync. Safe to
+// re-run — only touches members with no checkInToken yet.
+//
+// Run manually via the CLI:
+//   npx convex run migrations:backfillCheckInTokens '{}'
+export const backfillCheckInTokens = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const members = await ctx.db.query("members").collect();
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+
+    for (const member of members) {
+      if (member.checkInToken !== undefined) {
+        skippedAlreadySet++;
+        continue;
+      }
+
+      const token = await generateUniqueCheckInToken(ctx);
+      await ctx.db.patch(member._id, { checkInToken: token, checkInTokenIssuedAt: Date.now() });
+      updated++;
+    }
+
+    return { totalMembers: members.length, updated, skippedAlreadySet };
   },
 });
 
