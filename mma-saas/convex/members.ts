@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
+import { validateRank, disciplineValidator } from "./beltTaxonomy";
 
 export const getAll = query({
   args: {},
@@ -236,6 +237,8 @@ export const adminImportBatch = internalMutation({
         beltRank: v.optional(v.string()),
         joinDate: v.optional(v.string()),
         beltPromotionDate: v.optional(v.string()),
+        discipline: v.optional(disciplineValidator),
+        stripes: v.optional(v.number()),
       })
     ),
   },
@@ -260,6 +263,7 @@ export const adminImportBatch = internalMutation({
       name: string;
       email?: string;
       message?: string;
+      rankWarning?: string;
     }> = [];
 
     for (const row of rows) {
@@ -271,7 +275,7 @@ export const adminImportBatch = internalMutation({
           continue;
         }
         validateMemberFields({ name: row.name, plan, email, phone: row.phone, beltRank: row.beltRank });
-        await ctx.db.insert("members", {
+        const memberId = await ctx.db.insert("members", {
           name: row.name,
           plan,
           status: row.status ?? "active",
@@ -283,7 +287,30 @@ export const adminImportBatch = internalMutation({
           gymId,
         });
         if (email) existingEmails.add(email.toLowerCase());
-        results.push({ status: "inserted", name: row.name, email });
+
+        // Rank data is optional and validated separately from the rest of the
+        // row: a bad discipline/belt/stripe combo flags a warning on an
+        // otherwise-successful member import rather than failing the whole
+        // row, matching normalizeBelt()'s flag-don't-crash posture in
+        // scripts/import-members.js.
+        let rankWarning: string | undefined;
+        if (row.discipline && row.beltRank) {
+          const check = validateRank(row.discipline, row.beltRank, row.stripes);
+          if (check.valid) {
+            await ctx.db.insert("ranks", {
+              memberId,
+              gymId,
+              discipline: row.discipline,
+              currentBelt: check.canonicalBelt,
+              currentStripes: row.stripes,
+              promotionDate: row.beltPromotionDate,
+            });
+          } else {
+            rankWarning = check.reason;
+          }
+        }
+
+        results.push({ status: "inserted", name: row.name, email, rankWarning });
       } catch (e) {
         results.push({
           status: "error",

@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { disciplineValidator } from "./beltTaxonomy";
 
 export default defineSchema({
   members: defineTable({
@@ -89,4 +90,31 @@ export default defineSchema({
     windowStart: v.number(),
     count: v.number(),
   }).index("by_key", ["key"]),
+  // One row per (memberId, discipline) — a cross-training member holds
+  // multiple rows. Source of truth for belt/rank going forward; the legacy
+  // members.beltRank/beltPromotionDate fields are left untouched as a
+  // display snapshot populated only by the CSV import path (see
+  // migration-assets/beltTaxonomy.json for canonical discipline/belt values).
+  ranks: defineTable({
+    memberId: v.id("members"),
+    gymId: v.id("gyms"),
+    discipline: disciplineValidator,
+    currentBelt: v.string(),
+    currentStripes: v.optional(v.number()),
+    promotionDate: v.optional(v.string()),
+  })
+    .index("by_gym", ["gymId"])
+    .index("by_member", ["memberId"])
+    .index("by_member_discipline", ["memberId", "discipline"]),
+  // `belt` is the rank being promoted INTO, i.e. the requirements to reach
+  // that belt from whatever precedes it in the discipline's taxonomy order.
+  promotionCriteria: defineTable({
+    gymId: v.id("gyms"),
+    discipline: disciplineValidator,
+    belt: v.string(),
+    requiredSessions: v.optional(v.number()),
+    requiredDaysAtRank: v.optional(v.number()),
+  })
+    .index("by_gym", ["gymId"])
+    .index("by_gym_discipline_belt", ["gymId", "discipline", "belt"]),
 });

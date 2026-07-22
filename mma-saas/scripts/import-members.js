@@ -49,6 +49,12 @@ const FALLBACK_COLUMN_MAP = {
   join_date: "Join Date",
   promotion_date: "Last Promoted",
   status: "Status",
+  // None of the four auto-detected platforms (PushPress/Zen Planner/
+  // Kicksite/Gymdesk) export a stripe-count column — see
+  // migration-assets/fixtures/*.csv. This only matters for a different
+  // platform whose export has one; point it at the exact header text. A
+  // missing/unmapped column is treated as "no stripe data", not an error.
+  stripes: "Stripes",
 };
 // ---------------------------------------------------------------------------
 
@@ -56,6 +62,10 @@ const FALLBACK_COLUMN_MAP = {
 // migration-assets/fixtures/*.csv). `match` requires every listed header to
 // be present so an unrelated CSV that happens to share one column name
 // doesn't misfire.
+//
+// None of these four platforms export a stripe-count column today, so no
+// columnMap below has a `stripes` entry — normalizeStripes() treats that as
+// no data, not an error.
 const PLATFORM_PROFILES = [
   {
     name: "PushPress",
@@ -230,23 +240,62 @@ function canonicalLabel(value) {
 function normalizeBelt(raw, discipline) {
   const trimmed = (raw || "").trim();
   if (!trimmed) {
-    if (isNoRankDiscipline(discipline)) return { value: "No Rank", recognized: true };
+    if (isNoRankDiscipline(discipline)) return { value: "No Rank", canonical: "no_rank", recognized: true };
     if (discipline === "bjj_adult" || discipline === "bjj_kids") {
-      return { value: undefined, recognized: false, reason: "blank belt rank for a belt-based discipline" };
+      return { value: undefined, canonical: undefined, recognized: false, reason: "blank belt rank for a belt-based discipline" };
     }
-    return { value: undefined, recognized: true };
+    return { value: undefined, canonical: undefined, recognized: true };
   }
 
   const key = trimmed.toLowerCase();
   const aliasMap = getAliasMap(discipline);
-  if (aliasMap.has(key)) return { value: canonicalLabel(aliasMap.get(key)), recognized: true };
+  if (aliasMap.has(key)) {
+    const canonical = aliasMap.get(key);
+    return { value: canonicalLabel(canonical), canonical, recognized: true };
+  }
 
   // Retry with a trailing/leading "belt" stripped ("blue belt" already
   // matches via aliases, but this catches odd spacing/punctuation variants).
   const stripped = key.replace(/\bbelt\b/g, "").replace(/\s+/g, " ").trim();
-  if (stripped && aliasMap.has(stripped)) return { value: canonicalLabel(aliasMap.get(stripped)), recognized: true };
+  if (stripped && aliasMap.has(stripped)) {
+    const canonical = aliasMap.get(stripped);
+    return { value: canonicalLabel(canonical), canonical, recognized: true };
+  }
 
-  return { value: trimmed, recognized: false, reason: `unrecognized belt "${trimmed}"` };
+  return { value: trimmed, canonical: undefined, recognized: false, reason: `unrecognized belt "${trimmed}"` };
+}
+
+// Parses a raw stripe-count column into an integer and validates it against
+// the matched belt's valid range in beltTaxonomy.json — same
+// flag-don't-crash contract as normalizeBelt(). Needs the belt's canonical
+// key (normalizeBelt's `canonical` field above), not its display label, to
+// look up the right rank's stripes array. No range to check against if the
+// discipline/belt wasn't recognized, so a parsed number is accepted as-is
+// rather than guessed at.
+function normalizeStripes(raw, discipline, canonicalBelt) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return { value: undefined, recognized: true };
+
+  const n = Number(trimmed);
+  if (!Number.isInteger(n)) {
+    return { value: undefined, recognized: false, reason: `unparseable stripe count "${trimmed}"` };
+  }
+
+  const category = discipline ? beltTaxonomy[discipline] : undefined;
+  const rank = category && canonicalBelt
+    ? category.ranks.find((r) => r.canonical === canonicalBelt)
+    : undefined;
+
+  if (rank && !rank.stripes.includes(n)) {
+    const validValues = rank.stripes.length ? rank.stripes.join(", ") : "none";
+    return {
+      value: n,
+      recognized: false,
+      reason: `${n} stripe(s) not valid for ${discipline} ${canonicalBelt} (valid: ${validValues})`,
+    };
+  }
+
+  return { value: n, recognized: true };
 }
 
 function normalizeStatus(raw) {
@@ -309,6 +358,9 @@ function processRows(rawRows, columnMap) {
     const belt = normalizeBelt(get(row, columnMap, "belt"), discipline);
     if (!belt.recognized) flags.push(belt.reason);
 
+    const stripes = normalizeStripes(get(row, columnMap, "stripes"), discipline, belt.canonical);
+    if (!stripes.recognized) flags.push(stripes.reason);
+
     const joinDate = normalizeDate(get(row, columnMap, "join_date"));
     if (!joinDate.ok) flags.push(`unparseable join date "${joinDate.raw}"`);
 
@@ -323,6 +375,8 @@ function processRows(rawRows, columnMap) {
       email,
       phone,
       beltRank: belt.value,
+      discipline,
+      stripes: stripes.value,
       joinDate: joinDate.value,
       beltPromotionDate: promotionDate.value,
       plan: programRaw,
