@@ -1,0 +1,91 @@
+{
+  "_readme": "Canonical rank taxonomy for combat-sports member imports. Each discipline has a list of ranks in progression order. 'canonical' is the value the import script should normalize to; 'aliases' are real-world variants/misspellings an import script should fuzzy-match against (case-insensitive, whitespace-trimmed matching recommended before falling back to fuzzy string distance). 'stripes' lists valid stripe counts for that rank, or [] if the discipline doesn't use stripes.",
+
+  "bjj_adult": {
+    "label": "BJJ - Adult",
+    "notes": "Standard adult IBJJF belt order. Stripes 0-4 per belt (4th stripe = eligible for promotion). Black belt stripes/degrees run further (1-6+) but 0-4 covers the common case.",
+    "ranks": [
+      {
+        "canonical": "white",
+        "order": 1,
+        "stripes": [0, 1, 2, 3, 4],
+        "aliases": ["white belt", "white", "wb", "whte", "whitebelt", "white-belt"]
+      },
+      {
+        "canonical": "blue",
+        "order": 2,
+        "stripes": [0, 1, 2, 3, 4],
+        "aliases": ["blue belt", "blue", "bb", "blu", "bluebelt", "blue-belt"]
+      },
+      {
+        "canonical": "purple",
+        "order": 3,
+        "stripes": [0, 1, 2, 3, 4],
+        "aliases": ["purple belt", "purple", "pb", "purpel", "purlpe", "purplebelt", "purple-belt"]
+      },
+      {
+        "canonical": "brown",
+        "order": 4,
+        "stripes": [0, 1, 2, 3, 4],
+        "aliases": ["brown belt", "brown", "brn", "broen", "brwon", "brownbelt", "brown-belt"]
+      },
+      {
+        "canonical": "black",
+        "order": 5,
+        "stripes": [0, 1, 2, 3, 4, 5, 6],
+        "aliases": ["black belt", "black", "bk", "blck", "blackbelt", "black-belt"]
+      }
+    ]
+  },
+
+  "bjj_kids": {
+    "label": "BJJ - Kids (IBJJF, ages 4-15)",
+    "notes": "Standard IBJJF kids progression. At 16-17 (juvenile) athletes move to white/blue/purple (capped at purple until age 18) - if a gym reports a juvenile on an adult-looking belt, treat as valid, not an error.",
+    "ranks": [
+      { "canonical": "grey_white", "order": 1, "stripes": [0, 1, 2, 3, 4], "aliases": ["grey/white", "gray/white", "grey-white", "gray-white", "grey white", "gray white", "gw"] },
+      { "canonical": "grey", "order": 2, "stripes": [0, 1, 2, 3, 4], "aliases": ["grey", "gray", "grey belt", "gray belt"] },
+      { "canonical": "grey_black", "order": 3, "stripes": [0, 1, 2, 3, 4], "aliases": ["grey/black", "gray/black", "grey-black", "gray-black", "grey black", "gray black", "gb"] },
+      { "canonical": "yellow_white", "order": 4, "stripes": [0, 1, 2, 3, 4], "aliases": ["yellow/white", "yellow-white", "yellow white", "yw"] },
+      { "canonical": "yellow", "order": 5, "stripes": [0, 1, 2, 3, 4], "aliases": ["yellow", "yellow belt", "yelow"] },
+      { "canonical": "yellow_black", "order": 6, "stripes": [0, 1, 2, 3, 4], "aliases": ["yellow/black", "yellow-black", "yellow black", "yb"] },
+      { "canonical": "orange_white", "order": 7, "stripes": [0, 1, 2, 3, 4], "aliases": ["orange/white", "orange-white", "orange white", "ow"] },
+      { "canonical": "orange", "order": 8, "stripes": [0, 1, 2, 3, 4], "aliases": ["orange", "orange belt", "ornage"] },
+      { "canonical": "orange_black", "order": 9, "stripes": [0, 1, 2, 3, 4], "aliases": ["orange/black", "orange-black", "orange black", "ob"] },
+      { "canonical": "green_white", "order": 10, "stripes": [0, 1, 2, 3, 4], "aliases": ["green/white", "green-white", "green white", "gnw"] },
+      { "canonical": "green", "order": 11, "stripes": [0, 1, 2, 3, 4], "aliases": ["green", "green belt", "gren"] },
+      { "canonical": "green_black", "order": 12, "stripes": [0, 1, 2, 3, 4], "aliases": ["green/black", "green-black", "green black", "gnb"] }
+    ]
+  },
+
+  "muay_thai": {
+    "label": "Muay Thai",
+    "notes": "Thailand and most Western gyms have NO formal belt/rank system - 'no_rank' is a VALID value, not missing data, and should not be flagged as an import error. Some Western-run gyms use an informal armband/prajioud color system; included below for gyms that do use one, but it is not universal and should not be required.",
+    "ranks": [
+      { "canonical": "no_rank", "order": 0, "stripes": [], "aliases": ["no rank", "n/a", "na", "none", "no belt", "not applicable", "unranked", "no rank system"] },
+      { "canonical": "white_armband", "order": 1, "stripes": [], "aliases": ["white armband", "white prajioud", "white"] },
+      { "canonical": "yellow_armband", "order": 2, "stripes": [], "aliases": ["yellow armband", "yellow prajioud", "yellow"] },
+      { "canonical": "orange_armband", "order": 3, "stripes": [], "aliases": ["orange armband", "orange prajioud", "orange"] },
+      { "canonical": "green_armband", "order": 4, "stripes": [], "aliases": ["green armband", "green prajioud", "green"] },
+      { "canonical": "blue_armband", "order": 5, "stripes": [], "aliases": ["blue armband", "blue prajioud", "blue"] },
+      { "canonical": "brown_armband", "order": 6, "stripes": [], "aliases": ["brown armband", "brown prajioud", "brown"] },
+      { "canonical": "red_armband", "order": 7, "stripes": [], "aliases": ["red armband", "red prajioud", "red"] },
+      { "canonical": "black_armband", "order": 8, "stripes": [], "aliases": ["black armband", "black prajioud", "black"] }
+    ]
+  },
+
+  "wrestling": {
+    "label": "Wrestling",
+    "notes": "No belt/rank system exists in wrestling. 'no_rank' is the expected, valid value for every wrestler - the import script should NOT flag this as an error or missing data.",
+    "ranks": [
+      { "canonical": "no_rank", "order": 0, "stripes": [], "aliases": ["no rank", "n/a", "na", "none", "no belt", "not applicable", "unranked", "no rank system", "-"] }
+    ]
+  },
+
+  "mma": {
+    "label": "MMA",
+    "notes": "No formal rank/belt system for MMA itself (practitioners' individual base-discipline belts, e.g. BJJ, are tracked separately under that discipline). 'no_rank' is valid and expected here. Amateur/Pro status is a competition classification, not a rank - don't conflate the two.",
+    "ranks": [
+      { "canonical": "no_rank", "order": 0, "stripes": [], "aliases": ["no rank", "n/a", "na", "none", "no belt", "not applicable", "unranked", "no rank system", "-"] }
+    ]
+  }
+}

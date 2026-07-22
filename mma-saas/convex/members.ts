@@ -211,6 +211,92 @@ export const setSmsOptOutByPhone = internalMutation({
   },
 });
 
+// Admin-only bulk import path for scripts/import-members.js, invoked via
+// `npx convex run members:adminImportBatch` — internal functions aren't
+// reachable from the client SDK, only the CLI/dashboard with an admin key,
+// which is what makes this safe to run without a signed-in gym owner.
+// Deliberately mirrors the public `add` mutation's validation (same
+// validateMemberFields call) but skips requireGym/requireWriteAccess since
+// there's no Clerk session here. Never sets smsConsentConfirmed: migrated
+// CSV data carries no proof real consent was obtained, so an imported phone
+// number sits unconfirmed until a gym owner edits + re-saves that member
+// through the normal UI. sendRetentionTexts.ts:getAtRiskMembers requires
+// smsConsentConfirmed before texting anyone, so this can't silently bypass
+// the consent gate the way a raw ctx.db.insert normally would.
+export const adminImportBatch = internalMutation({
+  args: {
+    gymId: v.id("gyms"),
+    rows: v.array(
+      v.object({
+        name: v.string(),
+        plan: v.optional(v.string()),
+        status: v.optional(v.union(v.literal("active"), v.literal("inactive"))),
+        email: v.optional(v.string()),
+        phone: v.optional(v.string()),
+        beltRank: v.optional(v.string()),
+        joinDate: v.optional(v.string()),
+        beltPromotionDate: v.optional(v.string()),
+      })
+    ),
+  },
+  handler: async (ctx, { gymId, rows }) => {
+    const gym = await ctx.db.get(gymId);
+    if (!gym) throw new Error(`No gym found with id ${gymId}`);
+
+    // Dedupe against members already in this gym, matched on email — the
+    // same signal the script uses to skip a row it already imported on a
+    // prior run. Loaded once up front and kept in sync as we insert so two
+    // rows in the same CSV that share an email don't both get inserted.
+    const existing = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gymId))
+      .collect();
+    const existingEmails = new Set(
+      existing.filter((m) => m.email).map((m) => m.email!.toLowerCase())
+    );
+
+    const results: Array<{
+      status: "inserted" | "duplicate" | "error";
+      name: string;
+      email?: string;
+      message?: string;
+    }> = [];
+
+    for (const row of rows) {
+      const plan = row.plan?.trim() || "Imported";
+      const email = row.email?.trim() || undefined;
+      try {
+        if (email && existingEmails.has(email.toLowerCase())) {
+          results.push({ status: "duplicate", name: row.name, email });
+          continue;
+        }
+        validateMemberFields({ name: row.name, plan, email, phone: row.phone, beltRank: row.beltRank });
+        await ctx.db.insert("members", {
+          name: row.name,
+          plan,
+          status: row.status ?? "active",
+          email,
+          phone: row.phone,
+          beltRank: row.beltRank,
+          joinDate: row.joinDate,
+          beltPromotionDate: row.beltPromotionDate,
+          gymId,
+        });
+        if (email) existingEmails.add(email.toLowerCase());
+        results.push({ status: "inserted", name: row.name, email });
+      } catch (e) {
+        results.push({
+          status: "error",
+          name: row.name,
+          email,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return results;
+  },
+});
+
 // Global admin sweep across all gyms — safe unscoped: it only patches each
 // member's own status based on their own lastVisit, never returns or compares
 // data across gyms.

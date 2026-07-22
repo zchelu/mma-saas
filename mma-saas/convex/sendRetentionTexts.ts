@@ -20,7 +20,14 @@ export const getAtRiskMembers = internalQuery({
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     return all.filter((m) => {
-      if (!m.phone || m.status !== "active" || m.smsOptedOut) return false;
+      // smsConsentConfirmed gate: the public `add`/`update` mutations only
+      // ever let a phone number in alongside confirmed consent, so this was
+      // previously implied rather than checked here. That invariant breaks
+      // for members created by scripts/import-members.js's bulk import path
+      // (migrated CSV data has no proof consent was obtained) — check it
+      // explicitly so an imported phone number can't get texted until a gym
+      // owner confirms consent by editing + re-saving that member.
+      if (!m.phone || !m.smsConsentConfirmed || m.status !== "active" || m.smsOptedOut) return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
       const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
       return inactiveEnough && notRecentlyTexted;

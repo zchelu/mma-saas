@@ -17,6 +17,10 @@ export default defineSchema({
     // Optional until the backfill migration (convex/migrations.ts) has run for
     // every existing row — see convex/migrations.ts for the tighten-to-required follow-up.
     gymId: v.optional(v.id("gyms")),
+    // Populated by CSV import (scripts/import-members.js) and otherwise
+    // unused today — no UI reads/writes these yet.
+    joinDate: v.optional(v.string()),
+    beltPromotionDate: v.optional(v.string()),
   }).index("by_gym", ["gymId"]),
   classes: defineTable({
     name: v.string(),
