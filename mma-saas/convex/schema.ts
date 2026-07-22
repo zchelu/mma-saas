@@ -22,7 +22,14 @@ export default defineSchema({
     // unused today — no UI reads/writes these yet.
     joinDate: v.optional(v.string()),
     beltPromotionDate: v.optional(v.string()),
-  }).index("by_gym", ["gymId"]),
+    // Opaque token embedded in a member's QR/card for check-in. Set when a
+    // token is (re)issued; checkInTokenIssuedAt records when, so tokens
+    // issued before some cutoff can be bulk-invalidated later if needed.
+    checkInToken: v.optional(v.string()),
+    checkInTokenIssuedAt: v.optional(v.number()),
+  })
+    .index("by_gym", ["gymId"])
+    .index("by_check_in_token", ["checkInToken"]),
   classes: defineTable({
     name: v.string(),
     instructor: v.string(),

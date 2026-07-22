@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
@@ -63,6 +63,33 @@ function validateMemberFields(fields: {
   assertMaxLength(fields.beltRank, 100, "Belt rank");
 }
 
+// CSPRNG, not Math.random — Web Crypto's getRandomValues (Node's
+// crypto.randomBytes isn't available outside a "use node" action). 20 random
+// bytes -> 40 hex characters, well above the 20-char floor; hex is
+// inherently URL-safe so there's no padding/charset edge case like base64url
+// has.
+function generateCheckInToken(): string {
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Loops on the (astronomically unlikely) chance generateCheckInToken()
+// collides with an existing token, checked against the by_check_in_token
+// index rather than trusted blind. Capped so a persistent index/index-write
+// bug fails loudly instead of hanging the mutation.
+export async function generateUniqueCheckInToken(ctx: MutationCtx): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = generateCheckInToken();
+    const collision = await ctx.db
+      .query("members")
+      .withIndex("by_check_in_token", (q) => q.eq("checkInToken", candidate))
+      .unique();
+    if (!collision) return candidate;
+  }
+  throw new Error("Failed to generate a unique check-in token after 5 attempts");
+}
+
 export const add = mutation({
   args: memberFields,
   handler: async (ctx, args) => {
@@ -107,6 +134,24 @@ export const remove = mutation({
     const attendance = await ctx.db.query("attendance").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
     for (const a of attendance) await ctx.db.delete(a._id);
     await ctx.db.delete(id);
+  },
+});
+
+// Run when a member reports a lost/stolen card. Overwriting checkInToken is
+// itself the invalidation: by_check_in_token is keyed on the live field, so
+// the old token stops resolving to anything the instant this patch commits
+// — no separate revocation list needed.
+export const regenerateCheckInToken = mutation({
+  args: { memberId: v.id("members") },
+  handler: async (ctx, { memberId }) => {
+    const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    const existing = await ctx.db.get(memberId);
+    if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
+
+    const token = await generateUniqueCheckInToken(ctx);
+    await ctx.db.patch(memberId, { checkInToken: token, checkInTokenIssuedAt: Date.now() });
+    return token;
   },
 });
 
