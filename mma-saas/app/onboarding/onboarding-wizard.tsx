@@ -1,10 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-
-type MemberDraft = { name: string; email?: string; phone?: string; beltRank?: string };
 
 const PLAN_LABEL: Record<string, string> = { starter: "Starter", pro: "Pro", elite: "Elite" };
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
@@ -15,38 +13,8 @@ const inputStyle = {
   color: "#FFFFFF",
 };
 
-// Simple same-shape CSV parser for the onboarding roster upload — expects a
-// header row containing name/email/phone/beltRank in some order. This is
-// deliberately NOT scripts/import-members.js's platform auto-detection
-// (PushPress/Zen Planner/Kicksite/Gymdesk column-mapping + belt-taxonomy
-// normalization): that logic is Node-only and CLI-run by design (see its
-// header comment), and pulling it into the browser bundle for a one-time
-// initial-roster step during signup isn't worth the size/complexity here.
-// Gyms migrating a full existing roster from one of those platforms should
-// still use that script post-signup, not this upload.
-function parseCsv(text: string): MemberDraft[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-  const nameIdx = headers.indexOf("name");
-  if (nameIdx === -1) return [];
-  const emailIdx = headers.indexOf("email");
-  const phoneIdx = headers.indexOf("phone");
-  const beltIdx = headers.findIndex((h) => h === "beltrank" || h === "belt");
-
-  return lines.slice(1).map((line) => {
-    const cols = line.split(",").map((c) => c.trim());
-    return {
-      name: cols[nameIdx] ?? "",
-      email: emailIdx >= 0 ? cols[emailIdx] || undefined : undefined,
-      phone: phoneIdx >= 0 ? cols[phoneIdx] || undefined : undefined,
-      beltRank: beltIdx >= 0 ? cols[beltIdx] || undefined : undefined,
-    };
-  }).filter((m) => m.name);
-}
-
 function StepHeader({ step, plan }: { step: number; plan: string }) {
-  const labels = ["Your gym", "Add members", "Confirm & continue"];
+  const labels = ["Your gym", "SMS consent"];
   return (
     <div className="mb-10">
       <p className="text-xs uppercase tracking-widest mb-3" style={{ color: "#888888" }}>
@@ -90,41 +58,9 @@ export default function OnboardingWizard({
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
 
-  const [members, setMembers] = useState<MemberDraft[]>([]);
-  const [draft, setDraft] = useState<MemberDraft>({ name: "", email: "", phone: "" });
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [csvError, setCsvError] = useState<string | null>(null);
-
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const hasPhoneMembers = members.some((m) => m.phone);
-
-  function addDraftMember() {
-    if (!draft.name.trim()) return;
-    setMembers((prev) => [...prev, { ...draft, name: draft.name.trim() }]);
-    setDraft({ name: "", email: "", phone: "" });
-  }
-
-  function removeMember(idx: number) {
-    setMembers((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  async function handleCsvFile(file: File) {
-    setCsvError(null);
-    try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
-      if (parsed.length === 0) {
-        setCsvError('No rows found — make sure the file has a header row with a "name" column.');
-        return;
-      }
-      setMembers((prev) => [...prev, ...parsed]);
-    } catch {
-      setCsvError("Couldn't read that file — please try a plain CSV export.");
-    }
-  }
 
   async function handleFinish() {
     if (submitting) return;
@@ -135,12 +71,6 @@ export default function OnboardingWizard({
         gymName: gymName.trim(),
         city: city.trim() || undefined,
         state: state.trim() || undefined,
-        members: members.map((m) => ({
-          name: m.name,
-          email: m.email || undefined,
-          phone: m.phone || undefined,
-          beltRank: m.beltRank || undefined,
-        })),
         smsConsentConfirmed: consent,
       });
 
@@ -213,145 +143,35 @@ export default function OnboardingWizard({
       {step === 1 && (
         <div className="flex flex-col gap-4">
           <h1 className="text-2xl font-bold mb-1" style={{ color: "#FFFFFF" }}>
-            Add your members
+            SMS consent
           </h1>
           <p className="text-sm mb-2" style={{ color: "#888888" }}>
-            Add at least one member — one at a time, or upload a CSV.
+            {gymName} · {PLAN_LABEL[plan]}
           </p>
 
-          <div className="flex flex-col gap-2 rounded-lg p-4" style={{ border: "1px solid #333333" }}>
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="Name"
-                className="rounded-lg px-3 py-2 text-sm focus:outline-none"
-                style={inputStyle}
-              />
-              <input
-                value={draft.phone ?? ""}
-                onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-                placeholder="Phone (optional)"
-                className="rounded-lg px-3 py-2 text-sm focus:outline-none"
-                style={inputStyle}
-              />
-            </div>
+          <label
+            className="flex items-start gap-3 rounded-lg p-4 cursor-pointer"
+            style={{ border: `1px solid ${consent ? "#E02020" : "#333333"}` }}
+          >
             <input
-              value={draft.email ?? ""}
-              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-              placeholder="Email (optional)"
-              className="rounded-lg px-3 py-2 text-sm focus:outline-none"
-              style={inputStyle}
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              className="mt-0.5 w-4 h-4 shrink-0"
             />
-            <button
-              type="button"
-              onClick={addDraftMember}
-              disabled={!draft.name.trim()}
-              className="self-start rounded-lg font-semibold px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "#1A1A1A", color: "#FFFFFF", border: "1px solid #333333" }}
-            >
-              Add member
-            </button>
-          </div>
-
-          <div>
-            <input
-              ref={fileInput}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleCsvFile(file);
-                e.target.value = "";
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              className="text-sm underline"
-              style={{ color: "#888888" }}
-            >
-              Or upload a CSV (name, email, phone, beltRank columns)
-            </button>
-            {csvError && <p className="text-sm mt-2" style={{ color: "#FF6B6B" }}>{csvError}</p>}
-          </div>
-
-          {members.length > 0 && (
-            <ul className="flex flex-col gap-2 mt-2">
-              {members.map((m, i) => (
-                <li
-                  key={`${m.name}-${i}`}
-                  className="flex items-center justify-between rounded-lg px-4 py-2 text-sm"
-                  style={{ backgroundColor: "#1A1A1A", color: "#CCCCCC" }}
-                >
-                  <span>
-                    {m.name} {m.phone && <span style={{ color: "#666666" }}>· {m.phone}</span>}
-                  </span>
-                  <button type="button" onClick={() => removeMember(i)} style={{ color: "#888888" }}>
-                    ✕
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex gap-3 mt-4">
-            <button
-              type="button"
-              onClick={() => setStep(0)}
-              className="rounded-lg font-semibold px-6 py-3 text-sm"
-              style={{ backgroundColor: "#1A1A1A", color: "#AAAAAA", border: "1px solid #333333" }}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              disabled={members.length === 0}
-              onClick={() => setStep(2)}
-              className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="flex flex-col gap-4">
-          <h1 className="text-2xl font-bold mb-1" style={{ color: "#FFFFFF" }}>
-            Confirm & continue
-          </h1>
-          <p className="text-sm mb-2" style={{ color: "#888888" }}>
-            {gymName} · {members.length} member{members.length === 1 ? "" : "s"} · {PLAN_LABEL[plan]}
-          </p>
-
-          {hasPhoneMembers && (
-            <label
-              className="flex items-start gap-3 rounded-lg p-4 cursor-pointer"
-              style={{ border: `1px solid ${consent ? "#E02020" : "#333333"}` }}
-            >
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5 w-4 h-4 shrink-0"
-              />
-              <span className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>
-                I confirm I have obtained consent from the members above to receive SMS messages
-                from my gym, per KombatDesk&apos;s SMS Consent Addendum. Members added without a
-                phone number don&apos;t require this.
-              </span>
-            </label>
-          )}
+            <span className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>
+              I understand that before texting any member, I must obtain their consent to
+              receive SMS messages, per KombatDesk&apos;s SMS Consent Addendum — enforced
+              whenever a phone number is added to a member.
+            </span>
+          </label>
 
           {error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
 
           <div className="flex gap-3 mt-2">
             <button
               type="button"
-              onClick={() => setStep(1)}
+              onClick={() => setStep(0)}
               disabled={submitting}
               className="rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40"
               style={{ backgroundColor: "#1A1A1A", color: "#AAAAAA", border: "1px solid #333333" }}
@@ -360,7 +180,7 @@ export default function OnboardingWizard({
             </button>
             <button
               type="button"
-              disabled={submitting || (hasPhoneMembers && !consent)}
+              disabled={submitting || !consent}
               onClick={handleFinish}
               className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}

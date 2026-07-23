@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { fetchQuery, fetchMutation } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
@@ -60,6 +61,11 @@ export default async function DashboardPage({
     return <SettlingGate awaitingCheckout={checkout === "success"} />;
   }
 
+  // Members moved out of the onboarding wizard (now gym info + SMS consent
+  // only) — this is where that first roster entry actually happens instead,
+  // via the existing /members add-member UI.
+  const memberCount = await fetchQuery(api.members.getActiveCount, {}, { token });
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
       <AppHeader />
@@ -71,6 +77,16 @@ export default async function DashboardPage({
           {subscription.plan === "elite" && <RetentionButton />}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
+        {memberCount === 0 && (
+          <Link
+            href="/members"
+            className="flex items-center justify-between rounded-lg px-6 py-4 mb-12"
+            style={{ border: "1px solid #E02020", backgroundColor: "#1A1A1A" }}
+          >
+            <span style={{ color: "#FFFFFF" }}>Add your first members to start tracking attendance</span>
+            <span style={{ color: "#E02020" }}>Add members →</span>
+          </Link>
+        )}
         <StatsGrid />
         <AtRiskPanel />
       </main>
