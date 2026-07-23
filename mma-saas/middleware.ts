@@ -13,6 +13,7 @@ const isPublicRoute = createRouteMatcher([
   '/terms(.*)',
   '/privacy(.*)',
   '/cookies(.*)',
+  '/demo/sms-consent(.*)',
   '/api/stripe/webhook',
   '/api/stripe/checkout',
   '/api/recover',

@@ -127,7 +127,18 @@ export default function MemberModal({ member, onClose }: Props) {
                 />
                 <span>
                   I confirm this member has consented to receive text messages regarding
-                  their membership and attendance, per KombatDesk&apos;s Terms of Service.
+                  their membership and attendance, per KombatDesk&apos;s{" "}
+                  <a
+                    href="/terms#sms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="underline"
+                    style={{ color: "#CCCCCC" }}
+                  >
+                    Terms of Service
+                  </a>
+                  .
                 </span>
               </label>
               {consentError && (
