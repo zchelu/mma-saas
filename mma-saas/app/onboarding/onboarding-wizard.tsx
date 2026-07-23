@@ -13,8 +13,7 @@ const inputStyle = {
   color: "#FFFFFF",
 };
 
-function StepHeader({ step, plan }: { step: number; plan: string }) {
-  const labels = ["Your gym", "SMS consent"];
+function StepHeader({ step, plan, labels }: { step: number; plan: string; labels: string[] }) {
   return (
     <div className="mb-10">
       <p className="text-xs uppercase tracking-widest mb-3" style={{ color: "#888888" }}>
@@ -51,6 +50,10 @@ export default function OnboardingWizard({
   priceIdByPlan: Record<string, string | undefined>;
 }) {
   const plan = initialPlan;
+  // Starter has no SMS retention texting at all (see subscriptions.ts
+  // isProPlan/isElitePlan), so there's nothing for the consent attestation
+  // to cover — only Pro/Elite gate on it.
+  const skipConsent = plan === "starter";
   const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
 
   const [step, setStep] = useState(0);
@@ -96,9 +99,11 @@ export default function OnboardingWizard({
     }
   }
 
+  const labels = skipConsent ? ["Your gym"] : ["Your gym", "SMS consent"];
+
   return (
     <div className="max-w-xl mx-auto px-6 py-16">
-      <StepHeader step={step} plan={plan} />
+      <StepHeader step={step} plan={plan} labels={labels} />
 
       {step === 0 && (
         <div className="flex flex-col gap-4">
@@ -128,19 +133,22 @@ export default function OnboardingWizard({
               style={inputStyle}
             />
           </div>
+
+          {skipConsent && error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
+
           <button
             type="button"
-            disabled={!gymName.trim()}
-            onClick={() => setStep(1)}
+            disabled={!gymName.trim() || (skipConsent && submitting)}
+            onClick={() => (skipConsent ? handleFinish() : setStep(1))}
             className="mt-4 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
-            Continue
+            {skipConsent ? (submitting ? "Setting up…" : "Continue to payment") : "Continue"}
           </button>
         </div>
       )}
 
-      {step === 1 && (
+      {step === 1 && !skipConsent && (
         <div className="flex flex-col gap-4">
           <h1 className="text-2xl font-bold mb-1" style={{ color: "#FFFFFF" }}>
             SMS consent
