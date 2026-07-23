@@ -1,5 +1,7 @@
 "use client";
 
+import { PLAN_PRICE_USD } from "@/lib/plans";
+
 const STARTER_FEATURES = [
   "Add, edit, and track every member",
   "Members check themselves in at the front desk",
@@ -156,7 +158,7 @@ function ProCard({ href }: { href: string }) {
           </h3>
 
           <div className="flex items-baseline gap-1">
-            <span className="text-4xl font-extrabold" style={{ color: "#FFFFFF" }}>$89</span>
+            <span className="text-4xl font-extrabold" style={{ color: "#FFFFFF" }}>{`$${PLAN_PRICE_USD.pro}`}</span>
             <span className="text-sm" style={{ color: "#555555" }}>/month</span>
           </div>
         </div>
@@ -186,7 +188,7 @@ function ProCard({ href }: { href: string }) {
           className="rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
         >
-          I&apos;m Ready to Stop the Bleeding — $89/mo
+          {`I'm Ready to Stop the Bleeding — $${PLAN_PRICE_USD.pro}/mo`}
         </a>
       </div>
     </div>
@@ -222,7 +224,7 @@ function EliteCard({ href }: { href: string }) {
           </h3>
 
           <div className="flex items-baseline gap-1">
-            <span className="text-4xl font-extrabold" style={{ color: "#FFFFFF" }}>$149</span>
+            <span className="text-4xl font-extrabold" style={{ color: "#FFFFFF" }}>{`$${PLAN_PRICE_USD.elite}`}</span>
             <span className="text-sm" style={{ color: "#555555" }}>/month</span>
           </div>
         </div>
@@ -243,7 +245,7 @@ function EliteCard({ href }: { href: string }) {
           className="mt-auto rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#3B82F6", color: "#FFFFFF" }}
         >
-          I Want the Full Corner — $149/mo
+          {`I Want the Full Corner — $${PLAN_PRICE_USD.elite}/mo`}
         </a>
       </div>
     </div>
@@ -265,10 +267,10 @@ export default function PricingCards({ signedIn }: { signedIn: boolean }) {
       <PricingCard
         title="Starter"
         tagline="For Owners Who Want to Do It Themselves"
-        price="$49"
+        price={`$${PLAN_PRICE_USD.starter}`}
         features={STARTER_FEATURES}
         href={planHref("starter", signedIn)}
-        ctaLabel="I'll Start With the Basics — $49/mo"
+        ctaLabel={`I'll Start With the Basics — $${PLAN_PRICE_USD.starter}/mo`}
         checkColor="#3B82F6"
       />
       <ProCard href={planHref("pro", signedIn)} />

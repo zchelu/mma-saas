@@ -3,9 +3,24 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { PLAN_PRICE_USD } from "@/lib/plans";
 
 const PLAN_LABEL: Record<string, string> = { starter: "Starter", pro: "Pro", elite: "Elite" };
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
+
+// Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires the auto-renewal
+// terms be clear and conspicuous immediately adjacent to the enrollment
+// button — not just earlier on /pricing. Price comes from lib/plans.ts, the
+// same source pricing-cards.tsx uses, so this can't drift from what the
+// customer saw there.
+function RenewalDisclosure({ plan }: { plan: string }) {
+  const price = PLAN_PRICE_USD[plan];
+  return (
+    <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
+      {`14-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
+    </p>
+  );
+}
 
 const inputStyle = {
   backgroundColor: "#222222",
@@ -136,6 +151,8 @@ export default function OnboardingWizard({
 
           {skipConsent && error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
 
+          {skipConsent && <RenewalDisclosure plan={plan} />}
+
           <button
             type="button"
             disabled={!gymName.trim() || (skipConsent && submitting)}
@@ -175,6 +192,8 @@ export default function OnboardingWizard({
           </label>
 
           {error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
+
+          <RenewalDisclosure plan={plan} />
 
           <div className="flex gap-3 mt-2">
             <button
