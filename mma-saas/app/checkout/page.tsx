@@ -38,7 +38,8 @@ function CheckoutPageInner() {
         }
 
         window.location.href = data.url;
-      } catch {
+      } catch (err) {
+        console.error("Checkout fetch failed:", err);
         setError(GENERIC_ERROR);
       }
     })();
