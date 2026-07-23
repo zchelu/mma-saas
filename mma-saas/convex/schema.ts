@@ -91,6 +91,8 @@ export default defineSchema({
     // creation before being claimed — see convex/subscriptions.ts claim flow.
     clerkUserId: v.optional(v.string()),
     name: v.optional(v.string()),
+    city: v.optional(v.string()),
+    state: v.optional(v.string()),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
     plan: v.optional(v.string()),
@@ -101,6 +103,17 @@ export default defineSchema({
     // per-gym cooldown floor beneath both, independent of the per-member
     // lastRetentionTextAt gate on the members table.
     lastRetentionRunAt: v.optional(v.number()),
+    // Set once the auth-first onboarding wizard (app/onboarding) finishes —
+    // distinct from planStatus/billing state. A gym can be onboardingCompleted
+    // and still have no active plan (checkout abandoned); dashboard gates on
+    // both independently. See convex/onboarding.ts.
+    onboardingCompleted: v.optional(v.boolean()),
+    // Gym-level attestation collected at onboarding step 3, separate from the
+    // per-member members.smsConsentConfirmed/At fields — this is the owner
+    // confirming they've obtained consent for the initial roster entered
+    // during onboarding, before any of those members exist as rows yet.
+    smsConsentConfirmed: v.optional(v.boolean()),
+    smsConsentConfirmedAt: v.optional(v.number()),
   })
     .index("by_clerk_user", ["clerkUserId"])
     .index("by_stripe_customer", ["stripeCustomerId"]),

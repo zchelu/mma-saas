@@ -19,7 +19,7 @@ function PricingCard({
   tagline,
   price,
   features,
-  priceId,
+  href,
   ctaLabel,
   badge,
   highlighted,
@@ -30,7 +30,7 @@ function PricingCard({
   tagline?: string;
   price: string;
   features: string[];
-  priceId: string;
+  href: string;
   ctaLabel: string;
   badge?: string;
   highlighted?: boolean;
@@ -103,7 +103,7 @@ function PricingCard({
       )}
 
       <a
-        href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+        href={href}
         className="mt-auto rounded-lg font-semibold px-6 py-3 transition-opacity flex items-center justify-center gap-2 text-sm"
         style={{
           backgroundColor: highlighted ? "#E02020" : "#1A1A1A",
@@ -124,7 +124,7 @@ const PRO_VALUE_STACK = [
   "Get pinged the moment a member goes cold",
 ];
 
-function ProCard({ priceId }: { priceId: string }) {
+function ProCard({ href }: { href: string }) {
   return (
     <div
       className="rounded-xl flex flex-col relative overflow-hidden"
@@ -182,7 +182,7 @@ function ProCard({ priceId }: { priceId: string }) {
 
         {/* CTA */}
         <a
-          href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+          href={href}
           className="rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
         >
@@ -202,7 +202,7 @@ const ELITE_VALUE_STACK = [
   "First in line for every new feature we ship",
 ];
 
-function EliteCard({ priceId }: { priceId: string }) {
+function EliteCard({ href }: { href: string }) {
   return (
     <div
       className="rounded-xl flex flex-col"
@@ -239,7 +239,7 @@ function EliteCard({ priceId }: { priceId: string }) {
         </div>
 
         <a
-          href={`/checkout?priceId=${encodeURIComponent(priceId)}`}
+          href={href}
           className="mt-auto rounded-lg font-bold px-6 py-4 text-base transition-opacity flex items-center justify-center gap-2"
           style={{ backgroundColor: "#3B82F6", color: "#FFFFFF" }}
         >
@@ -250,15 +250,16 @@ function EliteCard({ priceId }: { priceId: string }) {
   );
 }
 
-export default function PricingCards({
-  starterPriceId,
-  proPriceId,
-  elitePriceId,
-}: {
-  starterPriceId: string;
-  proPriceId: string;
-  elitePriceId: string;
-}) {
+// Signed-out visitors go through Clerk sign-up first; already-signed-in
+// visitors (e.g. browsing /pricing again after abandoning setup) skip
+// straight to onboarding. Either way the plan choice rides along as a query
+// param — /sign-up's default post-signup redirect points at
+// /onboarding?plan=<slug> (see app/sign-up/[[...sign-up]]/page.tsx).
+function planHref(plan: string, signedIn: boolean): string {
+  return signedIn ? `/onboarding?plan=${plan}` : `/sign-up?plan=${plan}`;
+}
+
+export default function PricingCards({ signedIn }: { signedIn: boolean }) {
   return (
     <div className="flex flex-col sm:flex-row gap-6 w-full mx-auto items-start">
       <PricingCard
@@ -266,12 +267,12 @@ export default function PricingCards({
         tagline="For Owners Who Want to Do It Themselves"
         price="$49"
         features={STARTER_FEATURES}
-        priceId={starterPriceId}
+        href={planHref("starter", signedIn)}
         ctaLabel="I'll Start With the Basics — $49/mo"
         checkColor="#3B82F6"
       />
-      <ProCard priceId={proPriceId} />
-      <EliteCard priceId={elitePriceId} />
+      <ProCard href={planHref("pro", signedIn)} />
+      <EliteCard href={planHref("elite", signedIn)} />
     </div>
   );
 }

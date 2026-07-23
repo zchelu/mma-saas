@@ -353,7 +353,13 @@ export const getSubscription = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      return { plan: null, planStatus: null, stripeCustomerId: null, stripeSubscriptionId: null };
+      return {
+        plan: null,
+        planStatus: null,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        onboardingCompleted: false,
+      };
     }
     const gym = await ctx.db
       .query("gyms")
@@ -364,6 +370,7 @@ export const getSubscription = query({
       planStatus: gym?.planStatus ?? null,
       stripeCustomerId: gym?.stripeCustomerId ?? null,
       stripeSubscriptionId: gym?.stripeSubscriptionId ?? null,
+      onboardingCompleted: gym?.onboardingCompleted ?? false,
     };
   },
 });

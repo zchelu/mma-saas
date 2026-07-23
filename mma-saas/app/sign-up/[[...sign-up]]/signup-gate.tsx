@@ -9,7 +9,7 @@ export function SignUpGate({ redirectUrl }: { redirectUrl?: string }) {
   const [revealed, setRevealed] = useState(false);
 
   if (revealed) {
-    return <SignUp fallbackRedirectUrl={redirectUrl ?? "/dashboard"} />;
+    return <SignUp fallbackRedirectUrl={redirectUrl ?? "/onboarding"} />;
   }
 
   return (

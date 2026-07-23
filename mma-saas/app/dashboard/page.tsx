@@ -9,10 +9,15 @@ import RetentionButton from "./retention-button";
 import AtRiskPanel from "./at-risk";
 import SettlingGate from "./settling-gate";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ checkout?: string }>;
+}) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
+  const { checkout } = await searchParams;
   const token = await getConvexToken();
 
   // First authenticated page a new sign-up ever reaches — provisions this
@@ -26,6 +31,17 @@ export default async function DashboardPage() {
   );
 
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
+
+  // Auth-first signup: onboarding runs before any checkout, so a gym that
+  // hasn't finished it yet has no stripeCustomerId either. A gym that DOES
+  // have a stripeCustomerId already got here via the old guest-checkout/
+  // recovery fallback (onboardingCompleted is undefined for those, and
+  // that's fine — they never needed the wizard) so it's excluded here to
+  // avoid forcing already-paying accounts through onboarding retroactively.
+  if (!subscription.onboardingCompleted && !subscription.stripeCustomerId) {
+    redirect("/onboarding");
+  }
+
   // Mirrors requireGym's read-access gate (convex/gyms.ts): only "inactive"/
   // no plan at all is blocked here. canceled/past_due gyms keep a read-only
   // grace period and should reach the real dashboard, not bounce to
@@ -36,7 +52,12 @@ export default async function DashboardPage() {
   // write racing this request) — SettlingGate itself handles that case,
   // waiting on the reactive query before deciding there's genuinely no plan.
   if (!subscription.planStatus || subscription.planStatus === "inactive") {
-    return <SettlingGate />;
+    // checkout=success (set by the auth-first success_url — see
+    // app/api/stripe/checkout/route.ts) means stripeCustomerId is NOT known
+    // yet by design: unlike the old /welcome path, nothing synchronously
+    // claimed the subscription before landing here, so SettlingGate must
+    // wait out the webhook instead of bouncing on "no stripeCustomerId yet".
+    return <SettlingGate awaitingCheckout={checkout === "success"} />;
   }
 
   return (

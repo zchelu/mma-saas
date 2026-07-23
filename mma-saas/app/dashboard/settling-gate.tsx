@@ -14,7 +14,7 @@ const MAX_WAIT_MS = 8000;
 // never checked out (no stripeCustomerId at all), bounce to /pricing right
 // away. If they did but it's still settling, wait up to MAX_WAIT_MS before
 // giving up and sending them to /pricing.
-export default function SettlingGate() {
+export default function SettlingGate({ awaitingCheckout = false }: { awaitingCheckout?: boolean }) {
   const subscription = useQuery(api.subscriptions.getSubscription);
   const router = useRouter();
   const refreshed = useRef(false);
@@ -23,7 +23,17 @@ export default function SettlingGate() {
     subscription?.plan &&
     (subscription.planStatus === "active" || subscription.planStatus === "trialing")
   );
-  const hasBilling = !!subscription?.stripeCustomerId;
+  // awaitingCheckout (set when this instant's dashboard load followed a
+  // Stripe redirect via the auth-first flow — see app/dashboard/page.tsx)
+  // means stripeCustomerId is genuinely expected to be missing for a beat:
+  // nothing synchronously claimed the subscription the way /welcome's
+  // claimGymBySessionId does for the old guest-checkout path, so this
+  // request can land here before the customer.subscription.created webhook
+  // has even fired. Treat it as "known to be settling" instead of "never
+  // checked out", or a real paying customer gets bounced to /pricing on
+  // every single auth-first purchase — the exact bug /welcome's synchronous
+  // claim was built to avoid, just via a different code path this time.
+  const hasBilling = !!subscription?.stripeCustomerId || awaitingCheckout;
 
   useEffect(() => {
     if (subscription === undefined) return;

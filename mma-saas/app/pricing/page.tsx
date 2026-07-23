@@ -40,11 +40,7 @@ export default async function PricingPage() {
           </p>
         </div>
 
-        <PricingCards
-          starterPriceId={process.env.STRIPE_STARTER_PRICE_ID ?? ""}
-          proPriceId={process.env.STRIPE_PRO_PRICE_ID ?? ""}
-          elitePriceId={process.env.STRIPE_ELITE_PRICE_ID ?? ""}
-        />
+        <PricingCards signedIn={!!user} />
       </main>
 
       <Footer />

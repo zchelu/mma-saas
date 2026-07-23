@@ -49,13 +49,27 @@ export async function POST(request: NextRequest) {
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
-      // Both signed-in and guest buyers land on /welcome. It re-verifies the
-      // session with Stripe directly and activates the plan synchronously —
-      // never send a paying customer straight to /dashboard, since that
-      // trusts the async webhook to have already landed, which caused
-      // real customers to get bounced back to /pricing right after paying.
-      success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      // Signed-in buyers (the auth-first onboarding flow — the gym already
+      // exists via completeOnboarding/getOrCreateGym, linked by clerkUserId)
+      // land straight on /dashboard; SettlingGate there already knows how to
+      // wait out the async webhook rather than bounce prematurely (see the
+      // awaitingCheckout handling in app/dashboard/settling-gate.tsx). Guest
+      // checkouts (no signed-in user — the old pay-first fallback, kept
+      // alive per claimGymBySessionId/claimGymByRecoveryToken) still land on
+      // /welcome, which re-verifies the session with Stripe directly and
+      // activates the plan synchronously — never send a guest straight to
+      // /dashboard, since there's no account yet to link it to.
+      success_url: user
+        ? `${origin}/dashboard?checkout=success`
+        : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
+      // Mirrors subscription_data.metadata.clerkUserId below for Stripe
+      // Dashboard visibility (shows next to the customer without opening the
+      // subscription object) — the actual webhook resolution still reads the
+      // subscription metadata, not this field, since client_reference_id
+      // lives on the Checkout Session and isn't present on the
+      // customer.subscription.* events the webhook processes.
+      ...(user ? { client_reference_id: user.id } : {}),
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
       // 14-day trial on all plans, guest or signed-in alike — don't
