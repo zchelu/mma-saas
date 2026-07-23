@@ -18,12 +18,20 @@ export const upsertSubscription = internalMutation({
       .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
       .unique();
 
+    // onboardingCompleted is set true here, not in convex/onboarding.ts —
+    // this is the auth-first flow's real confirmation that Stripe actually
+    // created/updated a subscription for this clerkUserId, as opposed to
+    // the wizard merely having been filled out. Applies on every event
+    // (created/updated/deleted, see stripeWebhookAction.ts) since a
+    // canceled subscription still means onboarding genuinely happened —
+    // planStatus is what tracks current billing state, not this flag.
     if (existing) {
       await ctx.db.patch(existing._id, {
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
         plan: args.plan,
         planStatus: args.planStatus,
+        onboardingCompleted: true,
       });
     } else {
       await ctx.db.insert("gyms", {
@@ -32,6 +40,7 @@ export const upsertSubscription = internalMutation({
         stripeSubscriptionId: args.stripeSubscriptionId,
         plan: args.plan,
         planStatus: args.planStatus,
+        onboardingCompleted: true,
       });
     }
   },

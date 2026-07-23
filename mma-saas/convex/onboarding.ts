@@ -63,11 +63,18 @@ export const completeOnboarding = mutation({
       .unique();
 
     const now = Date.now();
+    // onboardingCompleted is deliberately NOT set here — it's only ever set
+    // true by upsertSubscription (convex/subscriptions.ts), once Stripe
+    // actually confirms a paid subscription via webhook. Setting it here,
+    // before checkout even runs, is what let an abandoned/failed checkout
+    // permanently strand a gym on a fake unpurchased plan (see
+    // app/onboarding/page.tsx's redirect guard). Same reasoning for not
+    // defaulting plan/planStatus on insert: an unpaid gym should have no
+    // plan at all, not a fabricated "starter"/"inactive" pair.
     const gymPatch = {
       name: gymName,
       city,
       state,
-      onboardingCompleted: true,
       ...(smsConsentConfirmed ? { smsConsentConfirmed: true, smsConsentConfirmedAt: now } : {}),
     };
 
@@ -75,8 +82,6 @@ export const completeOnboarding = mutation({
       ? existing._id
       : await ctx.db.insert("gyms", {
           clerkUserId,
-          plan: "starter",
-          planStatus: "inactive",
           createdAt: now,
           ...gymPatch,
         });

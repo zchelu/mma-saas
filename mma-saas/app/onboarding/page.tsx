@@ -21,9 +21,17 @@ export default async function OnboardingPage({
   // Already done — don't re-run the wizard over an existing gym. Covers both
   // a completed onboarding+active plan, and someone who already paid via the
   // old guest-checkout/recovery path (those gyms have stripeCustomerId set
-  // but onboardingCompleted is undefined; either signal alone is enough to
-  // skip straight to the real dashboard).
-  if (subscription.onboardingCompleted || subscription.stripeCustomerId) {
+  // but onboardingCompleted is undefined). Either signal alone used to be
+  // enough to redirect — but onboardingCompleted gets set (by
+  // convex/onboarding.ts) before Stripe Checkout ever runs, and
+  // stripeCustomerId can exist from a canceled/never-activated attempt too.
+  // Neither means the gym actually has a plan worth skipping to a dashboard
+  // for, so both are now gated on a real active/trialing planStatus — an
+  // abandoned checkout falls through to show the wizard again instead of
+  // permanently landing on a fake unpurchased plan.
+  const hasActivePlan =
+    subscription.planStatus === "active" || subscription.planStatus === "trialing";
+  if ((subscription.onboardingCompleted || subscription.stripeCustomerId) && hasActivePlan) {
     redirect("/dashboard");
   }
 
