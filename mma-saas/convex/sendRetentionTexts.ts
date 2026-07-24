@@ -9,6 +9,9 @@ import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireGym } from "./gyms";
 import { isProPlan, isElitePlan } from "./subscriptions";
+import { assertMaxLength } from "./validate";
+
+const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
 
 export const getAtRiskMembers = internalQuery({
   args: { gymId: v.id("gyms") },
@@ -94,7 +97,8 @@ export const releaseRetentionRunLock = internalMutation({
 async function sendRetentionTextsCore(
   ctx: ActionCtx,
   gymId: Id<"gyms">,
-  gymName: string
+  gymName: string,
+  customMessage?: string
 ): Promise<{ attempted: number; succeeded: number }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -118,7 +122,15 @@ async function sendRetentionTextsCore(
 
   await Promise.all(members.map(async (member) => {
     const firstName = member.name.trim().split(/\s+/)[0];
-    const body = `Hey ${firstName}, we missed you at the gym! Come back this week and keep that momentum going. - ${gymName}. Reply STOP to opt out.`;
+    // {name} is an optional per-recipient token in a gym owner's custom
+    // message (sendManualRetentionTextsForGym) — the automated cron path
+    // never passes customMessage, so it always gets the original default
+    // wording untouched. The opt-out footer is always appended server-side,
+    // never left to the composed text, so an owner can't accidentally ship a
+    // message with no STOP instructions (TCPA requirement).
+    const body = customMessage
+      ? `${customMessage.replace(/\{name\}/gi, firstName)} Reply STOP to opt out.`
+      : `Hey ${firstName}, we missed you at the gym! Come back this week and keep that momentum going. - ${gymName}. Reply STOP to opt out.`;
 
     try {
       const res = await fetch(url, {
@@ -175,14 +187,14 @@ export const sendRetentionTextsForGym = internalAction({
 // Manual "Send Retention Texts" button path — Elite only. Starter gets no
 // texting at all; Pro gets automatic only; Elite gets both.
 export const sendManualRetentionTextsForGym = internalAction({
-  args: { gymId: v.id("gyms") },
-  handler: async (ctx, { gymId }) => {
+  args: { gymId: v.id("gyms"), message: v.string() },
+  handler: async (ctx, { gymId, message }) => {
     const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
     if (!gym || !isElitePlan(gym)) {
       console.log(`Gym ${gymId} is not an active Elite gym — skipping manual retention texts`);
       return;
     }
-    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym", message);
     if (succeeded === 0) {
       // Mirrors sendRetentionTextsForGym's fix: triggerRetentionTexts claims
       // the run lock synchronously before scheduling this action, so a
@@ -212,12 +224,16 @@ export const sendRetentionTextsSMS = internalAction({
 // Elite gate the way relying solely on the downstream action's silent no-op
 // would.
 export const triggerRetentionTexts = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { message: v.string() },
+  handler: async (ctx, { message }) => {
     const gym = await requireGym(ctx);
     if (!isElitePlan(gym)) {
       throw new Error("Manual retention texts are an Elite-plan feature");
     }
+
+    const trimmed = message.trim();
+    if (!trimmed) throw new Error("Message can't be empty");
+    assertMaxLength(trimmed, MAX_MESSAGE_LENGTH, "Message");
 
     // Claimed synchronously here (not left to the scheduled action) so a
     // double-click or a scripted loop gets an immediate rejection instead of
@@ -231,6 +247,9 @@ export const triggerRetentionTexts = mutation({
     }
     await ctx.db.patch(gym._id, { lastRetentionRunAt: now });
 
-    await ctx.scheduler.runAfter(0, internal.sendRetentionTexts.sendManualRetentionTextsForGym, { gymId: gym._id });
+    await ctx.scheduler.runAfter(0, internal.sendRetentionTexts.sendManualRetentionTextsForGym, {
+      gymId: gym._id,
+      message: trimmed,
+    });
   },
 });

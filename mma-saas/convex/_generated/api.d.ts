@@ -22,6 +22,7 @@ import type * as onboarding from "../onboarding.js";
 import type * as promotionCriteria from "../promotionCriteria.js";
 import type * as rateLimit from "../rateLimit.js";
 import type * as recoveryAction from "../recoveryAction.js";
+import type * as seedDemoGym from "../seedDemoGym.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
 import type * as stripeWebhookAction from "../stripeWebhookAction.js";
 import type * as subscriptions from "../subscriptions.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   promotionCriteria: typeof promotionCriteria;
   rateLimit: typeof rateLimit;
   recoveryAction: typeof recoveryAction;
+  seedDemoGym: typeof seedDemoGym;
   sendRetentionTexts: typeof sendRetentionTexts;
   stripeWebhookAction: typeof stripeWebhookAction;
   subscriptions: typeof subscriptions;
