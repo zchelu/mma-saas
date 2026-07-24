@@ -1,9 +1,64 @@
 "use node";
 
 import Stripe from "stripe";
+import { Resend } from "resend";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { PLAN_PRICE_USD } from "../lib/plans";
+
+const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
+
+// Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires written
+// post-purchase confirmation of price/frequency/cancellation — the
+// onboarding wizard's on-screen disclosure alone doesn't satisfy that.
+// Fires off customer.subscription.created only, which Stripe never re-fires
+// for the same subscription, so this can't duplicate on renewals/upgrades.
+// Failure is logged, not thrown, so a Resend outage doesn't fail the whole
+// webhook and trigger a Stripe retry that would re-run the (idempotent)
+// upsert for nothing.
+async function sendTrialConfirmationEmail(
+  stripe: Stripe,
+  customerId: string,
+  plan: string,
+  trialEnd: number | null
+) {
+  if (!trialEnd) return;
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted || !customer.email) return;
+
+    const price = PLAN_PRICE_USD[plan];
+    const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1);
+    const trialEndDate = new Date(trialEnd * 1000).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: "KombatDesk <billing@kombatdesk.com>",
+      to: customer.email,
+      subject: `Your KombatDesk ${planLabel} trial has started`,
+      text: [
+        `Your 14-day free trial of KombatDesk ${planLabel} has started.`,
+        ``,
+        `Plan: KombatDesk ${planLabel} — $${price}/month`,
+        `Trial: 14 days, ends ${trialEndDate}`,
+        `Billing frequency: monthly, starting ${trialEndDate}`,
+        `Total due today: $0.00`,
+        ``,
+        `Cancel anytime before your trial ends to avoid being charged. Manage or cancel your subscription here:`,
+        MANAGE_SUBSCRIPTION_URL,
+        ``,
+        `Questions? Just reply to this email.`,
+      ].join("\n"),
+    });
+  } catch (err) {
+    console.error("Trial confirmation email failed to send:", err);
+  }
+}
 
 // Phase 2 complete: upsertSubscription/upsertUnclaimedSubscription/
 // updatePlanStatusByCustomer are now internalMutation — unreachable by any
@@ -61,6 +116,10 @@ export const verifyAndProcess = action({
             plan,
             planStatus,
           });
+        }
+
+        if (event.type === "customer.subscription.created") {
+          await sendTrialConfirmationEmail(stripe, customerId, plan, sub.trial_end);
         }
         break;
       }
