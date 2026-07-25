@@ -2,11 +2,17 @@ import { QueryCtx, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { ConvexError } from "convex/values";
 
-// Statuses that unlock write access — deliberately the same set
-// isProPlan/isElitePlan already treat as "really subscribed" in
-// subscriptions.ts. Neither "inactive" (never subscribed) nor a lapsed
-// "canceled"/"past_due" qualifies.
+// Statuses that unlock write access. Neither "inactive" (never subscribed)
+// nor a lapsed "canceled"/"past_due" qualifies. Also the definition of
+// "actually subscribed" for retention texting (convex/sendRetentionTexts.ts)
+// now that texting access no longer depends on plan tier — every
+// academy/fightteam/blackbelt gym gets the same access, gated only on
+// whether billing is live.
 const WRITE_ALLOWED_STATUSES = new Set(["active", "trialing"]);
+
+export function hasWriteAccess(gym: { planStatus?: string }): boolean {
+  return !!gym.planStatus && WRITE_ALLOWED_STATUSES.has(gym.planStatus);
+}
 
 // requireGym blocks "inactive" gyms (never completed checkout — the default
 // planStatus getOrCreateGym assigns before any Stripe purchase) outright,
@@ -57,7 +63,7 @@ export async function requireGym(
 // here from making any change until billing is reactive again. "inactive"
 // gyms never reach this point at all — requireGym already rejected them.
 export function requireWriteAccess(gym: Doc<"gyms">): void {
-  if (!gym.planStatus || !WRITE_ALLOWED_STATUSES.has(gym.planStatus)) {
+  if (!hasWriteAccess(gym)) {
     // ConvexError, not a plain Error — see assertReadAccess above.
     throw new ConvexError(
       "Your subscription isn't active — reactivate billing to make changes. You can still view your existing data."

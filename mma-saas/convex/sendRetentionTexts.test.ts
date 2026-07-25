@@ -45,3 +45,27 @@ test("getAtRiskMembers excludes members with a phone but unconfirmed SMS consent
 
   expect(atRisk.map((m) => m.name)).toEqual(["Consented Member"]);
 });
+
+// Retention texting used to be tiered (isProPlan/isElitePlan, removed): only
+// fightteam/blackbelt got automated texts, only blackbelt got manual. All
+// three tiers now get identical access — the only thing that still gates a
+// gym out is billing status, the same bar as any other gym-scoped write
+// (requireWriteAccess/hasWriteAccess in convex/gyms.ts). This confirms the
+// cron dispatcher's source list (listTextableGyms) reflects that: an academy
+// gym gets included, and a canceled fightteam gym does not, even though
+// under the old gate the tiers ranking would have been reversed.
+test("listTextableGyms includes every tier alike, gated on billing status only", async () => {
+  const t = convexTest(schema, modules);
+
+  const [academyActive, fightteamCanceled, blackbeltTrialing] = await t.run(async (ctx) => [
+    await ctx.db.insert("gyms", { plan: "academy", planStatus: "active" }),
+    await ctx.db.insert("gyms", { plan: "fightteam", planStatus: "canceled" }),
+    await ctx.db.insert("gyms", { plan: "blackbelt", planStatus: "trialing" }),
+  ]);
+
+  const textable = await t.query(internal.subscriptions.listTextableGyms, {});
+  const textableIds = textable.map((g) => g._id).sort();
+
+  expect(textableIds).toEqual([academyActive, blackbeltTrialing].sort());
+  expect(textableIds).not.toContain(fightteamCanceled);
+});

@@ -7,8 +7,7 @@ import { internalAction, internalMutation, internalQuery, mutation, ActionCtx } 
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireGym } from "./gyms";
-import { isProPlan, isElitePlan } from "./subscriptions";
+import { requireGym, requireWriteAccess, hasWriteAccess } from "./gyms";
 import { assertMaxLength } from "./validate";
 
 const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
@@ -158,14 +157,15 @@ async function sendRetentionTextsCore(
   return { attempted: members.length, succeeded };
 }
 
-// Automated cron path — Pro/Elite only. Automation is the paid differentiator;
-// the manual button below is available to any active plan, including Starter.
+// Automated cron path — every subscribed gym gets it, all three tiers alike;
+// the only gate left is whether billing is actually active (same bar as any
+// gym-scoped write, see hasWriteAccess).
 export const sendRetentionTextsForGym = internalAction({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
     const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
-    if (!gym || !isProPlan(gym)) {
-      console.log(`Gym ${gymId} is not an active Pro/Elite gym — skipping automated retention texts`);
+    if (!gym || !hasWriteAccess(gym)) {
+      console.log(`Gym ${gymId} is not actively subscribed — skipping automated retention texts`);
       return;
     }
     const claimed = await ctx.runMutation(internal.sendRetentionTexts.claimRetentionRunLock, { gymId });
@@ -184,14 +184,15 @@ export const sendRetentionTextsForGym = internalAction({
   },
 });
 
-// Manual "Send Retention Texts" button path — Elite only. Starter gets no
-// texting at all; Pro gets automatic only; Elite gets both.
+// Manual "Send Retention Texts" button path — available to every subscribed
+// gym, same as the automated path above; both read the same billing-status
+// gate now that texting isn't tiered.
 export const sendManualRetentionTextsForGym = internalAction({
   args: { gymId: v.id("gyms"), message: v.string() },
   handler: async (ctx, { gymId, message }) => {
     const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
-    if (!gym || !isElitePlan(gym)) {
-      console.log(`Gym ${gymId} is not an active Elite gym — skipping manual retention texts`);
+    if (!gym || !hasWriteAccess(gym)) {
+      console.log(`Gym ${gymId} is not actively subscribed — skipping manual retention texts`);
       return;
     }
     const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym", message);
@@ -206,30 +207,30 @@ export const sendManualRetentionTextsForGym = internalAction({
   },
 });
 
-// Cron entry point — fans out to every active Pro/Elite gym individually so
-// one gym's plan never gates or blends into another gym's retention texts.
+// Cron entry point — fans out to every actively-subscribed gym individually
+// so one gym's status never gates or blends into another gym's retention texts.
 export const sendRetentionTextsSMS = internalAction({
   args: {},
   handler: async (ctx) => {
-    const proGyms = await ctx.runQuery(internal.subscriptions.listProGyms);
-    for (const gym of proGyms) {
+    const textableGyms = await ctx.runQuery(internal.subscriptions.listTextableGyms);
+    for (const gym of textableGyms) {
       await ctx.runAction(internal.sendRetentionTexts.sendRetentionTextsForGym, { gymId: gym._id });
     }
   },
 });
 
-// Manual "Send Retention Texts" button — scoped to the caller's own gym, and
-// rejected outright for anything but an active Elite plan. Enforced here (not
-// just hidden in the UI) so a direct call to this mutation can't bypass the
-// Elite gate the way relying solely on the downstream action's silent no-op
-// would.
+// Manual "Send Retention Texts" button — scoped to the caller's own gym.
+// requireWriteAccess is the same gate every other gym-scoped write goes
+// through (members.add, classes.add, etc.) — texting isn't tier-gated
+// anymore, but a canceled/past_due gym still can't trigger it, same as it
+// can't create a member. Enforced here (not just hidden in the UI) so a
+// direct call to this mutation can't bypass that the way relying solely on
+// the downstream action's silent no-op would.
 export const triggerRetentionTexts = mutation({
   args: { message: v.string() },
   handler: async (ctx, { message }) => {
     const gym = await requireGym(ctx);
-    if (!isElitePlan(gym)) {
-      throw new Error("Manual retention texts are an Elite-plan feature");
-    }
+    requireWriteAccess(gym);
 
     const trimmed = message.trim();
     if (!trimmed) throw new Error("Message can't be empty");

@@ -1,9 +1,8 @@
 /// <reference types="vite/client" />
 // Verifies the planStatus enforcement added to requireGym()/requireWriteAccess()
-// (convex/gyms.ts) and the isProPlan/isElitePlan retention-text gating
-// (convex/subscriptions.ts). Runs entirely against convex-test's local
-// simulated backend — no real Convex deployment, Clerk session, or Stripe
-// call involved, so this is safe to run anytime with `npm run test:once`.
+// (convex/gyms.ts). Runs entirely against convex-test's local simulated
+// backend — no real Convex deployment, Clerk session, or Stripe call
+// involved, so this is safe to run anytime with `npm run test:once`.
 //
 // t.withIdentity({ subject }) fakes ctx.auth.getUserIdentity() — requireGym
 // resolves the gym by identity.subject === gyms.clerkUserId, so seeding a
@@ -14,7 +13,6 @@ import { ConvexError } from "convex/values";
 import { expect, test, describe } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { isProPlan, isElitePlan } from "./subscriptions";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -182,28 +180,4 @@ test("flipping planStatus from canceled to active immediately restores write acc
   await expect(
     asOwner.mutation(api.members.add, { name: "Allowed", plan: "x", status: "active" })
   ).resolves.toBeDefined();
-});
-
-// --- Scenario 4: isProPlan/isElitePlan retention-text gating is unaffected
-// by the planStatus write-gate work - these are separate, pure functions. ---
-describe("isProPlan / isElitePlan", () => {
-  test.each([
-    [{ plan: "academy", planStatus: "active" }, false, false],
-    [{ plan: "fightteam", planStatus: "active" }, true, false],
-    [{ plan: "fightteam", planStatus: "trialing" }, true, false],
-    [{ plan: "fightteam", planStatus: "canceled" }, false, false],
-    [{ plan: "fightteam", planStatus: "past_due" }, false, false],
-    [{ plan: "blackbelt", planStatus: "active" }, true, true],
-    [{ plan: "blackbelt", planStatus: "trialing" }, true, true],
-    [{ plan: "blackbelt", planStatus: "canceled" }, false, false],
-    [{ plan: "blackbelt", planStatus: "past_due" }, false, false],
-  ] as const)("%o -> isProPlan=%s isElitePlan=%s", (gym, pro, elite) => {
-    expect(isProPlan(gym)).toBe(pro);
-    expect(isElitePlan(gym)).toBe(elite);
-  });
-
-  test("null/undefined gym is neither", () => {
-    expect(isProPlan(null)).toBe(false);
-    expect(isElitePlan(null)).toBe(false);
-  });
 });
