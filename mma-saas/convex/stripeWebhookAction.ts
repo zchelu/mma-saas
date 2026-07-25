@@ -5,7 +5,7 @@ import { Resend } from "resend";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { PLAN_PRICE_USD } from "../lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD } from "../lib/plans";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 
@@ -28,8 +28,16 @@ async function sendTrialConfirmationEmail(
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted || !customer.email) return;
 
+    // Explicit lookup, not slug capitalization — that rendered multi-word
+    // tiers as "Fightteam"/"Blackbelt". Bail rather than send a confirmation
+    // quoting "$undefined" for a slug we have no copy for; this email is the
+    // C.R.S. 6-1-732 record, so a wrong one is worse than a missing one.
     const price = PLAN_PRICE_USD[plan];
-    const planLabel = plan.charAt(0).toUpperCase() + plan.slice(1);
+    const planLabel = PLAN_LABEL[plan];
+    if (price === undefined || planLabel === undefined) {
+      console.error(`Trial confirmation email skipped: no price/label copy for plan "${plan}"`);
+      return;
+    }
     const trialEndDate = new Date(trialEnd * 1000).toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",

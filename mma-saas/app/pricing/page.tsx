@@ -4,8 +4,8 @@ import { Footer } from "../components/footer";
 
 // Single place to change tier names, prices, and slugs for this page. These
 // slugs are display/routing only — the Stripe price mapping is untouched and
-// still keyed off the old starter/pro/elite slugs, so these will fall through
-// at /onboarding until that mapping is wired.
+// still keyed off the old starter/pro/elite slugs, so checkout for these tiers
+// stops at the wizard's "plan isn't available" guard until Prices are created.
 export const PRICING_TIERS = [
   {
     slug: "academy",
@@ -16,8 +16,8 @@ export const PRICING_TIERS = [
     perks: [] as string[],
   },
   {
-    slug: "pro",
-    name: "Pro",
+    slug: "fightteam",
+    name: "Fight Team",
     size: "101–250 members",
     price: 179,
     foundingPrice: 139,

@@ -5,7 +5,9 @@ import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 import OnboardingWizard from "./onboarding-wizard";
 
-const VALID_PLANS = new Set(["starter", "pro", "elite"]);
+// pricing-v2 tiers plus the legacy slugs, which still arrive on in-flight links
+// and are still what the Stripe webhook writes to gym records.
+const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt", "starter", "pro", "elite"]);
 
 export default async function OnboardingPage({
   searchParams,

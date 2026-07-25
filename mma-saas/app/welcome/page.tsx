@@ -3,8 +3,7 @@ import { redirect } from "next/navigation";
 import { fetchAction, fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
-
-const PLAN_LABEL: Record<string, string> = { starter: "Starter", pro: "Pro", elite: "Elite" };
+import { PLAN_LABEL } from "@/lib/plans";
 
 function CenteredMessage({ children }: { children: React.ReactNode }) {
   return (

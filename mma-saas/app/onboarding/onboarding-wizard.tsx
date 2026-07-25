@@ -3,9 +3,8 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { PLAN_PRICE_USD } from "@/lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD } from "@/lib/plans";
 
-const PLAN_LABEL: Record<string, string> = { starter: "Starter", pro: "Pro", elite: "Elite" };
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
 
 // Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires the auto-renewal
@@ -65,9 +64,10 @@ export default function OnboardingWizard({
   priceIdByPlan: Record<string, string | undefined>;
 }) {
   const plan = initialPlan;
-  // Starter has no SMS retention texting at all (see subscriptions.ts
-  // isProPlan/isElitePlan), so there's nothing for the consent attestation
-  // to cover — only Pro/Elite gate on it.
+  // Legacy Starter had no SMS retention texting at all (see subscriptions.ts
+  // isProPlan/isElitePlan), so there was nothing for the consent attestation to
+  // cover. The pricing-v2 tiers all include winback texts, so none of them match
+  // here and all three correctly show the consent step.
   const skipConsent = plan === "starter";
   const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
 
@@ -171,7 +171,7 @@ export default function OnboardingWizard({
             SMS consent
           </h1>
           <p className="text-sm mb-2" style={{ color: "#888888" }}>
-            {gymName} · {PLAN_LABEL[plan]}
+            {gymName} · {PLAN_LABEL[plan] ?? plan}
           </p>
 
           <label

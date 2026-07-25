@@ -1,6 +1,7 @@
 import { SignUpGate } from "./signup-gate";
 
-const VALID_PLANS = new Set(["starter", "pro", "elite"]);
+// pricing-v2 tiers plus the legacy slugs, which still arrive on in-flight links.
+const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt", "starter", "pro", "elite"]);
 
 export default async function SignUpPage({
   searchParams,
