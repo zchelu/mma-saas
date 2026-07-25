@@ -4,6 +4,7 @@ import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
+import { MAX_WINBACK_ATTEMPTS } from "./sendRetentionTexts";
 
 export const getAll = query({
   args: {},
@@ -251,6 +252,18 @@ export const checkIn = mutation({
       });
     }
 
+    // Winback sequence reset, deliberately outside the once-per-day branch
+    // above: walking through the door ends the sequence, whether or not this
+    // is the member's first scan today. A dormant member who returns is fully
+    // rearmed, so a future lapse starts a clean three attempts rather than
+    // finding a spent counter and never being texted again. Guarded so an
+    // ordinary check-in by a member with nothing to clear writes nothing.
+    // Safe to read off the `member` snapshot taken above: the patch in this
+    // mutation touches neither winback field.
+    if ((member.winbackAttempts ?? 0) > 0 || member.winbackDormantAt !== undefined) {
+      await ctx.db.patch(id, { winbackAttempts: 0, winbackDormantAt: undefined });
+    }
+
     await ctx.db.insert("checkIns", { memberId: id, gymId, timestamp: now, clientScannedAt, idempotencyKey });
   },
 });
@@ -284,6 +297,34 @@ export const getAtRiskMembers = query({
     return all.filter(
       (m) => m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
     );
+  },
+});
+
+// Members who exhausted the three-attempt winback sequence and are no longer
+// being texted (see convex/sendRetentionTexts.ts). Deliberately separate from
+// getAtRiskMembers above, which still lists them — this is the "we've stopped
+// reaching out, it's a phone call from you now" list. Authenticated and
+// double-scoped: requireGym establishes the caller's own gym, and the passed
+// gymId must match it, so this can't be pointed at another gym's roster.
+export const getDormantMembers = query({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    const gym = await requireGym(ctx);
+    if (gym._id !== gymId) throw new Error("Gym not found");
+    const all = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gymId))
+      .collect();
+    return all
+      .filter((m) => (m.winbackAttempts ?? 0) >= MAX_WINBACK_ATTEMPTS)
+      .sort((a, b) => (b.winbackDormantAt ?? 0) - (a.winbackDormantAt ?? 0))
+      .map((m) => ({
+        _id: m._id,
+        name: m.name,
+        phone: m.phone,
+        lastVisit: m.lastVisit,
+        winbackDormantAt: m.winbackDormantAt,
+      }));
   },
 });
 

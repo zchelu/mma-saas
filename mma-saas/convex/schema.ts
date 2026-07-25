@@ -12,6 +12,16 @@ export default defineSchema({
     beltRank: v.optional(v.string()),
     lastVisit: v.optional(v.string()),
     lastRetentionTextAt: v.optional(v.number()),
+    // Winback termination cap. lastRetentionTextAt sets the *cadence* (one
+    // text per member per 7 days); these set the *end*: after 3 confirmed
+    // sends the member goes dormant and is never texted again until they
+    // check in. Both optional with no backfill — undefined winbackAttempts
+    // is read as 0 everywhere, so every pre-existing member starts with a
+    // full three attempts. Written together by
+    // sendRetentionTexts.ts:recordRetentionText, cleared together by
+    // members.ts:checkIn.
+    winbackAttempts: v.optional(v.number()),
+    winbackDormantAt: v.optional(v.number()),
     smsConsentConfirmed: v.optional(v.boolean()),
     smsConsentConfirmedAt: v.optional(v.number()),
     smsOptedOut: v.optional(v.boolean()),

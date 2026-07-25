@@ -13,6 +13,10 @@ import { assertMaxLength } from "./validate";
 
 const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
 
+// Winback attempts a member gets per cold streak before going dormant. Paired
+// with the per-member 7-day gate below, that's ~three weeks of outreach.
+export const MAX_WINBACK_ATTEMPTS = 3;
+
 export const getAtRiskMembers = internalQuery({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
@@ -33,15 +37,42 @@ export const getAtRiskMembers = internalQuery({
       if (!m.phone || !m.smsConsentConfirmed || m.status !== "active" || m.smsOptedOut) return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
       const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
-      return inactiveEnough && notRecentlyTexted;
+      // Termination cap, layered on top of (not replacing) the 7-day cadence
+      // gate above: three confirmed sends over ~three weeks, then we leave
+      // them alone permanently. Undefined counts as 0, so members predating
+      // the field get all three attempts. Cleared by members.ts:checkIn, so
+      // a member who comes back and lapses again starts a clean sequence.
+      const attemptsLeft = (m.winbackAttempts ?? 0) < MAX_WINBACK_ATTEMPTS;
+      return inactiveEnough && notRecentlyTexted && attemptsLeft;
     });
   },
 });
 
+// The single write that records a delivered winback text. Called from exactly
+// one place — inside sendRetentionTextsCore's `if (res.ok)` branch, after
+// Twilio has accepted the message — so the attempt counter can only advance on
+// a confirmed send. A non-ok response or a thrown fetch never reaches here, and
+// therefore never burns one of the member's three attempts.
+//
+// Cadence and cap are set in the same patch deliberately: they were never two
+// writes, and keeping them in one transaction means there's no window where a
+// member is marked as texted but not counted (or counted twice).
 export const recordRetentionText = internalMutation({
-  args: { memberId: v.id("members") },
-  handler: async (ctx, { memberId }) => {
-    await ctx.db.patch(memberId, { lastRetentionTextAt: Date.now() });
+  args: { memberId: v.id("members"), gymId: v.id("gyms") },
+  handler: async (ctx, { memberId, gymId }) => {
+    const member = await ctx.db.get(memberId);
+    // gymId is passed and checked rather than trusted from the caller's loop
+    // so this internal mutation can't be made to write across gym boundaries.
+    if (!member || member.gymId !== gymId) throw new Error("Member not found");
+
+    const attempts = (member.winbackAttempts ?? 0) + 1;
+    await ctx.db.patch(memberId, {
+      lastRetentionTextAt: Date.now(),
+      winbackAttempts: attempts,
+      // Stamped on the write that reaches the cap, so winbackDormantAt always
+      // means "when the third text went out".
+      ...(attempts >= MAX_WINBACK_ATTEMPTS ? { winbackDormantAt: Date.now() } : {}),
+    });
   },
 });
 
@@ -144,7 +175,7 @@ async function sendRetentionTextsCore(
 
       if (res.ok) {
         console.log(`SMS sent to ${member.name} (${member.phone})`);
-        await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, { memberId: member._id });
+        await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, { memberId: member._id, gymId });
         succeeded++;
       } else {
         const text = await res.text();
