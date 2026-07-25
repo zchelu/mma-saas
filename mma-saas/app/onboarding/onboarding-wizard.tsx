@@ -3,17 +3,16 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
 
-const PLAN_LABEL: Record<string, string> = { starter: "Starter", pro: "Pro", elite: "Elite" };
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
 
 // Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires the auto-renewal
 // terms be clear and conspicuous immediately adjacent to the enrollment
 // button — not just earlier on /pricing. Price and trial length both come from
-// lib/plans.ts — the same source pricing-cards.tsx and the Stripe checkout
-// route use — so this can't drift from what the customer saw there or from
-// what Stripe actually grants.
+// lib/plans.ts — the same source app/pricing/page.tsx uses for price — so
+// this can't drift from what the customer saw there or from what Stripe
+// actually grants.
 function RenewalDisclosure({ plan }: { plan: string }) {
   const price = PLAN_PRICE_USD[plan];
   return (
@@ -66,10 +65,13 @@ export default function OnboardingWizard({
   priceIdByPlan: Record<string, string | undefined>;
 }) {
   const plan = initialPlan;
-  // Starter has no SMS retention texting at all (see subscriptions.ts
-  // isProPlan/isElitePlan), so there's nothing for the consent attestation
-  // to cover — only Pro/Elite gate on it.
-  const skipConsent = plan === "starter";
+  // No renamed tier skips the consent step: every academy/fightteam/blackbelt
+  // plan includes winback texts (see the pricing page's "included in every
+  // plan" list), unlike legacy Starter, which had none and used to skip this.
+  // Not a rename of that old `plan === "starter"` check — academy inherits
+  // Starter's price tier, not its feature set, so mechanically renaming the
+  // string would have silently resurrected the skip for Academy.
+  const skipConsent = false;
   const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
 
   const [step, setStep] = useState(0);
@@ -172,7 +174,7 @@ export default function OnboardingWizard({
             SMS consent
           </h1>
           <p className="text-sm mb-2" style={{ color: "#888888" }}>
-            {gymName} · {PLAN_LABEL[plan]}
+            {gymName} · {PLAN_LABEL[plan] ?? plan}
           </p>
 
           <label

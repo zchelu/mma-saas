@@ -1,6 +1,6 @@
 import { SignUpGate } from "./signup-gate";
 
-const VALID_PLANS = new Set(["starter", "pro", "elite"]);
+const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt"]);
 
 export default async function SignUpPage({
   searchParams,

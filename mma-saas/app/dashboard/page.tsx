@@ -74,7 +74,12 @@ export default async function DashboardPage({
           <h1 className="text-3xl" style={{ color: "#FFFFFF", fontWeight: 500 }}>
             Welcome back, {user.firstName ?? "Coach"}
           </h1>
-          {subscription.plan === "elite" && <RetentionButton />}
+          {/* Every tier gets manual retention texts now — this mirrors the
+              server-side gate (requireWriteAccess in triggerRetentionTexts),
+              not a plan check, so canceled/past_due still don't see it. */}
+          {(subscription.planStatus === "active" || subscription.planStatus === "trialing") && (
+            <RetentionButton />
+          )}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
         {memberCount === 0 && (

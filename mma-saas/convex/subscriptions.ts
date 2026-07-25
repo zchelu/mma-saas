@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
+import { hasWriteAccess } from "./gyms";
 
 export const upsertSubscription = internalMutation({
   args: {
@@ -133,7 +134,7 @@ export const claimGymBySessionId = action({
     const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
     const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
     const priceId = sub?.items?.data?.[0]?.price?.id;
-    const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
+    const plan = priceId === elitePriceId ? "blackbelt" : priceId === proPriceId ? "fightteam" : "academy";
 
     return await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
       clerkUserId: identity.subject,
@@ -218,7 +219,7 @@ export const claimGymByCustomer = internalMutation({
       clerkUserId,
       stripeCustomerId,
       ...(stripeSubscriptionId ? { stripeSubscriptionId } : {}),
-      plan: plan ?? "starter",
+      plan: plan ?? "academy",
       planStatus: planStatus ?? "inactive",
       createdAt: Date.now(),
     });
@@ -346,7 +347,7 @@ export const getOrCreateGym = mutation({
     const gymId = await ctx.db.insert("gyms", {
       clerkUserId,
       name: defaultName ?? "My Gym",
-      plan: "starter",
+      plan: "academy",
       planStatus: "inactive",
       createdAt: Date.now(),
     });
@@ -397,22 +398,6 @@ export const updatePlanStatusByCustomer = internalMutation({
   },
 });
 
-export function isProPlan(gym: { plan?: string; planStatus?: string } | null): boolean {
-  return (
-    !!gym &&
-    (gym.plan === "pro" || gym.plan === "elite") &&
-    (gym.planStatus === "active" || gym.planStatus === "trialing")
-  );
-}
-
-export function isElitePlan(gym: { plan?: string; planStatus?: string } | null): boolean {
-  return (
-    !!gym &&
-    gym.plan === "elite" &&
-    (gym.planStatus === "active" || gym.planStatus === "trialing")
-  );
-}
-
 export const getGymById = internalQuery({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
@@ -421,11 +406,14 @@ export const getGymById = internalQuery({
 });
 
 // Used by the retention-text cron dispatcher to fan out per gym instead of
-// treating "any gym anywhere is Pro" as license to text every gym's members.
-export const listProGyms = internalQuery({
+// treating "any gym anywhere is subscribed" as license to text every gym's
+// members. All three tiers get identical texting access — this filters on
+// billing status only (hasWriteAccess, same bar as any other gym-scoped
+// write), not plan.
+export const listTextableGyms = internalQuery({
   args: {},
   handler: async (ctx) => {
     const gyms = await ctx.db.query("gyms").collect();
-    return gyms.filter(isProPlan);
+    return gyms.filter(hasWriteAccess);
   },
 });

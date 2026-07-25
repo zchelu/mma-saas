@@ -49,7 +49,7 @@ export const completeOnboarding = mutation({
     // permanently strand a gym on a fake unpurchased plan (see
     // app/onboarding/page.tsx's redirect guard). Same reasoning for not
     // defaulting plan/planStatus on insert: an unpaid gym should have no
-    // plan at all, not a fabricated "starter"/"inactive" pair.
+    // plan at all, not a fabricated "academy"/"inactive" pair.
     const gymPatch = {
       name: gymName,
       city,
