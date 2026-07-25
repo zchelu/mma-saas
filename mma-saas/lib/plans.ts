@@ -3,38 +3,25 @@
 // confirmation email, so they can never drift apart. Actual billing amounts
 // live in Stripe (the STRIPE_*_PRICE_ID env vars); this is purely display copy.
 //
-// Two generations of slugs live here on purpose:
-//
-//   academy / fightteam / blackbelt — the pricing-v2 tiers. These only ever
-//   reach the app through the ?plan= query param on a /pricing CTA, because no
-//   Stripe Price exists for them yet.
-//
-//   starter / pro / elite — the legacy tiers. These are NOT dead keys. They are
-//   still the only slugs the billing path can produce: the plan slug is derived
-//   from the Stripe Price ID in convex/stripeWebhookAction.ts and
-//   convex/subscriptions.ts, so every gym row and every trial email is keyed off
-//   them until the new Prices are created and that derivation is renamed.
-//   Dropping them renders "$undefined" into the Colorado ARL trial email.
+// One generation of slugs as of the starter/pro/elite -> academy/fightteam/
+// blackbelt rename: the plan slug the Stripe webhook derives
+// (convex/stripeWebhookAction.ts, convex/subscriptions.ts) now writes these
+// same academy/fightteam/blackbelt values to gym rows — same three Stripe
+// Prices as before (STRIPE_STARTER_PRICE_ID/etc. env var names are
+// unchanged), just relabeled. See the rename's PR notes for the one open gap
+// this doesn't close: these dollar amounts ($99/$179/$299) don't match what
+// those three Stripe Prices actually charge ($49/$89/$149) until new Prices
+// are created and pointed at from the checkout route + onboarding wizard.
 export const PLAN_PRICE_USD: Record<string, number> = {
-  // pricing-v2 tiers
   academy: 99,
   fightteam: 179,
   blackbelt: 299,
-  // legacy tiers — still live on the Stripe webhook path
-  starter: 49,
-  pro: 89,
-  elite: 149,
 };
 
 // Explicit map rather than capitalizing the slug — "fightteam" and "blackbelt"
 // are single tokens that would render as "Fightteam" and "Blackbelt".
 export const PLAN_LABEL: Record<string, string> = {
-  // pricing-v2 tiers
   academy: "Academy",
   fightteam: "Fight Team",
   blackbelt: "Black Belt",
-  // legacy tiers
-  starter: "Starter",
-  pro: "Pro",
-  elite: "Elite",
 };

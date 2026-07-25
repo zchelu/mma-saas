@@ -33,7 +33,7 @@ async function seedGym(
 describe("requireGym blocks inactive gyms outright", () => {
   test.each([undefined, "inactive"])("planStatus=%s -> getAll rejects", async (planStatus) => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus });
 
     await expect(asOwner.query(api.members.getAll, {})).rejects.toThrow(
       "An active subscription is required to access this feature"
@@ -62,7 +62,7 @@ describe("requireGym blocks inactive gyms outright", () => {
 describe("canceled/past_due gyms: read allowed, write blocked", () => {
   test.each(["canceled", "past_due"])("planStatus=%s -> getAll resolves", async (planStatus) => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus });
 
     await expect(asOwner.query(api.members.getAll, {})).resolves.toEqual([]);
   });
@@ -77,7 +77,7 @@ describe("canceled/past_due gyms: read allowed, write blocked", () => {
     "planStatus=%s -> members.add rejects with the reactivate-billing message",
     async (planStatus) => {
       const t = convexTest(schema, modules);
-      const asOwner = await seedGym(t, { plan: "pro", planStatus });
+      const asOwner = await seedGym(t, { plan: "fightteam", planStatus });
 
       await expect(asOwner.mutation(api.members.add, memberFields)).rejects.toThrow(
         "Your subscription isn't active — reactivate billing to make changes. You can still view your existing data."
@@ -87,7 +87,7 @@ describe("canceled/past_due gyms: read allowed, write blocked", () => {
 
   test("the write-gate error is a ConvexError (survives prod redaction)", async () => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus: "past_due" });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus: "past_due" });
 
     let threw = false;
     try {
@@ -106,7 +106,7 @@ describe("canceled/past_due gyms: read allowed, write blocked", () => {
   // comment history) and it'd be easy for a new mutation to forget the call.
   test("classes.add is also blocked when past_due", async () => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus: "past_due" });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus: "past_due" });
 
     await expect(
       asOwner.mutation(api.classes.add, {
@@ -120,7 +120,7 @@ describe("canceled/past_due gyms: read allowed, write blocked", () => {
 
   test("invoices.add is also blocked when canceled", async () => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus: "active" });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus: "active" });
     const memberId = await t.run(async (ctx) =>
       ctx.db.insert("members", { ...memberFields, gymId: (await ctx.db.query("gyms").first())!._id })
     );
@@ -148,7 +148,7 @@ describe("canceled/past_due gyms: read allowed, write blocked", () => {
 describe("active/trialing gyms have full read+write access", () => {
   test.each(["active", "trialing"])("planStatus=%s -> members.add resolves and getAll sees it", async (planStatus) => {
     const t = convexTest(schema, modules);
-    const asOwner = await seedGym(t, { plan: "pro", planStatus });
+    const asOwner = await seedGym(t, { plan: "fightteam", planStatus });
 
     await asOwner.mutation(api.members.add, {
       name: "Test Member",
@@ -168,7 +168,7 @@ describe("active/trialing gyms have full read+write access", () => {
 // with no other state change needed. ---
 test("flipping planStatus from canceled to active immediately restores write access", async () => {
   const t = convexTest(schema, modules);
-  const asOwner = await seedGym(t, { plan: "pro", planStatus: "canceled" });
+  const asOwner = await seedGym(t, { plan: "fightteam", planStatus: "canceled" });
 
   await expect(
     asOwner.mutation(api.members.add, { name: "Blocked", plan: "x", status: "active" })
@@ -188,15 +188,15 @@ test("flipping planStatus from canceled to active immediately restores write acc
 // by the planStatus write-gate work - these are separate, pure functions. ---
 describe("isProPlan / isElitePlan", () => {
   test.each([
-    [{ plan: "starter", planStatus: "active" }, false, false],
-    [{ plan: "pro", planStatus: "active" }, true, false],
-    [{ plan: "pro", planStatus: "trialing" }, true, false],
-    [{ plan: "pro", planStatus: "canceled" }, false, false],
-    [{ plan: "pro", planStatus: "past_due" }, false, false],
-    [{ plan: "elite", planStatus: "active" }, true, true],
-    [{ plan: "elite", planStatus: "trialing" }, true, true],
-    [{ plan: "elite", planStatus: "canceled" }, false, false],
-    [{ plan: "elite", planStatus: "past_due" }, false, false],
+    [{ plan: "academy", planStatus: "active" }, false, false],
+    [{ plan: "fightteam", planStatus: "active" }, true, false],
+    [{ plan: "fightteam", planStatus: "trialing" }, true, false],
+    [{ plan: "fightteam", planStatus: "canceled" }, false, false],
+    [{ plan: "fightteam", planStatus: "past_due" }, false, false],
+    [{ plan: "blackbelt", planStatus: "active" }, true, true],
+    [{ plan: "blackbelt", planStatus: "trialing" }, true, true],
+    [{ plan: "blackbelt", planStatus: "canceled" }, false, false],
+    [{ plan: "blackbelt", planStatus: "past_due" }, false, false],
   ] as const)("%o -> isProPlan=%s isElitePlan=%s", (gym, pro, elite) => {
     expect(isProPlan(gym)).toBe(pro);
     expect(isElitePlan(gym)).toBe(elite);

@@ -74,7 +74,7 @@ export const backfillFirstGym = internalMutation({
       gymId = await ctx.db.insert("gyms", {
         clerkUserId,
         name: gymName,
-        plan: "starter",
+        plan: "academy",
         planStatus: "active",
         createdAt: Date.now(),
       });

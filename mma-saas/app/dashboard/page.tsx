@@ -74,7 +74,7 @@ export default async function DashboardPage({
           <h1 className="text-3xl" style={{ color: "#FFFFFF", fontWeight: 500 }}>
             Welcome back, {user.firstName ?? "Coach"}
           </h1>
-          {subscription.plan === "elite" && <RetentionButton />}
+          {subscription.plan === "blackbelt" && <RetentionButton />}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
         {memberCount === 0 && (

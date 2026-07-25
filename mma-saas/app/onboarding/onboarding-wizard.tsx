@@ -10,7 +10,7 @@ const GENERIC_ERROR = "Something went wrong — please try again or contact us."
 // Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires the auto-renewal
 // terms be clear and conspicuous immediately adjacent to the enrollment
 // button — not just earlier on /pricing. Price comes from lib/plans.ts, the
-// same source pricing-cards.tsx uses, so this can't drift from what the
+// same source app/pricing/page.tsx uses, so this can't drift from what the
 // customer saw there.
 function RenewalDisclosure({ plan }: { plan: string }) {
   const price = PLAN_PRICE_USD[plan];
@@ -64,11 +64,13 @@ export default function OnboardingWizard({
   priceIdByPlan: Record<string, string | undefined>;
 }) {
   const plan = initialPlan;
-  // Legacy Starter had no SMS retention texting at all (see subscriptions.ts
-  // isProPlan/isElitePlan), so there was nothing for the consent attestation to
-  // cover. The pricing-v2 tiers all include winback texts, so none of them match
-  // here and all three correctly show the consent step.
-  const skipConsent = plan === "starter";
+  // No renamed tier skips the consent step: every academy/fightteam/blackbelt
+  // plan includes winback texts (see the pricing page's "included in every
+  // plan" list), unlike legacy Starter, which had none and used to skip this.
+  // Not a rename of that old `plan === "starter"` check — academy inherits
+  // Starter's price tier, not its feature set, so mechanically renaming the
+  // string would have silently resurrected the skip for Academy.
+  const skipConsent = false;
   const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
 
   const [step, setStep] = useState(0);

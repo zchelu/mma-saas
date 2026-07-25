@@ -18,7 +18,7 @@ async function seedGymAndMember(t: ReturnType<typeof convexTest>) {
   const { gymId, memberId } = await t.run(async (ctx) => {
     const gymId = await ctx.db.insert("gyms", {
       clerkUserId,
-      plan: "pro",
+      plan: "fightteam",
       planStatus: "active",
     });
     const memberId = await ctx.db.insert("members", {

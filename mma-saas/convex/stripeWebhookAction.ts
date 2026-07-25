@@ -103,7 +103,7 @@ export const verifyAndProcess = action({
         const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
         const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
         const priceId = sub.items.data[0]?.price.id;
-        const plan = priceId === elitePriceId ? "elite" : priceId === proPriceId ? "pro" : "starter";
+        const plan = priceId === elitePriceId ? "blackbelt" : priceId === proPriceId ? "fightteam" : "academy";
         const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
         const planStatus = event.type === "customer.subscription.deleted" ? "canceled" : sub.status;
 
