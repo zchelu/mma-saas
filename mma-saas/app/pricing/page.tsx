@@ -41,6 +41,13 @@ export const PRICING_TIERS = [
 // not by feature, so there is nothing to upsell between them.
 const CTA_LABEL = "I'm Ready to Stop the Bleeding";
 
+// Signed-out visitors sign up first and carry ?plan= through to onboarding
+// (/sign-up reads it and builds the redirect); signed-in visitors skip straight
+// to the wizard, which would otherwise bounce them to /sign-in anyway.
+function planHref(plan: string, signedIn: boolean): string {
+  return signedIn ? `/onboarding?plan=${plan}` : `/sign-up?plan=${plan}`;
+}
+
 const INCLUDED_IN_EVERY_PLAN = [
   "Every member tracked — contact info, belt rank, promotion history",
   "Front-desk self check-in",
@@ -129,7 +136,7 @@ export default async function PricingPage() {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 items-stretch">
             {PRICING_TIERS.map((tier) => (
-              <TierCard key={tier.slug} tier={tier} />
+              <TierCard key={tier.slug} tier={tier} signedIn={!!user} />
             ))}
           </div>
         </div>
@@ -210,7 +217,13 @@ export default async function PricingPage() {
   );
 }
 
-function TierCard({ tier }: { tier: (typeof PRICING_TIERS)[number] }) {
+function TierCard({
+  tier,
+  signedIn,
+}: {
+  tier: (typeof PRICING_TIERS)[number];
+  signedIn: boolean;
+}) {
   return (
     <div
       className="rounded-xl p-8 flex flex-col text-left"
@@ -249,7 +262,7 @@ function TierCard({ tier }: { tier: (typeof PRICING_TIERS)[number] }) {
       )}
 
       <Link
-        href={`/onboarding?plan=${tier.slug}`}
+        href={planHref(tier.slug, signedIn)}
         className="mt-auto rounded-lg font-semibold px-6 py-3 text-sm text-center transition-colors"
         style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
       >
