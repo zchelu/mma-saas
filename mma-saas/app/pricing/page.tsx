@@ -115,25 +115,11 @@ export default async function PricingPage() {
           </p>
         </div>
 
-        {/* 3. Guarantee */}
-        <div className="w-full max-w-2xl pb-20">
-          <div
-            className="rounded-xl px-8 py-10 text-center"
-            style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
-          >
-            <h2 className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
-              Bring back 3 members in 90 days, or I refund every dollar.
-            </h2>
-            <p className="text-sm leading-relaxed mb-5" style={{ color: "#AAAAAA" }}>
-              Import your roster and reply to the members I flag for you. That&apos;s your
-              side. If KombatDesk doesn&apos;t get at least 3 lapsed members back through
-              your door in 90 days, I refund everything you&apos;ve paid. No forms, no
-              argument.
-            </p>
-            <p className="text-sm font-semibold" style={{ color: "#FFFFFF" }}>
-              — Zain, founder
-            </p>
-          </div>
+        {/* 3. Trial line */}
+        <div className="w-full max-w-2xl text-center pb-16">
+          <p className="text-xl font-semibold" style={{ color: "#FFFFFF" }}>
+            Free for 30 days. Card on file, nothing charged until it ends.
+          </p>
         </div>
 
         {/* 4. Tiers */}
@@ -245,6 +231,9 @@ function TierCard({ tier }: { tier: (typeof PRICING_TIERS)[number] }) {
           /mo
         </span>
       </div>
+      <p className="text-xs -mt-4 mb-6" style={{ color: "#888888" }}>
+        {`30 days free, then $${tier.price}/mo`}
+      </p>
 
       {tier.perks.length > 0 && (
         <ul className="flex flex-col gap-3 mb-6">
