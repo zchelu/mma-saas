@@ -17,13 +17,24 @@ const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 // Failure is logged, not thrown, so a Resend outage doesn't fail the whole
 // webhook and trigger a Stripe retry that would re-run the (idempotent)
 // upsert for nothing.
+//
+// Previously bailed out entirely when trialEnd was falsy (`if (!trialEnd)
+// return`), on the assumption every checkout gets the trial_period_days
+// trial. That's false whenever Stripe's "one trial per customer" account
+// setting has already been used for that customer/price (e.g. re-testing
+// checkout with the same email, or a future no-trial plan) — the
+// subscription still gets created and charged immediately, but zero
+// confirmation email ever goes out. That's not just a UX gap: this email is
+// the only C.R.S. 6-1-732 written record, so skipping it on the no-trial
+// path left real charged subscriptions with no compliance record at all.
+// Now always sends, branching copy on whether a trial actually applies.
 async function sendTrialConfirmationEmail(
   stripe: Stripe,
   customerId: string,
   plan: string,
-  trialEnd: number | null
+  trialEnd: number | null,
+  currentPeriodEnd: number | null
 ) {
-  if (!trialEnd) return;
   try {
     const customer = await stripe.customers.retrieve(customerId);
     if (customer.deleted || !customer.email) return;
@@ -38,31 +49,62 @@ async function sendTrialConfirmationEmail(
       console.error(`Trial confirmation email skipped: no price/label copy for plan "${plan}"`);
       return;
     }
-    const trialEndDate = new Date(trialEnd * 1000).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+
+    const formatDate = (unixSeconds: number) =>
+      new Date(unixSeconds * 1000).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
 
     const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: "KombatDesk <billing@kombatdesk.com>",
-      to: customer.email,
-      subject: `Your KombatDesk ${planLabel} trial has started`,
-      text: [
-        `Your ${TRIAL_DAYS}-day free trial of KombatDesk ${planLabel} has started.`,
-        ``,
-        `Plan: KombatDesk ${planLabel} — $${price}/month`,
-        `Trial: ${TRIAL_DAYS} days, ends ${trialEndDate}`,
-        `Billing frequency: monthly, starting ${trialEndDate}`,
-        `Total due today: $0.00`,
-        ``,
-        `Cancel anytime before your trial ends to avoid being charged. Manage or cancel your subscription here:`,
-        MANAGE_SUBSCRIPTION_URL,
-        ``,
-        `Questions? Just reply to this email.`,
-      ].join("\n"),
-    });
+
+    if (trialEnd) {
+      const trialEndDate = formatDate(trialEnd);
+      await resend.emails.send({
+        from: "KombatDesk <billing@kombatdesk.com>",
+        to: customer.email,
+        subject: `Your KombatDesk ${planLabel} trial has started`,
+        text: [
+          `Your ${TRIAL_DAYS}-day free trial of KombatDesk ${planLabel} has started.`,
+          ``,
+          `Plan: KombatDesk ${planLabel} — $${price}/month`,
+          `Trial: ${TRIAL_DAYS} days, ends ${trialEndDate}`,
+          `Billing frequency: monthly, starting ${trialEndDate}`,
+          `Total due today: $0.00`,
+          ``,
+          `Cancel anytime before your trial ends to avoid being charged. Manage or cancel your subscription here:`,
+          MANAGE_SUBSCRIPTION_URL,
+          ``,
+          `Questions? Just reply to this email.`,
+        ].join("\n"),
+      });
+    } else {
+      // No trial applied (most commonly: this customer/price already used
+      // its one-time trial) — they were charged today. Next charge date
+      // comes from the subscription's current_period_end, not a computed
+      // guess, since Stripe's actual billing anchor is the source of truth.
+      const nextChargeLine = currentPeriodEnd
+        ? `Next charge: $${price} on ${formatDate(currentPeriodEnd)}`
+        : `Billing frequency: monthly`;
+      await resend.emails.send({
+        from: "KombatDesk <billing@kombatdesk.com>",
+        to: customer.email,
+        subject: `Your KombatDesk ${planLabel} subscription is confirmed`,
+        text: [
+          `Your KombatDesk ${planLabel} subscription is now active.`,
+          ``,
+          `Plan: KombatDesk ${planLabel} — $${price}/month`,
+          `Total charged today: $${price}`,
+          nextChargeLine,
+          ``,
+          `Cancel anytime. Manage or cancel your subscription here:`,
+          MANAGE_SUBSCRIPTION_URL,
+          ``,
+          `Questions? Just reply to this email.`,
+        ].join("\n"),
+      });
+    }
   } catch (err) {
     console.error("Trial confirmation email failed to send:", err);
   }
@@ -127,7 +169,10 @@ export const verifyAndProcess = action({
         }
 
         if (event.type === "customer.subscription.created") {
-          await sendTrialConfirmationEmail(stripe, customerId, plan, sub.trial_end);
+          // current_period_end lives on the subscription item, not the
+          // subscription itself, as of this Stripe API version.
+          const currentPeriodEnd = sub.items.data[0]?.current_period_end ?? null;
+          await sendTrialConfirmationEmail(stripe, customerId, plan, sub.trial_end, currentPeriodEnd);
         }
         break;
       }

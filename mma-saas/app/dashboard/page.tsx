@@ -39,7 +39,14 @@ export default async function DashboardPage({
   // recovery fallback (onboardingCompleted is undefined for those, and
   // that's fine — they never needed the wizard) so it's excluded here to
   // avoid forcing already-paying accounts through onboarding retroactively.
-  if (!subscription.onboardingCompleted && !subscription.stripeCustomerId) {
+  // checkout=success is also excluded: that means Stripe just redirected
+  // back from a real completed Checkout, so both fields are EXPECTED to
+  // still be unset for a beat (they're only written by the webhook) — same
+  // race SettlingGate's awaitingCheckout exists to wait out below. Without
+  // this, every auth-first purchase bounced straight back to /onboarding
+  // before SettlingGate ever got a chance to render, forcing a redundant
+  // second checkout.
+  if (!subscription.onboardingCompleted && !subscription.stripeCustomerId && checkout !== "success") {
     redirect("/onboarding");
   }
 
