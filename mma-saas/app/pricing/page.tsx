@@ -2,10 +2,12 @@ import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "../components/footer";
 
-// Single place to change tier names, prices, and slugs for this page. These
-// slugs are display/routing only — the Stripe price mapping is untouched and
-// still keyed off the old starter/pro/elite slugs, so checkout for these tiers
-// stops at the wizard's "plan isn't available" guard until Prices are created.
+// Single place to change tier names, prices, and slugs for this page. As of
+// the starter/pro/elite -> academy/fightteam/blackbelt rename, these slugs are
+// what the onboarding wizard and Stripe webhook use too — checkout for these
+// tiers resolves and completes, but against the same three (unrenamed) Stripe
+// Prices as before, so it charges $49/$89/$149, not the $99/$179/$299 shown
+// below. See lib/plans.ts for the fix (new Prices + repoint priceIdByPlan).
 export const PRICING_TIERS = [
   {
     slug: "academy",
@@ -122,14 +124,7 @@ export default async function PricingPage() {
           </p>
         </div>
 
-        {/* 3. Trial line */}
-        <div className="w-full max-w-2xl text-center pb-16">
-          <p className="text-xl font-semibold" style={{ color: "#FFFFFF" }}>
-            Free for 30 days. Card on file, nothing charged until it ends.
-          </p>
-        </div>
-
-        {/* 4. Tiers */}
+        {/* 3. Tiers */}
         <div className="w-full max-w-5xl pb-24">
           <p className="text-sm text-center mb-8" style={{ color: "#888888" }}>
             No contracts. Cancel anytime. Every plan includes everything below.
@@ -139,9 +134,12 @@ export default async function PricingPage() {
               <TierCard key={tier.slug} tier={tier} signedIn={!!user} />
             ))}
           </div>
+          <p className="text-sm text-center mt-8" style={{ color: "#888888" }}>
+            30 days free. Cancel anytime. Card isn&apos;t charged until day 31.
+          </p>
         </div>
 
-        {/* 5. Included in every plan */}
+        {/* 4. Included in every plan */}
         <div className="w-full max-w-3xl pb-24">
           <h2 className="text-3xl font-extrabold tracking-tight mb-8 text-center" style={{ color: "#FFFFFF" }}>
             Everything included, every plan
@@ -162,7 +160,7 @@ export default async function PricingPage() {
           </ul>
         </div>
 
-        {/* 6. Founding offer */}
+        {/* 5. Founding offer */}
         <div className="w-full max-w-2xl pb-24">
           <div
             className="rounded-xl px-8 py-10 text-center"
@@ -188,7 +186,7 @@ export default async function PricingPage() {
           </div>
         </div>
 
-        {/* 7. FAQ */}
+        {/* 6. FAQ */}
         <div className="w-full max-w-3xl pb-24">
           <h2 className="text-3xl font-extrabold tracking-tight mb-8 text-center" style={{ color: "#FFFFFF" }}>
             Questions
@@ -244,9 +242,6 @@ function TierCard({
           /mo
         </span>
       </div>
-      <p className="text-xs -mt-4 mb-6" style={{ color: "#888888" }}>
-        {`30 days free, then $${tier.price}/mo`}
-      </p>
 
       {tier.perks.length > 0 && (
         <ul className="flex flex-col gap-3 mb-6">
