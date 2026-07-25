@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { hasWriteAccess } from "./gyms";
+import { planHasTexting } from "../lib/plans";
 
 export const upsertSubscription = internalMutation({
   args: {
@@ -407,13 +408,15 @@ export const getGymById = internalQuery({
 
 // Used by the retention-text cron dispatcher to fan out per gym instead of
 // treating "any gym anywhere is subscribed" as license to text every gym's
-// members. All three tiers get identical texting access — this filters on
-// billing status only (hasWriteAccess, same bar as any other gym-scoped
-// write), not plan.
+// members. academy/fightteam/blackbelt get identical texting access — this
+// filters on billing status (hasWriteAccess, same bar as any other gym-scoped
+// write), not tier. The one plan-based exclusion left is legacy "starter"
+// rows (see planHasTexting in lib/plans.ts) — never included under the old
+// pricing, and billing-status-only gating shouldn't silently grant it now.
 export const listTextableGyms = internalQuery({
   args: {},
   handler: async (ctx) => {
     const gyms = await ctx.db.query("gyms").collect();
-    return gyms.filter(hasWriteAccess);
+    return gyms.filter((gym) => hasWriteAccess(gym) && planHasTexting(gym.plan));
   },
 });
