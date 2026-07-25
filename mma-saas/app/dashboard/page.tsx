@@ -4,6 +4,7 @@ import Link from "next/link";
 import { fetchQuery, fetchMutation } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
+import { planHasTexting } from "@/lib/plans";
 import AppHeader from "../components/app-header";
 import StatsGrid from "./stats";
 import RetentionButton from "./retention-button";
@@ -81,12 +82,13 @@ export default async function DashboardPage({
           <h1 className="text-3xl" style={{ color: "#FFFFFF", fontWeight: 500 }}>
             Welcome back, {user.firstName ?? "Coach"}
           </h1>
-          {/* Every tier gets manual retention texts now — this mirrors the
-              server-side gate (requireWriteAccess in triggerRetentionTexts),
-              not a plan check, so canceled/past_due still don't see it. */}
-          {(subscription.planStatus === "active" || subscription.planStatus === "trialing") && (
-            <RetentionButton />
-          )}
+          {/* Mirrors triggerRetentionTexts' server-side gate: billing status
+              (active/trialing) plus planHasTexting to hide the button for a
+              legacy "starter" gym, which never had texting under the old
+              pricing and shouldn't gain it just because the tier split was
+              replaced with a billing-status-only check. */}
+          {(subscription.planStatus === "active" || subscription.planStatus === "trialing") &&
+            planHasTexting(subscription.plan ?? undefined) && <RetentionButton />}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
         {memberCount === 0 && (

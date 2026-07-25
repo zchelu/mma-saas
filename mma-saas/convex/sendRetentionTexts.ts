@@ -9,6 +9,7 @@ import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireGym, requireWriteAccess, hasWriteAccess } from "./gyms";
 import { assertMaxLength } from "./validate";
+import { planHasTexting } from "../lib/plans";
 
 const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
 
@@ -188,15 +189,19 @@ async function sendRetentionTextsCore(
   return { attempted: members.length, succeeded };
 }
 
-// Automated cron path — every subscribed gym gets it, all three tiers alike;
-// the only gate left is whether billing is actually active (same bar as any
-// gym-scoped write, see hasWriteAccess).
+// Automated cron path — every subscribed gym gets it, academy/fightteam/
+// blackbelt alike; billing status is the main gate (hasWriteAccess), plus
+// planHasTexting to exclude legacy "starter" rows, which never had texting
+// under the old pricing. listTextableGyms already filters on both before
+// dispatching here — this re-checks in case sendRetentionTextsForGym is ever
+// invoked directly for a gymId, same defense-in-depth as requireWriteAccess
+// below.
 export const sendRetentionTextsForGym = internalAction({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
     const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
-    if (!gym || !hasWriteAccess(gym)) {
-      console.log(`Gym ${gymId} is not actively subscribed — skipping automated retention texts`);
+    if (!gym || !hasWriteAccess(gym) || !planHasTexting(gym.plan)) {
+      console.log(`Gym ${gymId} is not eligible for texting — skipping automated retention texts`);
       return;
     }
     const claimed = await ctx.runMutation(internal.sendRetentionTexts.claimRetentionRunLock, { gymId });
@@ -216,14 +221,14 @@ export const sendRetentionTextsForGym = internalAction({
 });
 
 // Manual "Send Retention Texts" button path — available to every subscribed
-// gym, same as the automated path above; both read the same billing-status
-// gate now that texting isn't tiered.
+// gym, same as the automated path above; both read the same billing-status +
+// planHasTexting gate now that texting isn't tier-split (just starter-excluded).
 export const sendManualRetentionTextsForGym = internalAction({
   args: { gymId: v.id("gyms"), message: v.string() },
   handler: async (ctx, { gymId, message }) => {
     const gym = await ctx.runQuery(internal.subscriptions.getGymById, { gymId });
-    if (!gym || !hasWriteAccess(gym)) {
-      console.log(`Gym ${gymId} is not actively subscribed — skipping manual retention texts`);
+    if (!gym || !hasWriteAccess(gym) || !planHasTexting(gym.plan)) {
+      console.log(`Gym ${gymId} is not eligible for texting — skipping manual retention texts`);
       return;
     }
     const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym", message);
@@ -252,16 +257,20 @@ export const sendRetentionTextsSMS = internalAction({
 
 // Manual "Send Retention Texts" button — scoped to the caller's own gym.
 // requireWriteAccess is the same gate every other gym-scoped write goes
-// through (members.add, classes.add, etc.) — texting isn't tier-gated
-// anymore, but a canceled/past_due gym still can't trigger it, same as it
-// can't create a member. Enforced here (not just hidden in the UI) so a
-// direct call to this mutation can't bypass that the way relying solely on
-// the downstream action's silent no-op would.
+// through (members.add, classes.add, etc.) — texting isn't tier-gated beyond
+// that, except legacy "starter" gyms (planHasTexting), which never had
+// texting under the old pricing. This mutation is the real enforcement
+// boundary: it's what the dashboard button actually calls, so a direct call
+// bypassing the UI can't get a starter gym texts sent even though the
+// downstream action would also catch it.
 export const triggerRetentionTexts = mutation({
   args: { message: v.string() },
   handler: async (ctx, { message }) => {
     const gym = await requireGym(ctx);
     requireWriteAccess(gym);
+    if (!planHasTexting(gym.plan)) {
+      throw new Error("Retention texting isn't available on your current plan.");
+    }
 
     const trimmed = message.trim();
     if (!trimmed) throw new Error("Message can't be empty");
