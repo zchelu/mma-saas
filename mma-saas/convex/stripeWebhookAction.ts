@@ -5,7 +5,7 @@ import { Resend } from "resend";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { PLAN_LABEL, PLAN_PRICE_USD } from "../lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "../lib/plans";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 
@@ -50,10 +50,10 @@ async function sendTrialConfirmationEmail(
       to: customer.email,
       subject: `Your KombatDesk ${planLabel} trial has started`,
       text: [
-        `Your 14-day free trial of KombatDesk ${planLabel} has started.`,
+        `Your ${TRIAL_DAYS}-day free trial of KombatDesk ${planLabel} has started.`,
         ``,
         `Plan: KombatDesk ${planLabel} — $${price}/month`,
-        `Trial: 14 days, ends ${trialEndDate}`,
+        `Trial: ${TRIAL_DAYS} days, ends ${trialEndDate}`,
         `Billing frequency: monthly, starting ${trialEndDate}`,
         `Total due today: $0.00`,
         ``,

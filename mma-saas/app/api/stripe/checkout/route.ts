@@ -5,6 +5,7 @@ import { fetchAction } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 export async function POST(request: NextRequest) {
   // checkRateLimit is internalMutation now — this goes through the
@@ -72,10 +73,10 @@ export async function POST(request: NextRequest) {
       ...(user ? { client_reference_id: user.id } : {}),
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
-      // 14-day trial on all plans, guest or signed-in alike — don't
+      // 30-day trial on all plans, guest or signed-in alike — don't
       // special-case by priceId.
       subscription_data: {
-        trial_period_days: 14,
+        trial_period_days: TRIAL_DAYS,
         // Signed-in: tag the subscription so the webhook can also link it
         // (redundant with claimGymBySessionId, harmless). Guest: leave
         // clerkUserId unset — Stripe's hosted page collects the email

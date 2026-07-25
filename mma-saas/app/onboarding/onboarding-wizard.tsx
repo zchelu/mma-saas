@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { PLAN_LABEL, PLAN_PRICE_USD } from "@/lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
 
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
 
@@ -16,7 +16,7 @@ function RenewalDisclosure({ plan }: { plan: string }) {
   const price = PLAN_PRICE_USD[plan];
   return (
     <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
-      {`14-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
+      {`${TRIAL_DAYS}-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
     </p>
   );
 }
