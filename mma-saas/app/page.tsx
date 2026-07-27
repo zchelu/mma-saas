@@ -98,13 +98,9 @@ export default async function Home() {
             className="rounded-xl px-8 py-10 text-center"
             style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
           >
-            <p className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
-              If KombatDesk doesn&apos;t save you at least one member in your first 30 days,
-              it&apos;s free.
-            </p>
-            <p className="text-sm" style={{ color: "#AAAAAA" }}>
-              One saved member pays for KombatDesk. Everything after that is profit you were
-              losing to silence.
+            <p className="text-2xl font-bold leading-snug" style={{ color: "#FFFFFF" }}>
+              Your first 30 days are free. If I haven&apos;t brought back at least one member
+              who&apos;d gone cold by day 90, I refund every dollar you&apos;ve paid.
             </p>
           </div>
         </div>

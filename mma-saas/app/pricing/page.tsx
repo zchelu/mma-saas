@@ -33,6 +33,7 @@ export const PRICING_TIERS = [
     size: "Up to 100 members",
     price: 99,
     perks: [] as string[],
+    roiLine: "Save one member a year and it's paid for itself.",
   },
   {
     slug: "fightteam",
@@ -40,6 +41,10 @@ export const PRICING_TIERS = [
     size: "101–250 members",
     price: 179,
     perks: [] as string[],
+    badge: "MOST GYMS START HERE",
+    highlighted: true,
+    roiLine:
+      "Save two members a year and it's paid for itself. Built for the range where silent quitters stop being names you'd notice.",
   },
   {
     slug: "blackbelt",
@@ -63,6 +68,14 @@ const CTA_LABEL = "I'm Ready to Stop the Bleeding";
 // to the wizard, which would otherwise bounce them to /sign-in anyway.
 function planHref(plan: string, signedIn: boolean): string {
   return signedIn ? `/onboarding?plan=${plan}` : `/sign-up?plan=${plan}`;
+}
+
+// null means the coupon has no max_redemptions (unlimited) — shouldn't
+// happen given the founding program is meant to be spot-limited, but the
+// type allows it, so this can't crash if Stripe is ever configured that way.
+function spotsLabel(slotsLeft: number | null): string {
+  if (slotsLeft === null) return "Founding pricing open";
+  return `${slotsLeft} spot${slotsLeft === 1 ? "" : "s"}`;
 }
 
 const INCLUDED_IN_EVERY_PLAN = [
@@ -174,32 +187,133 @@ export default async function PricingPage() {
           </ul>
         </div>
 
-        {/* 5. Founding offer — omitted entirely once the coupon is exhausted,
+        {/* 5. Guarantee — pushes the risk past the free trial instead of
+            restating it. The homepage's short version says the same thing;
+            keep both in sync if this copy changes. */}
+        <div className="w-full max-w-2xl pb-24">
+          <div
+            className="rounded-xl px-8 py-10 text-center"
+            style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
+          >
+            <h2 className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
+              The Saved Member Guarantee
+            </h2>
+            <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
+              Your first 30 days are free. Card on file, nothing charged until day 31.
+            </p>
+            <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
+              After that: if KombatDesk hasn&apos;t brought back at least one member who&apos;d gone cold by
+              day 90, I refund every dollar you&apos;ve paid and help you export your member roster on the
+              way out. You leave with your data, not locked inside my software.
+            </p>
+            <p className="text-sm" style={{ color: "#AAAAAA" }}>
+              A member who stays six more months instead of quitting is $900 back on your books. Six months
+              of Academy is $594 — $294 as a founding gym. I&apos;m betting my own revenue that I can find
+              you one. If I can&apos;t, I haven&apos;t earned the right to charge you.
+            </p>
+          </div>
+        </div>
+
+        {/* 6. Founding offer — omitted entirely once the coupon is exhausted,
             deleted, or unconfigured; getFoundingOffer() is the single source
-            of truth for whether this section (and its numbers) exist. */}
+            of truth for whether this section (and its numbers) exist. Spot
+            count and prices are read live off the coupon (slotsLeft,
+            amountOffCents), never hardcoded, so this section can't drift out
+            of sync with what Stripe will actually charge. */}
         {foundingOffer && (
           <div className="w-full max-w-2xl pb-24">
             <div
-              className="rounded-xl px-8 py-10 text-center"
+              className="rounded-xl px-8 py-10 text-left"
               style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
             >
-              <h2 className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
-                First 5 gyms lock founding pricing for 24 months.
+              <h2 className="text-2xl font-bold leading-snug mb-2 text-center" style={{ color: "#FFFFFF" }}>
+                The Founding Gym Program
               </h2>
-              <p className="text-lg font-semibold" style={{ color: "#E02020" }}>
-                {PRICING_TIERS.map(
-                  (t) => `$${t.price - foundingOffer.amountOffCents / 100}`
-                ).join(" · ")}
-                <span className="font-normal" style={{ color: "#AAAAAA" }}>
-                  {" "}
-                  — guaranteed for 24 months while the subscription stays active.
-                </span>
+              <p className="text-lg font-semibold mb-6 text-center" style={{ color: "#E02020" }}>
+                {spotsLabel(foundingOffer.slotsLeft)}. ${foundingOffer.amountOffCents / 100} off every month
+                for two years.
+              </p>
+
+              <p className="text-base leading-relaxed mb-8" style={{ color: "#CCCCCC" }}>
+                I&apos;m taking on {foundingOffer.slotsLeft ?? "a few"} gym
+                {foundingOffer.slotsLeft === 1 ? "" : "s"} as founding members. You pay $
+                {foundingOffer.amountOffCents / 100}/month less than list — for 24 straight months, locked
+                the day you sign.
+              </p>
+
+              <div className="mb-8 rounded-lg overflow-hidden" style={{ border: "1px solid #333333" }}>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #333333" }}>
+                      <th className="text-left px-4 py-3 font-normal" style={{ color: "#888888" }}></th>
+                      <th className="text-left px-4 py-3 font-normal" style={{ color: "#888888" }}>List</th>
+                      <th className="text-left px-4 py-3 font-normal" style={{ color: "#888888" }}>
+                        Founding
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PRICING_TIERS.map((t) => (
+                      <tr key={t.slug} style={{ borderTop: "1px solid #333333" }}>
+                        <td className="px-4 py-3" style={{ color: "#FFFFFF" }}>
+                          {t.name}
+                        </td>
+                        <td className="px-4 py-3" style={{ color: "#888888" }}>{`$${t.price}/mo`}</td>
+                        <td className="px-4 py-3 font-semibold" style={{ color: "#E02020" }}>
+                          {`$${t.price - foundingOffer.amountOffCents / 100}/mo`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-base mb-8" style={{ color: "#CCCCCC" }}>
+                That&apos;s ${(foundingOffer.amountOffCents / 100) * 24} back in your pocket over the two
+                years, on any plan.
+              </p>
+
+              <p className="text-sm font-semibold mb-3" style={{ color: "#FFFFFF" }}>
+                What I want in return:
+              </p>
+              <ul className="flex flex-col gap-2 mb-4">
+                <li className="flex items-start gap-2 text-sm leading-snug" style={{ color: "#CCCCCC" }}>
+                  <span className="font-bold flex-shrink-0" style={{ color: "#E02020" }}>
+                    —
+                  </span>
+                  A testimonial — once I&apos;ve actually saved you members, not before.
+                </li>
+                <li className="flex items-start gap-2 text-sm leading-snug" style={{ color: "#CCCCCC" }}>
+                  <span className="font-bold flex-shrink-0" style={{ color: "#E02020" }}>
+                    —
+                  </span>
+                  Your logo on this page.
+                </li>
+                <li className="flex items-start gap-2 text-sm leading-snug" style={{ color: "#CCCCCC" }}>
+                  <span className="font-bold flex-shrink-0" style={{ color: "#E02020" }}>
+                    —
+                  </span>
+                  One introduction to another gym owner you&apos;d vouch for.
+                </li>
+              </ul>
+              <p className="text-sm mb-8" style={{ color: "#AAAAAA" }}>
+                That&apos;s it. No case study shoot, no committee, no extra calls.
+              </p>
+
+              <p className="text-sm leading-relaxed mb-6" style={{ color: "#AAAAAA" }}>
+                Your first 30 days are free. Then 24 months at the founding rate. After that you&apos;re on
+                standard pricing. Decide on the results, not on a discount.
+              </p>
+
+              <p className="text-sm font-semibold text-center" style={{ color: "#E02020" }}>
+                {spotsLabel(foundingOffer.slotsLeft)}. When {foundingOffer.slotsLeft === 1 ? "it's" : "they're"}{" "}
+                gone, this section comes down.
               </p>
             </div>
           </div>
         )}
 
-        {/* 6. FAQ */}
+        {/* 7. FAQ */}
         <div className="w-full max-w-3xl pb-24">
           <h2 className="text-3xl font-extrabold tracking-tight mb-8 text-center" style={{ color: "#FFFFFF" }}>
             Questions
@@ -235,11 +349,26 @@ function TierCard({
   tier: (typeof PRICING_TIERS)[number];
   signedIn: boolean;
 }) {
+  const badge = "badge" in tier ? tier.badge : undefined;
+  const highlighted = "highlighted" in tier && tier.highlighted;
+  const roiLine = "roiLine" in tier ? tier.roiLine : undefined;
+
   return (
     <div
-      className="rounded-xl p-8 flex flex-col text-left"
-      style={{ backgroundColor: "#222222", border: "1px solid #333333" }}
+      className="rounded-xl p-8 flex flex-col text-left relative"
+      style={{
+        backgroundColor: "#222222",
+        border: highlighted ? "1px solid #E02020" : "1px solid #333333",
+      }}
     >
+      {badge && (
+        <span
+          className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-bold tracking-widest uppercase px-3 py-1 rounded-full"
+          style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+        >
+          {badge}
+        </span>
+      )}
       <p className="text-xs font-semibold tracking-widest uppercase mb-2" style={{ color: "#E02020" }}>
         {tier.name}
       </p>
@@ -255,6 +384,12 @@ function TierCard({
           /mo
         </span>
       </div>
+
+      {roiLine && (
+        <p className="text-sm leading-relaxed mb-6" style={{ color: "#CCCCCC" }}>
+          {roiLine}
+        </p>
+      )}
 
       {tier.perks.length > 0 && (
         <ul className="flex flex-col gap-3 mb-6">
