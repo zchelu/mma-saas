@@ -78,6 +78,12 @@ function spotsLabel(slotsLeft: number | null): string {
   return `${slotsLeft} spot${slotsLeft === 1 ? "" : "s"}`;
 }
 
+// Small values today, but this keeps the guarantee/founding-offer copy from
+// silently rendering "$1200" once list prices grow past four digits.
+function formatUsd(amount: number): string {
+  return `$${amount.toLocaleString("en-US")}`;
+}
+
 const INCLUDED_IN_EVERY_PLAN = [
   "Every member tracked — contact info, belt rank, promotion history",
   "Front-desk self check-in",
@@ -112,6 +118,12 @@ const FAQS = [
 export default async function PricingPage() {
   const user = await currentUser();
   const foundingOffer = await getFoundingOffer();
+
+  const academyPrice = PRICING_TIERS.find((t) => t.slug === "academy")!.price;
+  const sixMonthsAcademyList = academyPrice * 6;
+  const sixMonthsAcademyFounding = foundingOffer
+    ? (academyPrice - foundingOffer.amountOffCents / 100) * 6
+    : null;
 
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
@@ -208,8 +220,10 @@ export default async function PricingPage() {
             </p>
             <p className="text-sm" style={{ color: "#AAAAAA" }}>
               A member who stays six more months instead of quitting is $900 back on your books. Six months
-              of Academy is $594 — $294 as a founding gym. I&apos;m betting my own revenue that I can find
-              you one. If I can&apos;t, I haven&apos;t earned the right to charge you.
+              of Academy is {formatUsd(sixMonthsAcademyList)}
+              {sixMonthsAcademyFounding !== null && ` — ${formatUsd(sixMonthsAcademyFounding)} as a founding gym`}.
+              I&apos;m betting my own revenue that I can find you one. If I can&apos;t, I haven&apos;t earned
+              the right to charge you.
             </p>
           </div>
         </div>
@@ -269,7 +283,7 @@ export default async function PricingPage() {
               </div>
 
               <p className="text-base mb-8" style={{ color: "#CCCCCC" }}>
-                That&apos;s ${((foundingOffer.amountOffCents / 100) * 24).toLocaleString()} back in your
+                That&apos;s {formatUsd((foundingOffer.amountOffCents / 100) * 24)} back in your
                 pocket over 24 months, on any plan.
               </p>
 
