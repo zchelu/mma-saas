@@ -17,12 +17,13 @@ export const TRIAL_DAYS = 30;
 // (convex/stripeWebhookAction.ts, convex/subscriptions.ts) now writes these
 // same academy/fightteam/blackbelt values to gym rows — same three Stripe
 // Prices as before (STRIPE_STARTER_PRICE_ID/etc. env var names are
-// unchanged), just relabeled. New Stripe Prices at $99/$179/$299 have since
-// been created; STRIPE_STARTER_PRICE_ID / STRIPE_PRO_PRICE_ID /
-// STRIPE_ELITE_PRICE_ID hold the Academy / Fight Team / Black Belt price IDs
-// respectively in Vercel Production and Convex prod, env var names
-// deliberately not renamed (renaming them means updating Vercel + the Convex
-// dashboard, not just this file).
+// unchanged), just relabeled. CONFIRMED 2026-07-26 against the Stripe
+// dashboard directly (not inferred from code comments) and Vercel Production:
+// STRIPE_STARTER_PRICE_ID / STRIPE_PRO_PRICE_ID / STRIPE_ELITE_PRICE_ID point
+// at the $99/$179/$299 Prices below. Convex prod env vars UNVERIFIED as of
+// 2026-07-26 — has NOT been checked against the Convex dashboard. Env var
+// names deliberately not renamed (renaming them means updating Vercel + the
+// Convex dashboard, not just this file).
 export const PLAN_PRICE_USD: Record<string, number> = {
   academy: 99,
   fightteam: 179,
@@ -46,4 +47,45 @@ export const PLAN_LABEL: Record<string, string> = {
 // because the tier-based gate was replaced with a billing-status-only one.
 export function planHasTexting(plan: string | undefined): boolean {
   return plan !== undefined && plan !== "starter";
+}
+
+export type PlanSlug = "academy" | "fightteam" | "blackbelt";
+
+// Env var names deliberately NOT renamed to match the academy/fightteam/
+// blackbelt slugs — see PLAN_PRICE_USD's comment above.
+const STANDARD_PRICE_ENV: Record<PlanSlug, string> = {
+  academy: "STRIPE_STARTER_PRICE_ID",
+  fightteam: "STRIPE_PRO_PRICE_ID",
+  blackbelt: "STRIPE_ELITE_PRICE_ID",
+};
+
+export function resolvePriceId(plan: PlanSlug): string | undefined {
+  return process.env[STANDARD_PRICE_ENV[plan]];
+}
+
+// Centralizes price->plan resolution across both webhook/claim call sites.
+// Returns undefined for anything not in this table — callers MUST NOT
+// default an unresolved price to any plan. An unrecognized price is most
+// likely during a rollout where a new env var hasn't landed in one of the
+// two environments (Vercel, Convex dashboard) yet; silently mislabeling the
+// tier is worse than surfacing the gap loudly.
+export function resolvePlanFromPriceId(priceId: string | undefined): PlanSlug | undefined {
+  if (!priceId) return undefined;
+  const table: [string | undefined, PlanSlug][] = [
+    [process.env[STANDARD_PRICE_ENV.academy], "academy"],
+    [process.env[STANDARD_PRICE_ENV.fightteam], "fightteam"],
+    [process.env[STANDARD_PRICE_ENV.blackbelt], "blackbelt"],
+  ];
+  return table.find(([envValue]) => envValue !== undefined && envValue === priceId)?.[1];
+}
+
+// Checkout allowlist — every standard price currently configured in this
+// environment. Env vars that aren't set are simply absent from the list, not
+// included as undefined.
+export function allowedPriceIds(): string[] {
+  return [
+    process.env[STANDARD_PRICE_ENV.academy],
+    process.env[STANDARD_PRICE_ENV.fightteam],
+    process.env[STANDARD_PRICE_ENV.blackbelt],
+  ].filter((id): id is string => id !== undefined);
 }

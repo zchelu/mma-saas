@@ -1,20 +1,37 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "../components/footer";
+import { getFoundingOffer } from "@/lib/foundingOffer";
+
+// The founding coupon's redemption count can change between requests (someone
+// else closes a founding gym), so this page must never be served from a
+// stale static/ISR cache — currentUser() below already forces dynamic
+// rendering today, but that's an implicit side effect of an unrelated auth
+// call, not a guarantee. Making it explicit means the founding pricing stays
+// correct even if that auth call's caching behavior ever changes.
+export const dynamic = "force-dynamic";
+
+// This page is no longer part of the public funnel. The landing page header
+// used to link here; it doesn't anymore, because pricing is now something
+// sent directly to a prospect after the demo rather than something a visitor
+// browses to on their own. The page stays live and reachable by direct URL
+// (and is still the cancel_url target for Stripe checkout), but search
+// engines are kept off it so a prospect can't land on pricing before the
+// conversation that's supposed to precede it.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 // Single place to change tier names, prices, and slugs for this page. As of
 // the starter/pro/elite -> academy/fightteam/blackbelt rename, these slugs are
-// what the onboarding wizard and Stripe webhook use too — checkout for these
-// tiers resolves and completes, but against the same three (unrenamed) Stripe
-// Prices as before, so it charges $49/$89/$149, not the $99/$179/$299 shown
-// below. See lib/plans.ts for the fix (new Prices + repoint priceIdByPlan).
+// what the onboarding wizard and Stripe webhook use too.
 export const PRICING_TIERS = [
   {
     slug: "academy",
     name: "Academy",
     size: "Up to 100 members",
     price: 99,
-    foundingPrice: 79,
     perks: [] as string[],
   },
   {
@@ -22,7 +39,6 @@ export const PRICING_TIERS = [
     name: "Fight Team",
     size: "101–250 members",
     price: 179,
-    foundingPrice: 139,
     perks: [] as string[],
   },
   {
@@ -30,7 +46,6 @@ export const PRICING_TIERS = [
     name: "Black Belt",
     size: "251+ members",
     price: 299,
-    foundingPrice: 229,
     perks: [
       "Done-for-you roster import",
       "Monthly revenue review call with me",
@@ -53,10 +68,9 @@ function planHref(plan: string, signedIn: boolean): string {
 const INCLUDED_IN_EVERY_PLAN = [
   "Every member tracked — contact info, belt rank, promotion history",
   "Front-desk self check-in",
-  "Automatic at-risk detection — you're pinged the moment a member goes cold",
-  "Automated winback texts — three attempts over three weeks, then we leave them alone",
-  "Two-way inbox — they reply, you answer from your phone",
-  "Broadcast messaging — one text to the whole gym, or just the white belts",
+  "Automatic at-risk detection — every cold member shows up on your dashboard, by name, with days since their last visit",
+  "Winback attempts taper off automatically — three texts over three weeks, then that member goes dormant so you never look like you're nagging",
+  "Manual send — write your own message and send it to your at-risk members who've opted in to texts",
   "Monthly retention report — exactly who came back, exactly who's at risk",
   "Setup call with me, on every plan",
 ];
@@ -85,6 +99,7 @@ const FAQS = [
 
 export default async function PricingPage() {
   const user = await currentUser();
+  const foundingOffer = await getFoundingOffer();
 
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
@@ -160,31 +175,30 @@ export default async function PricingPage() {
           </ul>
         </div>
 
-        {/* 5. Founding offer */}
-        <div className="w-full max-w-2xl pb-24">
-          <div
-            className="rounded-xl px-8 py-10 text-center"
-            style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
-          >
-            <h2 className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
-              First 5 gyms lock founding pricing for life.
-            </h2>
-            <p className="text-lg font-semibold mb-4" style={{ color: "#E02020" }}>
-              {PRICING_TIERS.map((t) => `$${t.foundingPrice}`).join(" · ")}
-              <span className="font-normal" style={{ color: "#AAAAAA" }}>
-                {" "}
-                — permanently, no matter how much the price goes up.
-              </span>
-            </p>
-            <p className="text-sm leading-relaxed mb-5" style={{ color: "#AAAAAA" }}>
-              What I want in return: a testimonial once I&apos;ve saved you members, your logo
-              on this page, and one introduction to another gym owner. That&apos;s it.
-            </p>
-            <p className="text-sm font-semibold" style={{ color: "#FFFFFF" }}>
-              5 spots.
-            </p>
+        {/* 5. Founding offer — omitted entirely once the coupon is exhausted,
+            deleted, or unconfigured; getFoundingOffer() is the single source
+            of truth for whether this section (and its numbers) exist. */}
+        {foundingOffer && (
+          <div className="w-full max-w-2xl pb-24">
+            <div
+              className="rounded-xl px-8 py-10 text-center"
+              style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
+            >
+              <h2 className="text-2xl font-bold leading-snug mb-4" style={{ color: "#FFFFFF" }}>
+                First 5 gyms lock founding pricing for 24 months.
+              </h2>
+              <p className="text-lg font-semibold" style={{ color: "#E02020" }}>
+                {PRICING_TIERS.map(
+                  (t) => `$${t.price - foundingOffer.amountOffCents / 100}`
+                ).join(" · ")}
+                <span className="font-normal" style={{ color: "#AAAAAA" }}>
+                  {" "}
+                  — guaranteed for 24 months while the subscription stays active.
+                </span>
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 6. FAQ */}
         <div className="w-full max-w-3xl pb-24">

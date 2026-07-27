@@ -5,7 +5,9 @@ import { fetchAction } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
-import { TRIAL_DAYS } from "@/lib/plans";
+import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
+import { getFoundingOffer } from "@/lib/foundingOffer";
+import { sendAlertEmail } from "@/lib/alerts";
 
 export async function POST(request: NextRequest) {
   // checkRateLimit is internalMutation now — this goes through the
@@ -31,12 +33,7 @@ export async function POST(request: NextRequest) {
   }
   const { priceId } = body;
 
-  const allowedPriceIds = [
-    process.env.STRIPE_STARTER_PRICE_ID,
-    process.env.STRIPE_PRO_PRICE_ID,
-    process.env.STRIPE_ELITE_PRICE_ID,
-  ];
-  if (!allowedPriceIds.includes(priceId)) {
+  if (!allowedPriceIds().includes(priceId)) {
     return NextResponse.json(
       { error: "That plan isn't available right now. Please refresh and try again." },
       { status: 400 }
@@ -45,11 +42,19 @@ export async function POST(request: NextRequest) {
 
   const origin = new URL(request.url).origin;
 
-  try {
-    const session = await stripe.checkout.sessions.create({
+  // Founding pricing is never read from client input — the coupon's own
+  // redemption count (via getFoundingOffer) is the only thing that decides
+  // whether a discount applies, same as the pricing page.
+  const foundingOffer = await getFoundingOffer();
+
+  function buildSessionParams(applyDiscount: boolean): Stripe.Checkout.SessionCreateParams {
+    return {
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
+      ...(applyDiscount && foundingOffer
+        ? { discounts: [{ coupon: foundingOffer.couponId }] }
+        : {}),
       // Signed-in buyers (the auth-first onboarding flow — the gym already
       // exists via completeOnboarding/getOrCreateGym, linked by clerkUserId)
       // land straight on /dashboard; SettlingGate there already knows how to
@@ -87,7 +92,47 @@ export async function POST(request: NextRequest) {
       },
       // Signed-in: prefill email.
       ...(user ? { customer_email: user.emailAddresses[0]?.emailAddress } : {}),
-    });
+    };
+  }
+
+  try {
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create(buildSessionParams(true));
+    } catch (err) {
+      // Only a coupon-specific rejection falls back to standard price. A
+      // network blip or rate limit here must NOT silently drop the discount
+      // and charge full price — those rethrow below and hit the normal
+      // error response instead.
+      if (foundingOffer && isCouponSpecificError(err)) {
+        // The coupon can be exhausted/invalidated between getFoundingOffer()
+        // resolving and this call reaching Stripe (another gym closes in the
+        // gap). A gym owner mid-demo must never see an error screen because
+        // of that race — retry once at standard price instead of failing —
+        // but this is money silently changing, so it also has to alert a
+        // human, not just log.
+        console.error(
+          "Stripe checkout: founding coupon rejected, retrying at standard price:",
+          err
+        );
+        await sendAlertEmail(
+          "KombatDesk: founding coupon rejected at checkout — customer charged standard price",
+          [
+            `Checkout proceeded at STANDARD price because Stripe rejected the founding coupon.`,
+            ``,
+            `Price ID: ${priceId}`,
+            `Coupon ID: ${foundingOffer.couponId}`,
+            ``,
+            `Stripe error: ${err instanceof Error ? err.message : String(err)}`,
+            ``,
+            `The /pricing page may have shown this customer a founding price before they clicked through — they may expect it. Check whether the coupon is exhausted, expired, or deleted, and whether the founding block on /pricing needs to come down.`,
+          ].join("\n")
+        );
+        session = await stripe.checkout.sessions.create(buildSessionParams(false));
+      } else {
+        throw err;
+      }
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (err) {
@@ -97,4 +142,29 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// Narrows the founding-coupon fallback to failures that are actually about
+// the coupon — a bad/expired/exhausted/deleted coupon — as opposed to any
+// other invalid-request error, and excludes non-invalid-request error classes
+// entirely (StripeRateLimitError, StripeConnectionError, StripeAPIError,
+// etc.), which must always rethrow rather than silently drop the discount.
+function isCouponSpecificError(err: unknown): boolean {
+  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
+
+  const param = err.param?.toLowerCase() ?? "";
+  if (param.includes("coupon") || param.includes("discount")) return true;
+
+  // Some coupon failures (exhausted, deleted) surface without a `param` —
+  // fall back to the message text Stripe uses for those specific cases,
+  // not invalid-request errors generally.
+  const message = err.message?.toLowerCase() ?? "";
+  return (
+    message.includes("coupon") &&
+    (message.includes("expired") ||
+      message.includes("invalid") ||
+      message.includes("deleted") ||
+      message.includes("no longer be redeemed") ||
+      message.includes("redemption"))
+  );
 }

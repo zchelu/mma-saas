@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
+import { resolvePriceId, PlanSlug } from "@/lib/plans";
 import OnboardingWizard from "./onboarding-wizard";
 
 const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt"]);
@@ -41,13 +42,9 @@ export default async function OnboardingPage({
   // Resolved server-side so raw Stripe price IDs never need a NEXT_PUBLIC_
   // env var / never ship to the client bundle — the wizard only ever holds
   // the plan slug in its own state and gets the matching priceId as a prop.
-  // Keys are the renamed slugs; the env var names and the Stripe Prices they
-  // point at are unchanged (academy is still the same $49 Price starter was).
-  const priceIdByPlan: Record<string, string | undefined> = {
-    academy: process.env.STRIPE_STARTER_PRICE_ID,
-    fightteam: process.env.STRIPE_PRO_PRICE_ID,
-    blackbelt: process.env.STRIPE_ELITE_PRICE_ID,
-  };
+  const priceIdByPlan: Record<string, string | undefined> = Object.fromEntries(
+    [...VALID_PLANS].map((p) => [p, resolvePriceId(p as PlanSlug)])
+  );
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
