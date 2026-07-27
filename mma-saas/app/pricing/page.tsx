@@ -202,9 +202,9 @@ export default async function PricingPage() {
               Your first 30 days are free. Card on file, nothing charged until day 31.
             </p>
             <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
-              After that: if KombatDesk hasn&apos;t brought back at least one member who&apos;d gone cold by
-              day 90, I refund every dollar you&apos;ve paid and help you export your member roster on the
-              way out. You leave with your data, not locked inside my software.
+              After that: if I haven&apos;t brought back at least one member — someone who&apos;d stopped
+              showing up, who got a KombatDesk text and came back to class — within 90 days of your first
+              text going out, I refund every dollar you&apos;ve paid.
             </p>
             <p className="text-sm" style={{ color: "#AAAAAA" }}>
               A member who stays six more months instead of quitting is $900 back on your books. Six months
@@ -231,7 +231,7 @@ export default async function PricingPage() {
               </h2>
               <p className="text-lg font-semibold mb-6 text-center" style={{ color: "#E02020" }}>
                 {spotsLabel(foundingOffer.slotsLeft)}. ${foundingOffer.amountOffCents / 100} off every month
-                for two years.
+                for 24 months.
               </p>
 
               <p className="text-base leading-relaxed mb-8" style={{ color: "#CCCCCC" }}>
@@ -269,8 +269,8 @@ export default async function PricingPage() {
               </div>
 
               <p className="text-base mb-8" style={{ color: "#CCCCCC" }}>
-                That&apos;s ${(foundingOffer.amountOffCents / 100) * 24} back in your pocket over the two
-                years, on any plan.
+                That&apos;s ${((foundingOffer.amountOffCents / 100) * 24).toLocaleString()} back in your
+                pocket over 24 months, on any plan.
               </p>
 
               <p className="text-sm font-semibold mb-3" style={{ color: "#FFFFFF" }}>

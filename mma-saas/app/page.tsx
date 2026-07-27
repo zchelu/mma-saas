@@ -100,7 +100,8 @@ export default async function Home() {
           >
             <p className="text-2xl font-bold leading-snug" style={{ color: "#FFFFFF" }}>
               Your first 30 days are free. If I haven&apos;t brought back at least one member
-              who&apos;d gone cold by day 90, I refund every dollar you&apos;ve paid.
+              who&apos;d stopped showing up — a KombatDesk text, and they came back to class —
+              within 90 days of your first text going out, I refund every dollar you&apos;ve paid.
             </p>
           </div>
         </div>
