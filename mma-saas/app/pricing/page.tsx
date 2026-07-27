@@ -71,7 +71,6 @@ const INCLUDED_IN_EVERY_PLAN = [
   "Automatic at-risk detection — every cold member shows up on your dashboard, by name, with days since their last visit",
   "Winback attempts taper off automatically — three texts over three weeks, then that member goes dormant so you never look like you're nagging",
   "Manual send — write your own message and send it to your at-risk members who've opted in to texts",
-  "Monthly retention report — exactly who came back, exactly who's at risk",
   "Setup call with me, on every plan",
 ];
 
@@ -89,7 +88,7 @@ const FAQS = [
   {
     question: "Do my members have to consent to texts?",
     answer:
-      "Yes — and I give you the consent language and the addendum at setup. Takes five minutes.",
+      "Yes — every member has to opt in before we can text them. We run that for you: we send your members the opt-in link and track who's said yes, and you can watch the count climb from your dashboard.",
   },
   {
     question: "Contract?",
