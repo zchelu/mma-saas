@@ -1,0 +1,108 @@
+import { notFound } from "next/navigation";
+import { fetchQuery } from "convex/nextjs";
+import { api } from "@/convex/_generated/api";
+import { getConsentText } from "@/lib/consentText";
+import { submitConsentAction } from "./actions";
+
+const inputStyle = {
+  backgroundColor: "#222222",
+  border: "1px solid #333333",
+  color: "#FFFFFF",
+};
+
+export default async function ConsentPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ gymSlug: string }>;
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const { gymSlug } = await params;
+  const { status } = await searchParams;
+
+  const gym = await fetchQuery(api.gyms.getBySlug, { slug: gymSlug });
+
+  if (!gym) notFound();
+
+  if (status === "ok") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#0D0D0D" }}>
+        <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ backgroundColor: "rgba(74,222,128,0.1)" }}>
+          <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ color: "#4ADE80" }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h1 className="text-3xl font-extrabold mb-3 tracking-tight" style={{ color: "#FFFFFF" }}>You&apos;re all set</h1>
+        <p className="text-base max-w-sm" style={{ color: "#888888" }}>
+          Thanks — {gym.name} can now text you about your membership.
+        </p>
+      </div>
+    );
+  }
+
+  const banner =
+    status === "rate_limited"
+      ? "Too many attempts from this device. Try again in a few minutes."
+      : status === "invalid"
+      ? "Enter your name and phone number, and check the box to continue."
+      : status === "error"
+      ? "Something went wrong. Please try again."
+      : null;
+
+  return (
+    <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
+      <div className="max-w-md mx-auto px-6 pt-16 pb-10">
+        <h1 className="text-3xl font-extrabold tracking-tight text-center mb-2" style={{ color: "#FFFFFF" }}>
+          {gym.name}
+        </h1>
+        <p className="text-sm font-semibold uppercase tracking-widest text-center mb-8" style={{ color: "#E02020" }}>
+          Opt in to text updates
+        </p>
+
+        {banner && (
+          <p className="text-sm mb-6 text-center" style={{ color: "#FF6B6B" }}>{banner}</p>
+        )}
+
+        <form action={submitConsentAction} className="flex flex-col gap-4">
+          <input type="hidden" name="gymSlug" value={gymSlug} />
+
+          <input
+            name="name"
+            required
+            maxLength={200}
+            placeholder="Full name"
+            autoComplete="name"
+            className="rounded-lg px-4 py-3 text-base focus:outline-none"
+            style={inputStyle}
+          />
+          <input
+            name="phone"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            required
+            maxLength={30}
+            placeholder="Phone number"
+            className="rounded-lg px-4 py-3 text-base focus:outline-none"
+            style={inputStyle}
+          />
+
+          <label className="flex items-start gap-3 rounded-lg p-4 cursor-pointer" style={{ border: "1px solid #333333" }}>
+            <input type="checkbox" name="consent" value="yes" required className="mt-0.5 w-4 h-4 shrink-0" />
+            <span className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>
+              {getConsentText(gym.name)}
+            </span>
+          </label>
+
+          <button
+            type="submit"
+            className="mt-2 rounded-lg font-semibold px-6 py-3 text-sm"
+            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+          >
+            Opt in to texts
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
