@@ -62,11 +62,11 @@ export default async function WelcomePage({
             : "This recovery link is invalid or has expired."}
         </p>
         <a
-          href={session_id ? "/pricing" : "/recover"}
+          href="/recover"
           className="text-sm underline mt-4 inline-block"
           style={{ color: "#888888" }}
         >
-          {session_id ? "Back to pricing" : "Request a new link"}
+          {session_id ? "Recover my purchase" : "Request a new link"}
         </a>
       </CenteredMessage>
     );
