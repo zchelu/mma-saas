@@ -9,14 +9,14 @@ export default async function Home() {
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
         <span className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>KombatDesk</span>
+        {/* Deliberately down to a single header action. Pricing and "Get
+            started" both used to live here; /pricing is now a link sent
+            directly to a prospect rather than something a visitor browses to
+            (the page itself is still live, just unlinked and noindexed), and
+            the only conversion path on this page is the "Book My Demo" CTA
+            below. Adding a second header button re-opens a competing funnel
+            that skips the demo entirely. */}
         <div className="flex items-center gap-3">
-          <Link
-            href="/pricing"
-            className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-            style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
-          >
-            Pricing
-          </Link>
           {user ? (
             // Plain <a>, not Link: forces a full page load instead of a
             // client-side RSC transition. Diagnosed live (browser-extension
@@ -32,22 +32,13 @@ export default async function Home() {
               Dashboard
             </a>
           ) : (
-            <>
-              <a
-                href="/sign-in"
-                className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-                style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
-              >
-                Sign in
-              </a>
-              <Link
-                href="/signup"
-                className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-                style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
-              >
-                Get started
-              </Link>
-            </>
+            <a
+              href="/sign-in"
+              className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+              style={{ backgroundColor: "#FFFFFF", color: "#000000" }}
+            >
+              Sign in
+            </a>
           )}
         </div>
       </header>
@@ -64,13 +55,17 @@ export default async function Home() {
           <p className="text-lg mb-10 max-w-lg mx-auto" style={{ color: "#888888" }}>
             KombatDesk spots members going cold and texts them back through your door — automatically.
           </p>
+          {/* Both CTAs on this page say the same thing and point to the same
+              place on purpose — /signup is the lead form (app/actions/sendLead.ts),
+              not Clerk's /sign-up. Keep the two labels identical; a visitor
+              should never be choosing between two different asks. */}
           <div className="flex justify-center">
             <Link
               href="/signup"
               className="rounded-lg font-semibold px-6 py-3 transition-colors"
               style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
-              Set up my gym
+              Book My Demo
             </Link>
           </div>
         </div>
@@ -123,7 +118,7 @@ export default async function Home() {
             className="inline-block rounded-lg font-semibold px-6 py-3 transition-colors"
             style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
-            Set up my gym
+            Book My Demo
           </Link>
         </div>
       </main>
