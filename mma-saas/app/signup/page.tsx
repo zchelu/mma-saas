@@ -134,7 +134,7 @@ export default function SignupPage() {
           Let&apos;s get your gym set up
         </h1>
         <p className="text-sm mb-8 leading-relaxed" style={{ color: "#888888" }}>
-          We&apos;ll reach out within 24 hours to get KombatDesk running for your gym — usually takes less than an hour.
+          I&apos;ll reach out within 24 hours. Once you send me your member list, your gym is live within 24 hours of that.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

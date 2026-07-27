@@ -41,7 +41,7 @@ export const PRICING_TIERS = [
     size: "101–250 members",
     price: 179,
     perks: [] as string[],
-    badge: "MOST GYMS START HERE",
+    badge: "WHERE I'D START YOU",
     highlighted: true,
     roiLine:
       "Save two members a year and it's paid for itself. Built for the range where silent quitters stop being names you'd notice.",
@@ -102,12 +102,12 @@ const FAQS = [
   {
     question: "I already use Zen Planner / Gymdesk / Kicksite.",
     answer:
-      "Keep it. Most owners run KombatDesk alongside for the first month and decide from there. I'll import your roster either way.",
+      "Keep it. Run KombatDesk alongside for the first month and decide from there — I'll import your roster either way, and you're not moving anything off your current system to try this.",
   },
   {
     question: "Do my members have to consent to texts?",
     answer:
-      "Yes — every member has to opt in before we can text them. We run that for you: we send your members the opt-in link and track who's said yes, and you can watch the count climb from your dashboard.",
+      "Yes — every member opts in before we can text them. I set up the opt-in page for your gym and hand you the link, so you can drop it in your group chat, on the whiteboard, or at the front desk. You watch the count climb from your dashboard.",
   },
   {
     question: "Contract?",

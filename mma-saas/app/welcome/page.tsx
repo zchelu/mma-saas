@@ -58,7 +58,7 @@ export default async function WelcomePage({
       <CenteredMessage>
         <p className="text-sm" style={{ color: "#FF6B6B" }}>
           {session_id
-            ? "We couldn't confirm your payment. If you were charged, contact us and we'll sort it out."
+            ? "I couldn't confirm your payment. If you were charged, email me at kombatdesk@outlook.com and I'll sort it out — or use the recovery link at kombatdesk.com/recover."
             : "This recovery link is invalid or has expired."}
         </p>
         <a

@@ -18,7 +18,7 @@ export default function ThankYouPage() {
           You&apos;re on the list.
         </h1>
         <p className="text-base leading-relaxed" style={{ color: "#888888" }}>
-          We&apos;ll call you within 24 hours to get KombatDesk set up for your gym.
+          I&apos;ll call you within 24 hours to get KombatDesk set up for your gym.
         </p>
       </div>
     </div>
