@@ -192,8 +192,16 @@ export default function OnboardingWizard({
             />
             <span className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>
               I understand that before texting any member, I must obtain their consent to
-              receive SMS messages, per KombatDesk&apos;s SMS Consent Addendum — enforced
-              whenever a phone number is added to a member.
+              receive SMS messages, per{" "}
+              <a
+                href="/terms#addclause"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                Terms §26
+              </a>{" "}
+              — KombatDesk will not text a member whose consent has not been confirmed.
             </span>
           </label>
 

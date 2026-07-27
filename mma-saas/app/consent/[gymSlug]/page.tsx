@@ -10,6 +10,32 @@ const inputStyle = {
   color: "#FFFFFF",
 };
 
+// Shown on both the form and the success state. This is the only KombatDesk
+// surface a gym member ever sees, and it previously named neither KombatDesk
+// nor the evidence captured at submission (IP + user agent — see actions.ts,
+// disclosed in Privacy §2/§4). Rendered as its own line rather than folded
+// into the checkbox label on purpose: that label comes from
+// lib/consentText.ts and is frozen onto each consentSubmissions row, so
+// editing it without bumping CONSENT_VERSION would desync stored evidence
+// from the wording actually agreed to.
+function ConsentDisclosure({ gymName }: { gymName: string }) {
+  return (
+    <p className="text-xs leading-relaxed" style={{ color: "#888888" }}>
+      Texts are sent by KombatDesk, the software {gymName} uses to manage its
+      membership, on the gym&apos;s behalf. Your name, phone number, IP address, and
+      browser are recorded as proof of consent. See our{" "}
+      <a href="/privacy" className="underline" style={{ color: "#AAAAAA" }}>
+        Privacy Policy
+      </a>{" "}
+      and{" "}
+      <a href="/terms" className="underline" style={{ color: "#AAAAAA" }}>
+        Terms
+      </a>
+      .
+    </p>
+  );
+}
+
 export default async function ConsentPage({
   params,
   searchParams,
@@ -36,6 +62,9 @@ export default async function ConsentPage({
         <p className="text-base max-w-sm" style={{ color: "#888888" }}>
           Thanks — {gym.name} can now text you about your membership.
         </p>
+        <div className="max-w-sm mt-8">
+          <ConsentDisclosure gymName={gym.name} />
+        </div>
       </div>
     );
   }
@@ -93,6 +122,8 @@ export default async function ConsentPage({
               {getConsentText(gym.name)}
             </span>
           </label>
+
+          <ConsentDisclosure gymName={gym.name} />
 
           <button
             type="submit"
