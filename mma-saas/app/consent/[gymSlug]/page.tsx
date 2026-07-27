@@ -21,9 +21,14 @@ const inputStyle = {
 function ConsentDisclosure({ gymName }: { gymName: string }) {
   return (
     <p className="text-xs leading-relaxed" style={{ color: "#888888" }}>
-      Texts are sent by KombatDesk, the software {gymName} uses to manage its
-      membership, on the gym&apos;s behalf. Your name, phone number, IP address, and
-      browser are recorded as proof of consent. See our{" "}
+      {/* The space after {gymName} must be an explicit {" "} expression: the
+          JSX text that follows it spans multiple lines, and the compiler strips
+          that chunk's leading whitespace while collapsing the line break —
+          which shipped "…the software Colorado Springs BJJuses to manage…" to
+          production. A literal space in the source is not enough here. */}
+      Texts are sent by KombatDesk, the software {gymName}{" "}
+      uses to manage its membership, on the gym&apos;s behalf. Your name, phone
+      number, IP address, and browser are recorded as proof of consent. See our{" "}
       <a href="/privacy" className="underline" style={{ color: "#AAAAAA" }}>
         Privacy Policy
       </a>{" "}
