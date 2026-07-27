@@ -12,7 +12,18 @@ import { STOP_KEYWORDS, START_KEYWORDS } from "./smsKeywords";
 // DRAFT — not legal-reviewed. Zain is taking the consent/sender-of-record
 // question to a lawyer; expect this wording (and possibly CONSENT_VERSION) to
 // change before this goes live with a real gym.
-export const CONSENT_VERSION = "1";
+//
+// v2 (2026-07-27): names KombatDesk as the sender-of-record inside the
+// checkbox itself — the registered brand now appears in the text the member
+// actually agrees to, not only in the surrounding explainer paragraph. The
+// wording genuinely changed, so this bump is required: consentSubmissions
+// snapshots consentText per row and the idempotency check is keyed on
+// gymId+phone+consentVersion. Existing v1 rows are deliberately NOT
+// backfilled or mutated — they record what those members really agreed to.
+// One intended consequence: someone who already submitted under v1 is no
+// longer deduped and can submit again under v2, which is correct — new
+// wording is a new TCPA event, not a duplicate.
+export const CONSENT_VERSION = "2";
 
 // Opt-out/opt-in keyword lists come from lib/smsKeywords.ts, shared with
 // convex/twilioWebhookAction.ts's actual STOP/START matching — that file is
@@ -30,7 +41,8 @@ function formatKeywordList(keywords: string[]): string {
 
 export function getConsentText(gymName: string): string {
   return (
-    `I agree to receive automated text messages from ${gymName} about my membership, ` +
+    `I agree to receive automated text messages about my membership from ${gymName}, ` +
+    `sent by KombatDesk on the gym's behalf, ` +
     `including a reminder if I haven't been in for a while, sent to the number above using ` +
     `an automatic telephone dialing system. Consent is not a condition of membership or of ` +
     `purchasing anything. Message frequency varies. Message and data rates may apply. ` +
