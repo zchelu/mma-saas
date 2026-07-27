@@ -6,12 +6,14 @@ export default function StatsGrid() {
   const activeMembers = useQuery(api.members.getActiveCount);
   const classCount = useQuery(api.classes.getCount);
   const openInvoices = useQuery(api.invoices.getUnpaidCount);
+  const consentStats = useQuery(api.consent.getConsentStats);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
       <StatCard label="Active Members" value={activeMembers} />
       <StatCard label="Classes Scheduled" value={classCount} />
       <StatCard label="Open Invoices" value={openInvoices} />
+      <StatCard label="SMS Opt-ins Received" value={consentStats?.totalSubmissions} />
     </div>
   );
 }

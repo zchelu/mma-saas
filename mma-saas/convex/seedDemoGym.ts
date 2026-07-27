@@ -114,6 +114,37 @@ export const seedDemoGym = internalMutation({
       }
     }
 
+    // Every member above deliberately has no phone/smsConsentConfirmed, so a
+    // live winback run on the demo gym would otherwise text nobody. This one
+    // extra member exists purely to pass sendRetentionTexts.ts:
+    // getAtRiskMembers' send gate. Consent is hardcoded true here ONLY
+    // because DEMO_PHONE is expected to be the gym owner's own number that
+    // they've knowingly opted in for demo purposes — no other seeded member
+    // may ever be given a fabricated consent record. Phone comes from an env
+    // var, never hardcoded in source, since a realistic-looking hardcoded
+    // number belongs to a real person and this gym auto-texts.
+    const demoPhone = process.env.DEMO_PHONE;
+    if (demoPhone) {
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      await ctx.db.insert("members", {
+        name: "Demo Winback (owner phone)",
+        plan: "Adult BJJ Unlimited",
+        status: "active",
+        beltRank: "White",
+        lastVisit: tenDaysAgo,
+        phone: demoPhone,
+        smsConsentConfirmed: true,
+        smsConsentConfirmedAt: Date.now(),
+        smsConsentSource: "owner_attestation",
+        gymId,
+      });
+      membersCreated++;
+    } else {
+      console.log(
+        "Demo winback member skipped: DEMO_PHONE env var isn't set, so no member can pass the send gate."
+      );
+    }
+
     return {
       classesCreated: classIds.length,
       membersCreated,

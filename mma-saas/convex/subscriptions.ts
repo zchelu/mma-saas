@@ -4,17 +4,25 @@ import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { hasWriteAccess } from "./gyms";
-import { planHasTexting } from "../lib/plans";
+import { planHasTexting, resolvePlanFromPriceId } from "../lib/plans";
+import { alertUnresolvedPrice } from "../lib/alerts";
 
 export const upsertSubscription = internalMutation({
   args: {
     clerkUserId: v.string(),
     stripeCustomerId: v.string(),
     stripeSubscriptionId: v.string(),
-    plan: v.string(),
+    // Optional (schema field already is): stripeWebhookAction.ts passes
+    // undefined when the subscription's Stripe Price doesn't resolve to a
+    // known plan (see lib/plans.ts:resolvePlanFromPriceId), rather than
+    // guessing a tier. Omitting the field here — never defaulting it — is
+    // what keeps this gym's plan untouched instead of mislabeled: a
+    // just-paid customer still gets planStatus/stripeCustomerId written and
+    // keeps access, just with whatever plan value (or none) it already had.
+    plan: v.optional(v.string()),
     planStatus: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ gymId: string }> => {
     const existing = await ctx.db
       .query("gyms")
       .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
@@ -31,19 +39,21 @@ export const upsertSubscription = internalMutation({
       await ctx.db.patch(existing._id, {
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
-        plan: args.plan,
+        ...(args.plan ? { plan: args.plan } : {}),
         planStatus: args.planStatus,
         onboardingCompleted: true,
       });
+      return { gymId: existing._id };
     } else {
-      await ctx.db.insert("gyms", {
+      const gymId = await ctx.db.insert("gyms", {
         clerkUserId: args.clerkUserId,
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
-        plan: args.plan,
+        ...(args.plan ? { plan: args.plan } : {}),
         planStatus: args.planStatus,
         onboardingCompleted: true,
       });
+      return { gymId };
     }
   },
 });
@@ -57,10 +67,11 @@ export const upsertUnclaimedSubscription = internalMutation({
   args: {
     stripeCustomerId: v.string(),
     stripeSubscriptionId: v.string(),
-    plan: v.string(),
+    // See upsertSubscription's comment above — same optional-plan reasoning.
+    plan: v.optional(v.string()),
     planStatus: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ gymId: string }> => {
     const existing = await ctx.db
       .query("gyms")
       .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", args.stripeCustomerId))
@@ -69,17 +80,19 @@ export const upsertUnclaimedSubscription = internalMutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         stripeSubscriptionId: args.stripeSubscriptionId,
-        plan: args.plan,
+        ...(args.plan ? { plan: args.plan } : {}),
         planStatus: args.planStatus,
       });
+      return { gymId: existing._id };
     } else {
-      await ctx.db.insert("gyms", {
+      const gymId = await ctx.db.insert("gyms", {
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
-        plan: args.plan,
+        ...(args.plan ? { plan: args.plan } : {}),
         planStatus: args.planStatus,
         createdAt: Date.now(),
       });
+      return { gymId };
     }
   },
 });
@@ -132,18 +145,32 @@ export const claimGymBySessionId = action({
     const sub = session.subscription as
       | { id: string; status: string; items: { data: { price: { id: string } }[] } }
       | null;
-    const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
-    const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
     const priceId = sub?.items?.data?.[0]?.price?.id;
-    const plan = priceId === elitePriceId ? "blackbelt" : priceId === proPriceId ? "fightteam" : "academy";
+    const plan = resolvePlanFromPriceId(priceId);
 
-    return await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
+    const result = await ctx.runMutation(internal.subscriptions.claimGymByCustomer, {
       clerkUserId: identity.subject,
       stripeCustomerId,
       stripeSubscriptionId: sub?.id,
-      plan: sub ? plan : undefined,
+      // resolvePlanFromPriceId(undefined) already returns undefined when sub
+      // is null (priceId is undefined too), so this needs no ternary.
+      plan,
       planStatus: sub?.status,
     });
+
+    // Does not throw — a customer sitting mid-checkout must not see an error
+    // page. gym.plan stays whatever claimGymByCustomer already left it as;
+    // this only alerts so it gets fixed by hand.
+    if (sub && !plan) {
+      await alertUnresolvedPrice({
+        source: "subscriptions.claimGymBySessionId",
+        priceId,
+        gymId: result.gymId,
+        stripeSubscriptionId: sub.id,
+      });
+    }
+
+    return result;
   },
 });
 
@@ -220,7 +247,12 @@ export const claimGymByCustomer = internalMutation({
       clerkUserId,
       stripeCustomerId,
       ...(stripeSubscriptionId ? { stripeSubscriptionId } : {}),
-      plan: plan ?? "academy",
+      // Never fabricate a plan for an unresolved price (see
+      // lib/plans.ts:resolvePlanFromPriceId) — omit the field entirely
+      // (already optional in schema) rather than defaulting to "academy".
+      // upsertUnclaimedSubscription will fill this in once the webhook
+      // lands, same as it always does for a still-blank placeholder.
+      ...(plan ? { plan } : {}),
       planStatus: planStatus ?? "inactive",
       createdAt: Date.now(),
     });
@@ -345,10 +377,14 @@ export const getOrCreateGym = mutation({
       .unique();
     if (existing) return existing;
 
+    // A gym with no subscription has no plan — never fabricate one (see the
+    // same reasoning in claimGymByCustomer below and lib/plans.ts:
+    // resolvePlanFromPriceId). Defaulting to "academy" here made
+    // planHasTexting() return true for a gym that has never subscribed, and
+    // made app/billing/page.tsx show "Academy" to someone who has never paid.
     const gymId = await ctx.db.insert("gyms", {
       clerkUserId,
       name: defaultName ?? "My Gym",
-      plan: "academy",
       planStatus: "inactive",
       createdAt: Date.now(),
     });
@@ -370,6 +406,8 @@ export const getSubscription = query({
         stripeCustomerId: null,
         stripeSubscriptionId: null,
         onboardingCompleted: false,
+        gymId: null,
+        createdAt: null,
       };
     }
     const gym = await ctx.db
@@ -382,6 +420,11 @@ export const getSubscription = query({
       stripeCustomerId: gym?.stripeCustomerId ?? null,
       stripeSubscriptionId: gym?.stripeSubscriptionId ?? null,
       onboardingCompleted: gym?.onboardingCompleted ?? false,
+      // Exposed for app/dashboard/winback-panel.tsx: the panel's default range
+      // start is this gym's own createdAt, not a trailing window — see that
+      // file for why.
+      gymId: gym?._id ?? null,
+      createdAt: gym?.createdAt ?? null,
     };
   },
 });

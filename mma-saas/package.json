@@ -14,7 +14,7 @@
     "@clerk/nextjs": "^7.5.7",
     "@stripe/stripe-js": "^9.8.0",
     "convex": "^1.41.0",
-    "next": "16.2.9",
+    "next": "^16.2.12",
     "posthog-js": "^1.392.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",

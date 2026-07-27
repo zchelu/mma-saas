@@ -16,4 +16,13 @@ crons.daily(
   internal.sendRetentionTexts.sendRetentionTextsSMS,
 );
 
+// Trailing-30-day summary, not a calendar-month report — see
+// winbackReportEmail.ts. Runs on the 1st so every gym gets it on a
+// predictable date regardless of when they onboarded.
+crons.monthly(
+  "send monthly winback reports",
+  { day: 1, hourUTC: 17, minuteUTC: 0 },
+  internal.winbackReportEmail.sendMonthlyWinbackReports,
+);
+
 export default crons;

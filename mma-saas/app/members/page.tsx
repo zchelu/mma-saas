@@ -6,6 +6,7 @@ import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import MemberModal from "./member-modal";
 import CheckInHistoryDrawer from "./check-in-history-drawer";
+import ConsentAttestationPanel from "./consent-attestation-panel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
 
 type Member = {
@@ -117,6 +118,8 @@ export default function MembersPage() {
         </div>
 
         {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
+
+        <ConsentAttestationPanel />
 
         {members !== undefined && (
           <div className="flex gap-6 mb-6 pb-6" style={{ borderBottom: "1px solid #333333" }}>

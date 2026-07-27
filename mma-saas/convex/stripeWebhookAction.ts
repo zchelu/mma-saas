@@ -2,10 +2,11 @@
 
 import Stripe from "stripe";
 import { Resend } from "resend";
-import { action } from "./_generated/server";
+import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "../lib/plans";
+import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS, resolvePlanFromPriceId } from "../lib/plans";
+import { alertUnresolvedPrice } from "../lib/alerts";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 
@@ -28,15 +29,30 @@ const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 // the only C.R.S. 6-1-732 written record, so skipping it on the no-trial
 // path left real charged subscriptions with no compliance record at all.
 // Now always sends, branching copy on whether a trial actually applies.
+// customerRef is the subscription's `customer` field. Because every
+// subscription re-fetch below expands it (see retrieveSubscription), this is
+// normally the full object already and costs no additional Stripe call — the
+// string branch is a fallback that keeps this correct if it's ever called
+// without expansion.
 async function sendTrialConfirmationEmail(
   stripe: Stripe,
-  customerId: string,
-  plan: string,
+  customerRef: string | Stripe.Customer | Stripe.DeletedCustomer,
+  plan: string | undefined,
   trialEnd: number | null,
   currentPeriodEnd: number | null
 ) {
+  const customerId = typeof customerRef === "string" ? customerRef : customerRef.id;
   try {
-    const customer = await stripe.customers.retrieve(customerId);
+    // plan is undefined when the subscription's Stripe Price didn't resolve
+    // to a known tier (see lib/plans.ts:resolvePlanFromPriceId) — the gym
+    // itself already kept whatever plan it had (upsertSubscription/
+    // upsertUnclaimedSubscription omit the field rather than guessing), so
+    // this only skips the confirmation email, not the customer's access.
+    if (!plan) {
+      console.error(`Trial confirmation email skipped: subscription has no resolved plan (customer ${customerId})`);
+      return;
+    }
+    const customer = typeof customerRef === "string" ? await stripe.customers.retrieve(customerId) : customerRef;
     if (customer.deleted || !customer.email) return;
 
     // Explicit lookup, not slug capitalization — that rendered multi-word
@@ -122,9 +138,157 @@ async function sendTrialConfirmationEmail(
 // SDK's constructEvent, but httpAction handlers can't live in a "use node"
 // file, so the HTTP entry point and this verification/processing logic stay
 // split across two files.
+// Every expected outcome is a variant so each caller can map it to its own
+// status. "retry" specifically must NOT collapse into the signature-failure
+// response: Stripe retries any non-2xx, so a 400 would technically work, but it
+// would log a Stripe outage as a forged request.
+type WebhookResult = { status: "ok" } | { status: "invalid_signature" } | { status: "retry" };
+
+// Event types this handler acts on. Checked before the dedupe claim so the
+// events Stripe sends that we ignore don't fill the table.
+const HANDLED_EVENT_TYPES = new Set<Stripe.Event["type"]>([
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.payment_failed",
+  "invoice.payment_succeeded",
+]);
+
+// Always expands the customer. Expansion is server-side, so this is still one
+// API call — it just means the subscription.created path can email without a
+// second customers.retrieve.
+async function retrieveSubscription(stripe: Stripe, subscriptionId: string): Promise<Stripe.Subscription> {
+  return await stripe.subscriptions.retrieve(subscriptionId, { expand: ["customer"] });
+}
+
+// Writes gym billing state from a FRESHLY RETRIEVED subscription. Callers must
+// never pass the object embedded in the webhook event — see processEvent.
+async function applySubscriptionState(
+  ctx: ActionCtx,
+  stripe: Stripe,
+  sub: Stripe.Subscription,
+  sendConfirmation: boolean
+): Promise<void> {
+  const clerkUserId = sub.metadata?.clerkUserId;
+
+  const priceId = sub.items.data[0]?.price.id;
+  const plan = resolvePlanFromPriceId(priceId);
+  if (!plan) {
+    // Most likely: the price env var is missing or has a different value
+    // between Vercel and the Convex dashboard. Deliberately NOT defaulting to
+    // "academy" — see lib/plans.ts. The gym still gets planStatus/
+    // stripeCustomerId written below (upsertSubscription/
+    // upsertUnclaimedSubscription omit plan when it's undefined), so a customer
+    // who just paid keeps access; only the tier label and trial confirmation
+    // email are affected until this is fixed.
+    console.error(`Stripe webhook: unrecognized price "${priceId}" on subscription ${sub.id} — plan will not be set`);
+  }
+  const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+
+  // No longer special-cased per event type. A deleted subscription reports
+  // status "canceled" on retrieve, so the old
+  // `event.type === "deleted" ? "canceled" : sub.status` branch is redundant —
+  // and it was actively wrong under out-of-order delivery, since it forced
+  // "canceled" from a stale event regardless of the subscription's real state.
+  const planStatus = sub.status;
+
+  let gymId: string;
+  if (clerkUserId) {
+    ({ gymId } = await ctx.runMutation(internal.subscriptions.upsertSubscription, {
+      clerkUserId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      plan,
+      planStatus,
+    }));
+  } else {
+    // Guest checkout — no Clerk account yet. Persist by customer id;
+    // claimGymBySessionId links clerkUserId once they sign up.
+    ({ gymId } = await ctx.runMutation(internal.subscriptions.upsertUnclaimedSubscription, {
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      plan,
+      planStatus,
+    }));
+  }
+
+  // Deliberately not thrown: an unresolved price is a deterministic config
+  // problem, so failing the event would just burn Stripe's retries on
+  // something that can't self-heal. Billing fields were persisted above; only
+  // the plan label is affected.
+  if (!plan) {
+    await alertUnresolvedPrice({
+      source: "stripeWebhookAction.verifyAndProcess",
+      priceId,
+      gymId,
+      stripeSubscriptionId: sub.id,
+    });
+  }
+
+  if (sendConfirmation) {
+    // current_period_end lives on the subscription item, not the subscription
+    // itself, as of this Stripe API version.
+    const currentPeriodEnd = sub.items.data[0]?.current_period_end ?? null;
+    await sendTrialConfirmationEmail(stripe, sub.customer, plan, sub.trial_end, currentPeriodEnd);
+  }
+}
+
+// Throws on a transient failure so verifyAndProcess can release the dedupe
+// claim and ask Stripe to retry.
+async function processEvent(ctx: ActionCtx, stripe: Stripe, event: Stripe.Event): Promise<void> {
+  switch (event.type) {
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted": {
+      // The event payload is used for ONE thing: the subscription id. Stripe
+      // does not guarantee delivery order, so the state embedded in the event
+      // may already be obsolete — a stale "updated" landing after a "deleted"
+      // used to un-cancel a gym, and a stale "deleted" landing after an
+      // "updated" used to lock a paying customer out mid-class. Re-fetching
+      // makes the write ordering-immune with no version bookkeeping: whatever
+      // order events arrive in, every one of them converges on the same
+      // current truth.
+      const staleId = (event.data.object as Stripe.Subscription).id;
+      const sub = await retrieveSubscription(stripe, staleId);
+      await applySubscriptionState(ctx, stripe, sub, event.type === "customer.subscription.created");
+      break;
+    }
+    case "invoice.payment_failed":
+    case "invoice.payment_succeeded": {
+      const invoice = event.data.object as Stripe.Invoice;
+
+      // As of this Stripe API version there is no top-level invoice.subscription
+      // — it lives under parent.subscription_details, and both levels are
+      // nullable for an invoice that isn't subscription-driven.
+      const subRef = invoice.parent?.subscription_details?.subscription;
+      const subscriptionId = typeof subRef === "string" ? subRef : subRef?.id;
+
+      // Previously this branch flipped planStatus for ANY invoice belonging to
+      // the customer, keyed on customer id alone — so a one-off manual invoice
+      // could mark a gym "active" (or "past_due") with no subscription behind
+      // it at all. No subscription means nothing to say about subscription
+      // state, so say nothing.
+      if (!subscriptionId) {
+        console.log(
+          `Stripe webhook: ${event.type} on invoice ${invoice.id} has no subscription — skipping, nothing to sync`
+        );
+        break;
+      }
+
+      // Same re-fetch rationale as above, and it also replaces the hardcoded
+      // "past_due"/"active" guess with the subscription's real status — Stripe
+      // may have already retried a failed payment successfully by the time this
+      // event is processed.
+      const sub = await retrieveSubscription(stripe, subscriptionId);
+      await applySubscriptionState(ctx, stripe, sub, false);
+      break;
+    }
+  }
+}
+
 export const verifyAndProcess = action({
   args: { signature: v.string(), payload: v.string() },
-  handler: async (ctx, { signature, payload }): Promise<{ success: boolean }> => {
+  handler: async (ctx, { signature, payload }): Promise<WebhookResult> => {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
     let event: Stripe.Event;
@@ -132,64 +296,32 @@ export const verifyAndProcess = action({
       event = stripe.webhooks.constructEvent(payload, signature, process.env.STRIPE_WEBHOOK_SECRET!);
     } catch (err) {
       console.error("Stripe webhook signature verification failed:", err);
-      return { success: false };
+      return { status: "invalid_signature" };
     }
 
-    switch (event.type) {
-      case "customer.subscription.created":
-      case "customer.subscription.updated":
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-        const clerkUserId = sub.metadata?.clerkUserId;
+    if (!HANDLED_EVENT_TYPES.has(event.type)) return { status: "ok" };
 
-        const proPriceId = process.env.STRIPE_PRO_PRICE_ID!;
-        const elitePriceId = process.env.STRIPE_ELITE_PRICE_ID!;
-        const priceId = sub.items.data[0]?.price.id;
-        const plan = priceId === elitePriceId ? "blackbelt" : priceId === proPriceId ? "fightteam" : "academy";
-        const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-        const planStatus = event.type === "customer.subscription.deleted" ? "canceled" : sub.status;
-
-        if (clerkUserId) {
-          await ctx.runMutation(internal.subscriptions.upsertSubscription, {
-            clerkUserId,
-            stripeCustomerId: customerId,
-            stripeSubscriptionId: sub.id,
-            plan,
-            planStatus,
-          });
-        } else {
-          // Guest checkout — no Clerk account yet. Persist by customer id;
-          // claimGymBySessionId links clerkUserId once they sign up.
-          await ctx.runMutation(internal.subscriptions.upsertUnclaimedSubscription, {
-            stripeCustomerId: customerId,
-            stripeSubscriptionId: sub.id,
-            plan,
-            planStatus,
-          });
-        }
-
-        if (event.type === "customer.subscription.created") {
-          // current_period_end lives on the subscription item, not the
-          // subscription itself, as of this Stripe API version.
-          const currentPeriodEnd = sub.items.data[0]?.current_period_end ?? null;
-          await sendTrialConfirmationEmail(stripe, customerId, plan, sub.trial_end, currentPeriodEnd);
-        }
-        break;
-      }
-      case "invoice.payment_failed":
-      case "invoice.payment_succeeded": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
-        if (customerId) {
-          await ctx.runMutation(internal.subscriptions.updatePlanStatusByCustomer, {
-            stripeCustomerId: customerId,
-            planStatus: event.type === "invoice.payment_failed" ? "past_due" : "active",
-          });
-        }
-        break;
-      }
+    // Stripe retries deliveries as normal operation, so this handler WILL see
+    // the same event more than once. The DB writes below are idempotent
+    // patches, but sendTrialConfirmationEmail is not — a redelivery would send
+    // a paying customer a second copy of the confirmation that serves as their
+    // C.R.S. 6-1-732 record.
+    const claimed = await ctx.runMutation(internal.stripeEvents.claimEventId, { eventId: event.id });
+    if (!claimed) {
+      console.log(`Stripe webhook: event ${event.id} (${event.type}) already processed — ignoring duplicate delivery`);
+      return { status: "ok" };
     }
 
-    return { success: true };
+    try {
+      await processEvent(ctx, stripe, event);
+      return { status: "ok" };
+    } catch (err) {
+      // Release before asking for a retry, or the claim above would make
+      // Stripe's redelivery look like a duplicate and the event would be lost
+      // for good — the failure mode the whole retry mechanism exists to avoid.
+      console.error(`Stripe webhook: processing failed for event ${event.id} (${event.type}) — releasing claim:`, err);
+      await ctx.runMutation(internal.stripeEvents.releaseEventId, { eventId: event.id });
+      return { status: "retry" };
+    }
   },
 });

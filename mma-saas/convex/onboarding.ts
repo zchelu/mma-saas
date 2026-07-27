@@ -1,6 +1,7 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
+import { generateGymSlug } from "./gyms";
 
 // Auth-first signup's setup wizard (app/onboarding). Deliberately does NOT go
 // through requireGym/requireWriteAccess — those block any gym whose
@@ -26,8 +27,12 @@ export const completeOnboarding = mutation({
     city: v.optional(v.string()),
     state: v.optional(v.string()),
     smsConsentConfirmed: v.boolean(),
+    // Clerk's client-side user object, not a Convex identity claim — the
+    // Convex JWT template doesn't carry email. Only destination we have for
+    // the monthly winback report (convex/winbackReportEmail.ts).
+    ownerEmail: v.optional(v.string()),
   },
-  handler: async (ctx, { gymName, city, state, smsConsentConfirmed }) => {
+  handler: async (ctx, { gymName, city, state, smsConsentConfirmed, ownerEmail }) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
     const clerkUserId = identity.subject;
@@ -42,6 +47,13 @@ export const completeOnboarding = mutation({
       .unique();
 
     const now = Date.now();
+    // Assigned once, here, the moment a gym's real name first becomes known
+    // — the one reliable spot in the app for that (see gyms.ts:generateGymSlug).
+    // Never reassigned on a repeat submit (e.g. the owner edits the gym name
+    // and resubmits): a slug already handed out in a /consent/[gymSlug] link
+    // must keep resolving to the same gym.
+    const slug = existing?.slug ? undefined : await generateGymSlug(ctx, gymName);
+
     // onboardingCompleted is deliberately NOT set here — it's only ever set
     // true by upsertSubscription (convex/subscriptions.ts), once Stripe
     // actually confirms a paid subscription via webhook. Setting it here,
@@ -54,6 +66,8 @@ export const completeOnboarding = mutation({
       name: gymName,
       city,
       state,
+      ...(slug ? { slug } : {}),
+      ...(ownerEmail ? { email: ownerEmail } : {}),
       ...(smsConsentConfirmed ? { smsConsentConfirmed: true, smsConsentConfirmedAt: now } : {}),
     };
 

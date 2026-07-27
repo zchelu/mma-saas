@@ -3,6 +3,7 @@ import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { validateRank, type Discipline } from "./beltTaxonomy";
 import { generateUniqueCheckInToken } from "./members";
+import { generateGymSlug } from "./gyms";
 
 // Shared by every table that has an optional gymId field awaiting backfill.
 async function backfillGymId(
@@ -313,5 +314,42 @@ export const deleteLegacySeedData = internalMutation({
     }
 
     return { membersDeleted: seeded.length, ranksDeleted };
+  },
+});
+
+// One-time backfill: assigns a slug (convex/gyms.ts:generateGymSlug) to every
+// existing gym row created before onboarding.ts:completeOnboarding started
+// doing this on new signups. A gym with no name yet never finished
+// onboarding — nothing to slugify, and it'll get one the first time it does
+// finish. Safe to re-run, like backfillCheckInTokens above — only touches
+// gyms with no slug yet.
+//
+// Run manually via the CLI:
+//   npx convex run migrations:backfillGymSlugs '{}'
+export const backfillGymSlugs = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const gyms = await ctx.db.query("gyms").collect();
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+    let skippedNoName = 0;
+
+    for (const gym of gyms) {
+      if (gym.slug !== undefined) {
+        skippedAlreadySet++;
+        continue;
+      }
+      if (!gym.name) {
+        skippedNoName++;
+        continue;
+      }
+
+      const slug = await generateGymSlug(ctx, gym.name);
+      await ctx.db.patch(gym._id, { slug });
+      updated++;
+    }
+
+    return { totalGyms: gyms.length, updated, skippedAlreadySet, skippedNoName };
   },
 });

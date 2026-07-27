@@ -58,7 +58,8 @@ export default function RetentionButton() {
           style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333" }}
         >
           <p className="text-xs mb-2" style={{ color: "#888888" }}>
-            Sent to every active member with no check-in in 7+ days. Use{" "}
+            Sent to at-risk members who&apos;ve opted in to texts and aren&apos;t already
+            mid-winback. Use{" "}
             <code style={{ color: "#CCCCCC" }}>{"{name}"}</code> for their first name — &quot;Reply STOP to opt
             out.&quot; is always added automatically.
           </p>
@@ -105,7 +106,7 @@ export default function RetentionButton() {
           className="absolute top-10 right-0 text-sm px-3 py-2 rounded-lg whitespace-nowrap z-10"
           style={{ backgroundColor: "#1A2A1A", border: "1px solid #4ADE80", color: "#4ADE80" }}
         >
-          Texts queued
+          Send started — only eligible members will actually be texted
         </div>
       )}
 

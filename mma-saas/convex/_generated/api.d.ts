@@ -11,6 +11,7 @@
 import type * as attendance from "../attendance.js";
 import type * as beltTaxonomy from "../beltTaxonomy.js";
 import type * as classes from "../classes.js";
+import type * as consent from "../consent.js";
 import type * as crons from "../crons.js";
 import type * as enrollments from "../enrollments.js";
 import type * as gyms from "../gyms.js";
@@ -24,10 +25,14 @@ import type * as rateLimit from "../rateLimit.js";
 import type * as recoveryAction from "../recoveryAction.js";
 import type * as seedDemoGym from "../seedDemoGym.js";
 import type * as sendRetentionTexts from "../sendRetentionTexts.js";
+import type * as stripeEvents from "../stripeEvents.js";
 import type * as stripeWebhookAction from "../stripeWebhookAction.js";
 import type * as subscriptions from "../subscriptions.js";
+import type * as twilioInbound from "../twilioInbound.js";
 import type * as twilioWebhookAction from "../twilioWebhookAction.js";
 import type * as validate from "../validate.js";
+import type * as winbackReport from "../winbackReport.js";
+import type * as winbackReportEmail from "../winbackReportEmail.js";
 
 import type {
   ApiFromModules,
@@ -39,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   attendance: typeof attendance;
   beltTaxonomy: typeof beltTaxonomy;
   classes: typeof classes;
+  consent: typeof consent;
   crons: typeof crons;
   enrollments: typeof enrollments;
   gyms: typeof gyms;
@@ -52,10 +58,14 @@ declare const fullApi: ApiFromModules<{
   recoveryAction: typeof recoveryAction;
   seedDemoGym: typeof seedDemoGym;
   sendRetentionTexts: typeof sendRetentionTexts;
+  stripeEvents: typeof stripeEvents;
   stripeWebhookAction: typeof stripeWebhookAction;
   subscriptions: typeof subscriptions;
+  twilioInbound: typeof twilioInbound;
   twilioWebhookAction: typeof twilioWebhookAction;
   validate: typeof validate;
+  winbackReport: typeof winbackReport;
+  winbackReportEmail: typeof winbackReportEmail;
 }>;
 
 /**

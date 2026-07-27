@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Resend } from "resend";
 import { fetchAction } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { clientIp } from "@/lib/rate-limit";
@@ -10,14 +9,21 @@ const GENERIC_RESPONSE = {
 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// KNOWN LIMITATION, accepted at current scale: the matched-email branch below
-// does real work (Stripe subscription lookups, a Resend email send) that the
-// non-match branch skips, so response *timing* differs even though the
-// response *body* is always GENERIC_RESPONSE either way. A patient attacker
-// could in principle use that timing gap to statistically distinguish real
-// accounts from non-accounts despite the identical response text. Not fixed
-// here — revisit if this app ever handles data sensitive enough to justify
-// constant-time responses (e.g. padding the fast path to match the slow one).
+// TIMING, largely closed. This route no longer branches on whether the email
+// matched: requestRecovery does no Stripe or Resend work inline — it consumes
+// two rate limits, schedules convex/recoveryAction.ts:deliverRecoveryEmail with
+// runAfter(0), and returns. The old gap was a match doing several hundred
+// milliseconds of Stripe lookups plus an email send while a non-match did
+// neither; what's left is one scheduler insert, and it happens before match
+// status is even known, so it can't correlate with it.
+//
+// Residual: a rate-limited call returns after one mutation instead of two plus
+// a schedule. Sub-millisecond, and it reveals throttle state rather than
+// account existence. Accepted.
+//
+// This route's own limit is layer two. The real per-email and platform-wide
+// limits live inside the Convex action, because this route is not the only way
+// to reach it — the deployment is directly callable.
 export async function POST(request: NextRequest) {
   const body = await readJsonBody<{ email?: string }>(request);
   const email = body?.email;
@@ -25,12 +31,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   }
 
-  // "auth" bucket — same 5-attempts/15-min ceiling as every other route that
-  // verifies or issues a credential in this app. checkRateLimit is
-  // internalMutation now, so this goes through the checkRateLimitAction
-  // wrapper instead of fetchMutation — see convex/rateLimit.ts for why.
+  // "recoverIp", not the shared "auth" bucket. Two reasons: this is now an
+  // outer layer rather than the control, and "auth" is no longer reachable
+  // through checkRateLimitAction at all — it keys on a Clerk user id in the
+  // claim flows, which made it burnable against a named victim. See the
+  // PUBLICLY_CALLABLE_BUCKETS allowlist in convex/rateLimit.ts.
   const allowed = await fetchAction(api.rateLimit.checkRateLimitAction, {
-    bucket: "auth",
+    bucket: "recoverIp",
     identifier: `ip:${clientIp(request)}`,
   });
   if (!allowed) {
@@ -41,28 +48,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Stripe ownership verification + recovery-token minting both happen
-    // inside this action now (convex/recoveryAction.ts) — this route no
-    // longer touches Stripe or calls createRecoveryToken directly.
-    const { token } = await fetchAction(api.recoveryAction.requestRecovery, { email });
-
-    if (token) {
-      const origin = new URL(request.url).origin;
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      await resend.emails.send({
-        from: "KombatDesk <billing@kombatdesk.com>",
-        to: email,
-        subject: "Finish setting up your KombatDesk account",
-        text: [
-          `We found a payment on file for this email but no account linked to it yet.`,
-          ``,
-          `Finish setting up your account here (link expires in 30 minutes):`,
-          `${origin}/welcome?token=${token}`,
-          ``,
-          `If you didn't request this, you can ignore this email.`,
-        ].join("\n"),
-      });
-    }
+    // Stripe verification, token minting, and the email send all happen inside
+    // Convex now (convex/recoveryAction.ts). There is deliberately no return
+    // value to branch on: the token must never cross a network boundary back
+    // to a caller, and the link origin must never come from the request, or an
+    // attacker could point a real victim's email at a domain they control.
+    await fetchAction(api.recoveryAction.requestRecovery, { email });
   } catch (err) {
     console.error("Recovery email request failed:", err);
     // Fall through to the generic response either way — never reveal via

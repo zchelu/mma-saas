@@ -19,9 +19,18 @@ http.route({
       payload,
     });
 
-    if (!result.success) {
+    if (result.status === "invalid_signature") {
       return new Response(JSON.stringify({ error: "Invalid webhook signature" }), { status: 400 });
     }
+
+    // 500, not 400 — processing hit a transient failure (typically the Stripe
+    // re-fetch) and the dedupe claim has been released, so Stripe should
+    // redeliver. Stripe retries any non-2xx, so a 400 would also get retried,
+    // but it would record an outage as a rejected signature.
+    if (result.status === "retry") {
+      return new Response(JSON.stringify({ error: "Temporarily unable to process" }), { status: 500 });
+    }
+
     return new Response(JSON.stringify({ received: true }), { status: 200 });
   }),
 });
@@ -39,22 +48,17 @@ http.route({
       return new Response("Missing signature", { status: 400 });
     }
 
+    // Everything from here to the runAction below is read-only parsing. The
+    // rate limiter used to sit in this gap and write a rateLimits row keyed on
+    // params.From — an attacker-controlled field on an unauthenticated
+    // endpoint, read before anything had proven the request came from Twilio.
+    // Burning a real member's bucket that way got their genuine STOP rejected
+    // with a 429 right here, before the signature was ever checked. It now
+    // runs inside verifyAndProcess, after validation; see the comment there.
     const rawBody = await request.text();
     const params = Object.fromEntries(new URLSearchParams(rawBody));
     const url = new URL(request.url);
     const webhookUrl = `${url.origin}${url.pathname}`;
-
-    // Signature verification (below) already proves this came from Twilio,
-    // but a compromised/misconfigured sender replaying the same request
-    // shouldn't be able to hammer this in a tight loop — bounded per sender
-    // number, generous enough for a real opt-out/opt-in burst.
-    const allowed = await ctx.runMutation(internal.rateLimit.checkRateLimit, {
-      bucket: "twilioInbound",
-      identifier: params.From ?? "unknown",
-    });
-    if (!allowed) {
-      return new Response("Too many requests", { status: 429 });
-    }
 
     try {
       const result = await ctx.runAction(internal.twilioWebhookAction.verifyAndProcess, {
@@ -62,12 +66,33 @@ http.route({
         params,
         signature,
       });
+
+      // Empty body: a forged request gets a deliberate rejection and nothing
+      // to learn from. 403 rather than 401 — there is no credential to
+      // re-present, and Twilio does not retry 4xx.
+      if (result.status === "invalid_signature") {
+        return new Response(null, { status: 403 });
+      }
+
+      // Distinct from the 403 above on purpose: this point is only reachable
+      // with a valid Twilio signature, so 429 tells a real sender to back off
+      // rather than implying their credentials were rejected.
+      if (result.status === "rate_limited") {
+        return new Response("Too many requests", { status: 429 });
+      }
+
       const twiml = result.replyMessage
         ? `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${result.replyMessage}</Message></Response>`
         : `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`;
       return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
-    } catch {
-      return new Response("Invalid signature", { status: 403 });
+    } catch (err) {
+      // Genuinely unexpected only — an invalid signature is a returned variant
+      // now, not a throw. This used to answer 403 for anything, which meant a
+      // missing TWILIO_AUTH_TOKEN or a Convex fault was reported to Twilio as a
+      // forged request: no retry, no log, and a real member's STOP dropped on
+      // the floor looking like an attack. 500 gets it retried and logged.
+      console.error("Twilio inbound webhook failed:", err);
+      return new Response(null, { status: 500 });
     }
   }),
 });

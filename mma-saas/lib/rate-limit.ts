@@ -14,7 +14,15 @@ import { NextRequest } from "next/server";
 // x-real-ip is documented as identical to x-forwarded-for, not a distinct
 // stronger signal, so it isn't checked separately here.
 export function clientIp(request: NextRequest): string {
-  const vercelForwardedFor = request.headers.get("x-vercel-forwarded-for");
-  const forwardedFor = request.headers.get("x-forwarded-for");
+  return clientIpFromHeaders(request.headers);
+}
+
+// Same header-preference logic as clientIp above, taking a plain Headers
+// object instead of NextRequest — for callers that only have that, like a
+// Server Action reading next/headers' headers() (Route Handlers get a
+// NextRequest and should keep using clientIp).
+export function clientIpFromHeaders(headers: Headers): string {
+  const vercelForwardedFor = headers.get("x-vercel-forwarded-for");
+  const forwardedFor = headers.get("x-forwarded-for");
   return (vercelForwardedFor ?? forwardedFor)?.split(",")[0]?.trim() || "unknown";
 }

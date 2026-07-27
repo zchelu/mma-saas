@@ -1,6 +1,6 @@
-import { QueryCtx, MutationCtx } from "./_generated/server";
+import { query, QueryCtx, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
 
 // Statuses that unlock write access. Neither "inactive" (never subscribed)
 // nor a lapsed "canceled"/"past_due" qualifies. Also the definition of
@@ -111,3 +111,59 @@ export async function requireOwnMember(
   if (!member || member.gymId !== gymId) throw new Error("Member not found");
   return member;
 }
+
+function slugifyGymName(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return base || "gym";
+}
+
+// 3 random bytes -> 6 lowercase base36 chars, only used as a disambiguating
+// suffix (see below) — collision odds within one retry loop are irrelevant
+// since the loop itself re-checks by_slug either way.
+function randomSlugSuffix(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(36)).join("").slice(0, 6);
+}
+
+// Human-readable, never the raw Convex document id — this is what ends up in
+// a URL a gym owner pastes into an email/text (see /consent/[gymSlug]).
+// First attempt is the bare slugified name with no suffix, so the common
+// case (one gym per name) gets a clean "colorado-springs-bjj" rather than
+// always carrying a random tail; only a genuine collision (two gyms
+// slugifying to the same base) falls through to a suffixed retry, checked
+// against by_slug the same way generateUniqueCheckInToken checks
+// by_check_in_token.
+export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<string> {
+  const base = slugifyGymName(name);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = attempt === 0 ? base : `${base}-${randomSlugSuffix()}`;
+    const collision = await ctx.db
+      .query("gyms")
+      .withIndex("by_slug", (q) => q.eq("slug", candidate))
+      .unique();
+    if (!collision) return candidate;
+  }
+  throw new Error("Failed to generate a unique gym slug after 5 attempts");
+}
+
+// Public, unauthenticated — resolves the human-readable slug in a consent
+// link to just the gym's name for display. Deliberately returns nothing but
+// the name: the public consent page needs it to render "Welcome to X" and
+// nothing else, so there's no reason for this to ever hand back a gym's
+// Convex document id (or any other field) to an unauthenticated caller.
+export const getBySlug = query({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const gym = await ctx.db
+      .query("gyms")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!gym?.name) return null;
+    return { name: gym.name };
+  },
+});

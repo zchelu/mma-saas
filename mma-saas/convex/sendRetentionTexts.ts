@@ -17,6 +17,13 @@ const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appen
 // with the per-member 7-day gate below, that's ~three weeks of outreach.
 export const MAX_WINBACK_ATTEMPTS = 3;
 
+// How recent a winback text has to be for a subsequent check-in to count as
+// a recovery caused by it (see members.ts:checkIn). Two full texting cycles
+// (cadence is one text per 7 days) — long enough for a real response to have
+// happened, short enough not to credit an unrelated organic return. Biased
+// conservative on purpose: this number gets said out loud to a gym owner.
+export const WINBACK_ATTRIBUTION_WINDOW_DAYS = 14;
+
 export const getAtRiskMembers = internalQuery({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {

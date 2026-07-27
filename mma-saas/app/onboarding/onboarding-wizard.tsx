@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
@@ -73,6 +74,7 @@ export default function OnboardingWizard({
   // string would have silently resurrected the skip for Academy.
   const skipConsent = false;
   const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
+  const { user } = useUser();
 
   const [step, setStep] = useState(0);
   const [gymName, setGymName] = useState("");
@@ -93,6 +95,7 @@ export default function OnboardingWizard({
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         smsConsentConfirmed: consent,
+        ownerEmail: user?.primaryEmailAddress?.emailAddress,
       });
 
       const priceId = priceIdByPlan[plan];

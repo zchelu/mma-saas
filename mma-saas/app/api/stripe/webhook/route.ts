@@ -23,8 +23,15 @@ export async function POST(request: NextRequest) {
     payload: rawBody,
   });
 
-  if (!result.success) {
+  if (result.status === "invalid_signature") {
     return NextResponse.json({ error: "Invalid webhook signature" }, { status: 400 });
+  }
+
+  // 500 so Stripe redelivers a transient failure (typically the Stripe
+  // re-fetch inside the action). The dedupe claim is released before this is
+  // returned, so the retry is processed rather than discarded as a duplicate.
+  if (result.status === "retry") {
+    return NextResponse.json({ error: "Temporarily unable to process" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

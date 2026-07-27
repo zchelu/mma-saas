@@ -4,17 +4,36 @@ import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
-import { MAX_WINBACK_ATTEMPTS } from "./sendRetentionTexts";
+import { MAX_WINBACK_ATTEMPTS, WINBACK_ATTRIBUTION_WINDOW_DAYS } from "./sendRetentionTexts";
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Gym-scoped, narrowed the same way getActiveForGym/getUnconfirmedImportedMembers
+// are — no checkInToken (kiosk check-in credential). It's the owner's own
+// data, not a tenant leak, but the dashboard's members list/modals/history
+// drawer (app/members/page.tsx's Member type) never need the credential, so
+// it shouldn't ship to the client at all.
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
     const gym = await requireGym(ctx);
-    return await ctx.db
+    const members = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .order("desc")
       .collect();
+    return members.map((m) => ({
+      _id: m._id,
+      name: m.name,
+      plan: m.plan,
+      status: m.status,
+      email: m.email,
+      phone: m.phone,
+      beltRank: m.beltRank,
+      lastVisit: m.lastVisit,
+      smsConsentConfirmed: m.smsConsentConfirmed,
+      smsConsentConfirmedAt: m.smsConsentConfirmedAt,
+    }));
   },
 });
 
@@ -98,7 +117,11 @@ export const add = mutation({
     requireWriteAccess(gym);
     validateMemberFields(args);
     assertSmsConsent(args);
-    return await ctx.db.insert("members", { ...args, gymId: gym._id });
+    return await ctx.db.insert("members", {
+      ...args,
+      gymId: gym._id,
+      ...(args.smsConsentConfirmed ? { smsConsentSource: "member_modal" as const } : {}),
+    });
   },
 });
 
@@ -119,7 +142,21 @@ export const update = mutation({
     // from texts on a new number they never opted out on, with no UI to
     // notice or fix it.
     const phoneChanged = fields.phone !== existing.phone;
-    await ctx.db.patch(id, { ...fields, ...(phoneChanged ? { smsOptedOut: false } : {}) });
+    // member-modal.tsx only advances smsConsentConfirmedAt to Date.now() when
+    // it computes needsConsent (a genuinely new phone/consent event); it
+    // resends the existing timestamp unchanged when just re-saving an
+    // already-confirmed phone. A changed timestamp is therefore this dashboard
+    // modal establishing fresh consent, not a no-op resend — worth stamping
+    // the source for. Doing the comparison here (not accepting source as a
+    // client arg) keeps this in sync with the modal without touching it.
+    const isFreshModalConsent =
+      fields.smsConsentConfirmed &&
+      fields.smsConsentConfirmedAt !== existing.smsConsentConfirmedAt;
+    await ctx.db.patch(id, {
+      ...fields,
+      ...(phoneChanged ? { smsOptedOut: false } : {}),
+      ...(isFreshModalConsent ? { smsConsentSource: "member_modal" as const } : {}),
+    });
   },
 });
 
@@ -240,7 +277,8 @@ export const checkIn = mutation({
     if (!member || member.gymId !== gymId) throw new Error("Member not found");
 
     const now = Date.now();
-    const eventIso = new Date(clientScannedAt ?? now).toISOString();
+    const eventTime = clientScannedAt ?? now;
+    const eventIso = new Date(eventTime).toISOString();
     const alreadyVisitedToday =
       !!member.lastVisit && member.lastVisit.slice(0, 10) === eventIso.slice(0, 10);
 
@@ -260,7 +298,37 @@ export const checkIn = mutation({
     // ordinary check-in by a member with nothing to clear writes nothing.
     // Safe to read off the `member` snapshot taken above: the patch in this
     // mutation touches neither winback field.
+    //
+    // Recovery capture lives inside this same branch, read BEFORE the patch
+    // below overwrites the fields it needs. It's gated on the identical
+    // condition, which is what makes it fire exactly once per winback
+    // sequence: the condition is evaluated against the member's state as
+    // freshly read from the DB above, not a flag, so once this patch clears
+    // winbackAttempts/winbackDormantAt, any later checkIn call for this
+    // member (a same-day double-scan, an offline-queue replay under a
+    // different idempotencyKey) reads clean state and this branch can't
+    // fire again — no separate dedupe mechanism needed.
     if ((member.winbackAttempts ?? 0) > 0 || member.winbackDormantAt !== undefined) {
+      // lastRetentionTextAt is required, not just winbackAttempts > 0 — with
+      // no timestamp there's nothing to attribute the return to, and the
+      // point of the attribution window below is to under-claim rather than
+      // guess. Uses eventTime, not `now`: for an offline-queue replay,
+      // eventTime is when the member actually scanned, which is what the
+      // attribution window and daysToReturn need to be measured against, not
+      // whenever the queue happened to sync.
+      if (member.lastRetentionTextAt !== undefined) {
+        const daysToReturn = (eventTime - member.lastRetentionTextAt) / MS_PER_DAY;
+        if (daysToReturn >= 0 && daysToReturn <= WINBACK_ATTRIBUTION_WINDOW_DAYS) {
+          await ctx.db.insert("winbackRecoveries", {
+            memberId: id,
+            gymId,
+            returnedAt: eventTime,
+            lastTextedAt: member.lastRetentionTextAt,
+            attemptsUsed: member.winbackAttempts ?? 0,
+            daysToReturn,
+          });
+        }
+      }
       await ctx.db.patch(id, { winbackAttempts: 0, winbackDormantAt: undefined });
     }
 
@@ -300,6 +368,83 @@ export const getAtRiskMembers = query({
   },
 });
 
+const CONSENT_ATTESTATION_VERSION = "v1";
+
+// Bulk consent stamp for imported members, gated behind an explicit
+// owner-facing attestation checkbox (attested must be true — no silent
+// default). Always inserts one consentAttestations audit row, even when
+// nothing gets stamped: an owner running the flow and confirming nobody
+// needed it is still a true TCPA-relevant event. memberIds is unbounded —
+// this does N reads + N patches in one transaction, fine at the roster
+// sizes every current plan tier supports; chunk if bulk imports ever bring
+// in thousands at once.
+export const attestBulkConsent = mutation({
+  args: { memberIds: v.array(v.id("members")), attested: v.boolean() },
+  handler: async (ctx, { memberIds, attested }) => {
+    const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    if (!attested) throw new Error("Attestation must be explicitly confirmed");
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+
+    const now = Date.now();
+    const stampedIds: typeof memberIds = [];
+    let skippedNoPhone = 0;
+    let skippedAlreadyConfirmed = 0;
+
+    for (const memberId of memberIds) {
+      const member = await ctx.db.get(memberId);
+      if (!member || member.gymId !== gym._id) continue; // scope guard
+      if (!member.phone) {
+        skippedNoPhone++;
+        continue;
+      }
+      if (member.smsConsentConfirmed) {
+        skippedAlreadyConfirmed++;
+        continue;
+      }
+      await ctx.db.patch(memberId, {
+        smsConsentConfirmed: true,
+        smsConsentConfirmedAt: now,
+        smsConsentSource: "owner_attestation",
+      });
+      stampedIds.push(memberId);
+    }
+
+    await ctx.db.insert("consentAttestations", {
+      gymId: gym._id,
+      attestedByClerkUserId: identity.subject,
+      attestedAt: now,
+      memberCount: stampedIds.length,
+      memberIds: stampedIds,
+      attestationVersion: CONSENT_ATTESTATION_VERSION,
+    });
+
+    return { confirmed: stampedIds.length, skippedNoPhone, skippedAlreadyConfirmed };
+  },
+});
+
+// Gym-scoped, narrowed the same way getActiveForGym/getDormantMembers are —
+// no checkInToken (kiosk check-in credential), email, or other fields the
+// bulk-consent UI doesn't need. importBatchId is included so the UI can
+// group by import run: the attestation requirement is per-import, and two
+// separate CSV imports merging into one undifferentiated list would satisfy
+// it only in spirit, not literally.
+export const getUnconfirmedImportedMembers = query({
+  args: {},
+  handler: async (ctx) => {
+    const gym = await requireGym(ctx);
+    const members = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
+      .collect();
+    return members
+      .filter((m) => !!m.phone && m.smsConsentConfirmed !== true)
+      .map((m) => ({ _id: m._id, name: m.name, phone: m.phone, importBatchId: m.importBatchId }));
+  },
+});
+
 // Members who exhausted the three-attempt winback sequence and are no longer
 // being texted (see convex/sendRetentionTexts.ts). Deliberately separate from
 // getAtRiskMembers above, which still lists them — this is the "we've stopped
@@ -328,7 +473,7 @@ export const getDormantMembers = query({
   },
 });
 
-function normalizePhoneDigits(phone: string): string {
+export function normalizePhoneDigits(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
 }
@@ -389,6 +534,11 @@ export const adminImportBatch = internalMutation({
     const gym = await ctx.db.get(gymId);
     if (!gym) throw new Error(`No gym found with id ${gymId}`);
 
+    // One id per call, not per row — every member inserted by this
+    // invocation belongs to the same CSV run, which is what makes the id
+    // useful as a grouping key (see consentAttestations/attestBulkConsent).
+    const importBatchId = crypto.randomUUID();
+
     // Dedupe against members already in this gym, matched on email — the
     // same signal the script uses to skip a row it already imported on a
     // prior run. Loaded once up front and kept in sync as we insert so two
@@ -428,6 +578,7 @@ export const adminImportBatch = internalMutation({
           joinDate: row.joinDate,
           beltPromotionDate: row.beltPromotionDate,
           gymId,
+          importBatchId,
         });
         if (email) existingEmails.add(email.toLowerCase());
 
