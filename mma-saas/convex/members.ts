@@ -539,6 +539,25 @@ export const adminImportBatch = internalMutation({
     // useful as a grouping key (see consentAttestations/attestBulkConsent).
     const importBatchId = crypto.randomUUID();
 
+    // Baseline lastVisit for the whole batch, server-set and deliberately NOT
+    // a caller-supplied arg — no CSV source exports a last-visit column, so
+    // there is nothing truthful to import and this is the honest floor: "we
+    // have no record of a visit before the import."
+    //
+    // Without it every imported member trips the `!m.lastVisit` clause in both
+    // at-risk tests (members.ts:getAtRiskMembers, sendRetentionTexts.ts:
+    // getAtRiskMembers) and the entire roster is at-risk on day one. With it,
+    // the batch starts clean and a genuinely lapsed member surfaces at day 7
+    // when no real check-in has landed since — the same 7-day gate everyone
+    // else is measured by.
+    //
+    // ISO string, matching every other writer (attendance.ts:69, checkIn's
+    // eventIso) and every threshold comparison, all of which use
+    // .toISOString() so the lexicographic `<` stays chronological.
+    // One timestamp for the batch, not per row, so a slow import doesn't
+    // scatter members across different baselines.
+    const importedAt = new Date().toISOString();
+
     // Dedupe against members already in this gym, matched on email — the
     // same signal the script uses to skip a row it already imported on a
     // prior run. Loaded once up front and kept in sync as we insert so two
@@ -577,6 +596,7 @@ export const adminImportBatch = internalMutation({
           beltRank: row.beltRank,
           joinDate: row.joinDate,
           beltPromotionDate: row.beltPromotionDate,
+          lastVisit: importedAt,
           gymId,
           importBatchId,
         });
@@ -629,7 +649,16 @@ export const markInactiveMembers = internalMutation({
     const threshold = thirtyDaysAgo.toISOString();
     const members = await ctx.db.query("members").collect();
     for (const member of members) {
-      if (member.status === "active" && (!member.lastVisit || member.lastVisit < threshold)) {
+      // An UNSET lastVisit is left alone — absence of evidence, not evidence of
+      // absence. This used to read `!member.lastVisit || member.lastVisit <
+      // threshold`, where the first clause short-circuited before the 30-day
+      // comparison was ever evaluated. No CSV source exports a last-visit
+      // column (see adminImportBatch), so every imported member has none, and
+      // that clause flipped an entire freshly-imported roster to "inactive"
+      // within 24 hours of setup — emptying getActiveForGym and with it the
+      // check-in kiosk, so nobody could check in the next morning. Only a
+      // member with a RECORDED visit older than the threshold flips now.
+      if (member.status === "active" && member.lastVisit !== undefined && member.lastVisit < threshold) {
         await ctx.db.patch(member._id, { status: "inactive" });
       }
     }
