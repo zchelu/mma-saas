@@ -33,8 +33,11 @@ function ConsentDisclosure({ gymName }: { gymName: string }) {
         Privacy Policy
       </a>{" "}
       and{" "}
+      {/* "Terms of Service", not "Terms" — Twilio's required disclosure names
+          it that way and a compliance reviewer string-matches the label. Href
+          is unchanged. */}
       <a href="/terms" className="underline" style={{ color: "#AAAAAA" }}>
-        Terms
+        Terms of Service
       </a>
       .
     </p>
