@@ -41,7 +41,7 @@ export const PRICING_TIERS = [
     size: "101–250 members",
     price: 179,
     perks: [] as string[],
-    badge: "WHERE I'D START YOU",
+    badge: "MOST GYMS START HERE",
     highlighted: true,
     roiLine:
       "Save two members a year and it's paid for itself. Built for the range where silent quitters stop being names you'd notice.",
@@ -214,9 +214,9 @@ export default async function PricingPage() {
               Your first 30 days are free. Card on file, nothing charged until day 31.
             </p>
             <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
-              After that: if I haven&apos;t brought back at least one member — someone who&apos;d stopped
-              showing up, who got a KombatDesk text and came back to class — within 90 days of your first
-              text going out, I refund every dollar you&apos;ve paid.
+              After that: if KombatDesk hasn&apos;t brought back at least one member who&apos;d gone
+              cold by day 90, I refund every dollar you&apos;ve paid and help you export your member
+              roster on the way out. You leave with your data, not locked inside my software.
             </p>
             <p className="text-sm" style={{ color: "#AAAAAA" }}>
               A member who stays six more months instead of quitting is $900 back on your books. Six months
@@ -372,7 +372,7 @@ function TierCard({
       className="rounded-xl p-8 flex flex-col text-left relative"
       style={{
         backgroundColor: "#222222",
-        border: highlighted ? "1px solid #E02020" : "1px solid #333333",
+        border: highlighted ? "2px solid #FF3B3B" : "1px solid #333333",
       }}
     >
       {badge && (
