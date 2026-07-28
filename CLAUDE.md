@@ -161,19 +161,32 @@ DECISIONS / KNOWN HISTORY
   deliberate two-phase cutover: the new endpoint
   (<deployment>.convex.site/stripe/webhook) runs ALONGSIDE the
   existing Next.js route, unchanged, receiving no real traffic yet —
-  Stripe's dashboard endpoint has NOT been repointed. Phase 2 (not yet
-  done): once the Convex endpoint is verified against real Stripe
-  events, manually repoint the Stripe dashboard endpoint to it, then
-  convert upsertSubscription/upsertUnclaimedSubscription/
-  updatePlanStatusByCustomer to internalMutation and remove the old
-  Next.js route (those mutations are otherwise callable directly by
-  any signed-in browser, bypassing webhook signature verification).
+  Stripe's dashboard endpoint has NOT been repointed.
+
+  UPDATE (verified 2026-07-27, terminal session, via
+  `npx convex function-spec --prod` against limitless-raven-596):
+
+  ✅ All three mutations converted to internalMutation — verified in
+     prod function spec — upsertSubscription, upsertUnclaimedSubscription,
+     updatePlanStatusByCustomer are all "internal", not callable by a
+     signed-in browser.
+  ✅ Convex httpAction POST /stripe/webhook registered and live at
+     limitless-raven-596.convex.site/stripe/webhook.
+  ❌ Remaining step: repoint the Stripe Dashboard webhook endpoint from
+     https://www.kombatdesk.com/api/stripe/webhook to the Convex URL.
+     Deliberately deferred until after the first live purchase test and
+     first revenue — do not cut over before then. Two payment paths,
+     one verified; debug them separately.
+
+  Note: the Convex endpoint is registered but idle — it has never
+  processed a real Stripe event, so its STRIPE_WEBHOOK_SECRET is
+  unverified and may predate the key rotation.
 
   Do not re-remove convex/http.ts or convex/stripeWebhookAction.ts as
   if they were the abandoned first attempt — they're live, intentional
-  Phase 1 work. Before touching Stripe webhook config in the dashboard,
-  confirm which phase this is currently in (check for a Phase 2 commit
-  first).
+  Phase 1 work, and the internalMutation conversion above is already
+  done. The only open item is the dashboard repoint itself, deliberately
+  held until after first revenue.
 
 ====================================================================
 KNOWN ISSUES, NOT YET FIXED (decisions needed, not urgent)
