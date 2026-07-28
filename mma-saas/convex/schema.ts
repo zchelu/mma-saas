@@ -127,10 +127,11 @@ export default defineSchema({
   // before that reset clears winbackAttempts/winbackDormantAt. daysToReturn
   // is stored unrounded (fractional days) so a same-day return isn't
   // truncated to a misleading 0 — round only when displaying it.
-  // memberId is not cascade-deleted by members.ts:remove; getWinbackRecoveries
-  // falls back to "Unknown Member" the same way invoices.getAll does, since
-  // deleting these rows would retroactively shrink a number already quoted
-  // to a gym owner.
+  // Nothing cascade-deletes these rows by memberId — members are archived, not
+  // hard-deleted (see members.ts:archiveMember), so the referenced member row
+  // survives. getWinbackRecoveries still falls back to "Unknown Member" the
+  // same way invoices.getAll does, since deleting these rows would
+  // retroactively shrink a number already quoted to a gym owner.
   winbackRecoveries: defineTable({
     memberId: v.id("members"),
     gymId: v.id("gyms"),
