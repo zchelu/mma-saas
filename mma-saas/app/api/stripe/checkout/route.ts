@@ -6,7 +6,7 @@ import { api } from "@/convex/_generated/api";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
 import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
-import { getFoundingOffer } from "@/lib/foundingOffer";
+import { getFoundingOfferResult } from "@/lib/foundingOffer";
 import { sendAlertEmail } from "@/lib/alerts";
 
 export async function POST(request: NextRequest) {
@@ -43,9 +43,25 @@ export async function POST(request: NextRequest) {
   const origin = new URL(request.url).origin;
 
   // Founding pricing is never read from client input — the coupon's own
-  // redemption count (via getFoundingOffer) is the only thing that decides
-  // whether a discount applies, same as the pricing page.
-  const foundingOffer = await getFoundingOffer();
+  // redemption count (via getFoundingOfferResult) is the only thing that
+  // decides whether a discount applies, same as the pricing page. Unlike the
+  // pricing page, checkout can't collapse "sold out" and "couldn't tell" into
+  // the same outcome: a transient Stripe error or cold-start cache miss must
+  // never silently fall through to a full-price charge for someone who
+  // should have gotten the founding rate — only a confirmed exhausted coupon
+  // is allowed to proceed at full price.
+  const foundingOfferResult = await getFoundingOfferResult();
+  if (foundingOfferResult.status === "unavailable") {
+    console.error(
+      "Stripe checkout: founding coupon could not be resolved (not confirmed exhausted) — refusing to create a full-price session silently:",
+      foundingOfferResult.reason
+    );
+    return NextResponse.json(
+      { error: "Something went wrong setting up checkout. Please try again in a moment." },
+      { status: 503 }
+    );
+  }
+  const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;
 
   function buildSessionParams(applyDiscount: boolean): Stripe.Checkout.SessionCreateParams {
     return {
