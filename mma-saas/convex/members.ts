@@ -134,6 +134,13 @@ export const update = mutation({
     requireWriteAccess(gym);
     const existing = await ctx.db.get(id);
     if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
+    // An archived member is not editable. No UI can reach one (every list query
+    // filters them out), so this only closes a direct client call — but the
+    // phoneChanged branch below sets smsOptedOut: false, which would clear the
+    // opt-out record the privacy policy (§10) commits to retaining after a
+    // member is removed. Same opaque error as a foreign/missing id: an archived
+    // member should be indistinguishable from one that isn't there.
+    if (existing.archived) throw new Error("Member not found");
     validateMemberFields(fields);
     assertSmsConsent(fields);
     // A prior opt-out is tied to the phone number that opted out, not the

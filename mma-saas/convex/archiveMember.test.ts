@@ -167,6 +167,73 @@ test("an archived member's check-in token stops resolving and check-in is reject
   ).rejects.toThrow(/Member not found/);
 });
 
+// members.update must refuse an archived member. Not reachable from the UI —
+// every list query filters archived rows — so this covers a direct client call,
+// which matters because update's phoneChanged branch clears smsOptedOut.
+test("update rejects an archived member and leaves the opt-out record intact", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, memberId } = await seedTextableGymWithLapsedMember(t);
+
+  await t.run(async (ctx) => {
+    await ctx.db.patch(memberId, { smsOptedOut: true });
+  });
+  await asOwner.mutation(api.members.archiveMember, { memberId });
+
+  // A phone change is the dangerous case: on a live member this resets
+  // smsOptedOut to false.
+  await expect(
+    asOwner.mutation(api.members.update, {
+      id: memberId,
+      name: "Lapsed Member",
+      plan: "BJJ Monthly",
+      status: "active",
+      phone: "(720) 555-0999",
+      smsConsentConfirmed: true,
+      smsConsentConfirmedAt: Date.now(),
+    })
+  ).rejects.toThrow(/Member not found/);
+
+  const member = await t.run(async (ctx) => ctx.db.get(memberId));
+  expect(member!.smsOptedOut).toBe(true);
+  expect(member!.phone).toBe("(720) 555-0100");
+});
+
+test("archived members drop out of class rosters and enrollment counts", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId, memberId } = await seedTextableGymWithLapsedMember(t);
+
+  const classId = await t.run(async (ctx) =>
+    ctx.db.insert("classes", {
+      name: "Evening BJJ",
+      instructor: "Coach",
+      dayOfWeek: "Monday",
+      time: "18:00",
+      gymId,
+    })
+  );
+  await asOwner.mutation(api.enrollments.enroll, { memberId, classId });
+
+  expect((await asOwner.query(api.enrollments.getByClass, { classId })).map((m) => m._id)).toContain(
+    memberId
+  );
+  expect((await asOwner.query(api.enrollments.getEnrollmentCounts, {}))[classId]).toBe(1);
+
+  await asOwner.mutation(api.members.archiveMember, { memberId });
+
+  // Roster and count must move together — a count that still said 1 over an
+  // empty roster is the bug this pair of assertions exists to catch.
+  expect(await asOwner.query(api.enrollments.getByClass, { classId })).toHaveLength(0);
+  expect((await asOwner.query(api.enrollments.getEnrollmentCounts, {}))[classId] ?? 0).toBe(0);
+
+  // The enrollment row itself survives: archival is not a cascade delete, so an
+  // unarchive would restore the member's class membership rather than silently
+  // having dropped it.
+  const enrollmentRows = await t.run(async (ctx) =>
+    ctx.db.query("enrollments").withIndex("by_member", (q) => q.eq("memberId", memberId)).collect()
+  );
+  expect(enrollmentRows).toHaveLength(1);
+});
+
 // Guards the deliberate exception documented at setSmsOptOutByPhone: an
 // archived member texting STOP must still be recorded, or a re-added number
 // loses its opt-out.
