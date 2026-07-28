@@ -57,24 +57,53 @@ const getCachedCoupon = unstable_cache(
 // Count bills, not months, or don't count at all.
 export async function getFoundingOffer(): Promise<FoundingOffer | null> {
   const couponId = process.env.STRIPE_FOUNDING_COUPON_ID;
-  if (!couponId) return null;
+  if (!couponId) {
+    console.warn(
+      "getFoundingOffer: STRIPE_FOUNDING_COUPON_ID is not set in this environment — founding block hidden. BROKEN, not sold out."
+    );
+    return null;
+  }
 
   try {
     const coupon = await getCachedCoupon(couponId);
 
-    if ("deleted" in coupon) return null;
-    if (!coupon.valid) return null;
-    if (coupon.max_redemptions != null && coupon.times_redeemed >= coupon.max_redemptions) {
+    if ("deleted" in coupon) {
+      console.warn(
+        `getFoundingOffer: coupon ${couponId} is deleted in Stripe — founding block hidden. BROKEN, not sold out.`
+      );
       return null;
     }
-    if (coupon.amount_off == null) return null;
+    // Stripe often flips valid=false on exhaustion before the explicit
+    // redemption-count check below is ever reached, so this path is not
+    // automatically "broken" — read the coupon before concluding either way.
+    if (!coupon.valid) {
+      console.warn(
+        `getFoundingOffer: coupon ${couponId} reports valid=false (expired via redeem_by, or Stripe already marked it exhausted) — founding block hidden. Check redeem_by before assuming sold out.`
+      );
+      return null;
+    }
+    if (coupon.max_redemptions != null && coupon.times_redeemed >= coupon.max_redemptions) {
+      console.warn(
+        `getFoundingOffer: coupon ${couponId} exhausted at ${coupon.times_redeemed}/${coupon.max_redemptions} redemptions — founding block hidden. SOLD OUT, working as intended.`
+      );
+      return null;
+    }
+    if (coupon.amount_off == null) {
+      console.warn(
+        `getFoundingOffer: coupon ${couponId} has no amount_off (percent_off=${coupon.percent_off}) — founding block hidden. BROKEN: this page renders fixed-amount coupons only.`
+      );
+      return null;
+    }
 
     const slotsLeft =
       coupon.max_redemptions != null ? coupon.max_redemptions - coupon.times_redeemed : null;
 
     return { amountOffCents: coupon.amount_off, slotsLeft, couponId };
   } catch (err) {
-    console.error("getFoundingOffer: failed to retrieve Stripe coupon:", err);
+    console.error(
+      `getFoundingOffer: failed to retrieve Stripe coupon ${couponId} — founding block hidden. BROKEN, not sold out. Most likely a test/live mode mismatch between STRIPE_SECRET_KEY and this coupon:`,
+      err
+    );
     return null;
   }
 }
