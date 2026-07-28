@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { consumeRateLimit } from "./rateLimit";
-import { requireGym } from "./gyms";
+import { tryGetGym } from "./gyms";
 import { normalizePhoneDigits } from "./members";
 import { assertMaxLength } from "./validate";
 import { getConsentText, CONSENT_VERSION } from "../lib/consentText";
@@ -110,10 +110,20 @@ export const submitConsent = mutation({
 // matched an existing member (an owner running the "we migrate your whole
 // roster" offer wants to see this number climb even before every submission
 // resolves to a roster match).
+// tryGetGym, not requireGym: this renders in StatsGrid ("use client") via
+// useQuery, so it fires during the window before Clerk's client-side session
+// has hydrated. requireGym throws a plain Error there, which production
+// redacts to a generic "Server Error" and — with no error boundary on the
+// route — took the whole dashboard down. Its three sibling stat cards
+// (members.getActiveCount, classes.getCount, invoices.getUnpaidCount) already
+// use tryGetGym for exactly this reason; see 518ad18, which fixed this same
+// crash once before. Return shape matches the success path so StatCard
+// renders 0 rather than an indefinite loading "…".
 export const getConsentStats = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetGym(ctx);
+    if (!gym) return { totalSubmissions: 0 };
     const submissions = await ctx.db
       .query("consentSubmissions")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
