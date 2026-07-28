@@ -24,8 +24,18 @@ export async function submitConsentAction(formData: FormData) {
   // normal use (page.tsx always sets it). Sends to the marketing homepage
   // rather than a route that doesn't exist.
   if (!gymSlug) redirect("/");
-  if (!name || !phone || !consented) {
+  if (!name || !phone) {
     redirect(`/consent/${gymSlug}?status=invalid`);
+  }
+
+  // Unchecked consent box. With JS on, ConsentForm intercepts this before any
+  // request is made and we never get here; this is the no-JS fallback for the
+  // same case. Either way it is a hard stop BEFORE submitConsent —
+  // consentSubmissions is our TCPA evidence table and a row must never exist
+  // for someone who did not tick the box. ?status=declined re-renders the form
+  // with the same "you have not been signed up" notice the client path shows.
+  if (!consented) {
+    redirect(`/consent/${gymSlug}?status=declined`);
   }
 
   const h = await headers();

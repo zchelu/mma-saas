@@ -2,13 +2,7 @@ import { notFound } from "next/navigation";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConsentText } from "@/lib/consentText";
-import { submitConsentAction } from "./actions";
-
-const inputStyle = {
-  backgroundColor: "#222222",
-  border: "1px solid #333333",
-  color: "#FFFFFF",
-};
+import { ConsentForm } from "./ConsentForm";
 
 // Shown on both the form and the success state. This is the only KombatDesk
 // surface a gym member ever sees, and it previously named neither KombatDesk
@@ -81,7 +75,7 @@ export default async function ConsentPage({
     status === "rate_limited"
       ? "Too many attempts from this device. Try again in a few minutes."
       : status === "invalid"
-      ? "Enter your name and phone number, and check the box to continue."
+      ? "Enter your name and phone number to continue."
       : status === "error"
       ? "Something went wrong. Please try again."
       : null;
@@ -100,47 +94,12 @@ export default async function ConsentPage({
           <p className="text-sm mb-6 text-center" style={{ color: "#FF6B6B" }}>{banner}</p>
         )}
 
-        <form action={submitConsentAction} className="flex flex-col gap-4">
-          <input type="hidden" name="gymSlug" value={gymSlug} />
-
-          <input
-            name="name"
-            required
-            maxLength={200}
-            placeholder="Full name"
-            autoComplete="name"
-            className="rounded-lg px-4 py-3 text-base focus:outline-none"
-            style={inputStyle}
-          />
-          <input
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            required
-            maxLength={30}
-            placeholder="Phone number"
-            className="rounded-lg px-4 py-3 text-base focus:outline-none"
-            style={inputStyle}
-          />
-
-          <label className="flex items-start gap-3 rounded-lg p-4 cursor-pointer" style={{ border: "1px solid #333333" }}>
-            <input type="checkbox" name="consent" value="yes" required className="mt-0.5 w-4 h-4 shrink-0" />
-            <span className="text-sm leading-relaxed" style={{ color: "#CCCCCC" }}>
-              {getConsentText(gym.name)}
-            </span>
-          </label>
-
-          <ConsentDisclosure gymName={gym.name} />
-
-          <button
-            type="submit"
-            className="mt-2 rounded-lg font-semibold px-6 py-3 text-sm"
-            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
-          >
-            Opt in to texts
-          </button>
-        </form>
+        <ConsentForm
+          gymSlug={gymSlug}
+          consentText={getConsentText(gym.name)}
+          disclosure={<ConsentDisclosure gymName={gym.name} />}
+          initialDeclined={status === "declined"}
+        />
       </div>
     </div>
   );
