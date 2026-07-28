@@ -45,10 +45,13 @@ function SortIcon({ col, sortCol, sortDir }: { col: ActiveSortCol; sortCol: Sort
 
 export default function MembersPage() {
   const members = useQuery(api.members.getAll);
-  const remove = useMutation(api.members.remove);
+  // archiveMember, not the older hard-deleting `remove` mutation: removal here
+  // is a soft delete that keeps the member's attendance and consent record —
+  // see convex/members.ts:archiveMember for why that matters legally.
+  const archiveMember = useMutation(api.members.archiveMember);
 
   const [modal, setModal] = useState<null | "add" | Member>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -89,13 +92,20 @@ export default function MembersPage() {
   const activeCount = memberList.filter((m) => m.status === "active").length;
   const inactiveCount = total - activeCount;
 
-  async function handleDelete(id: Id<"members">) {
-    if (!confirm("Delete this member?")) return;
-    setDeleteError(null);
+  // Copy deliberately promises only what archiveMember actually does: the row
+  // is archived, not erased, so this must not claim the record is deleted.
+  async function handleRemove(member: Member) {
+    if (
+      !confirm(
+        `Remove ${member.name}? Their attendance history and consent record are kept, and they will stop receiving texts.`
+      )
+    )
+      return;
+    setRemoveError(null);
     try {
-      await remove({ id });
+      await archiveMember({ memberId: member._id });
     } catch (err) {
-      setDeleteError(getErrorMessage(err, "Couldn't delete that member — try refreshing the page."));
+      setRemoveError(getErrorMessage(err, "Couldn't remove that member — try refreshing the page."));
     }
   }
 
@@ -117,7 +127,7 @@ export default function MembersPage() {
           </button>
         </div>
 
-        {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
+        {removeError && <div className="mb-6"><ErrorToast message={removeError} /></div>}
 
         <ConsentAttestationPanel />
 
@@ -242,13 +252,13 @@ export default function MembersPage() {
                           Edit
                         </button>
                         <button
-                          onClick={() => handleDelete(m._id)}
+                          onClick={() => handleRemove(m)}
                           className="text-xs transition-colors"
                           style={{ color: "#F87171" }}
                           onMouseEnter={e => (e.currentTarget.style.color = "#FCA5A5")}
                           onMouseLeave={e => (e.currentTarget.style.color = "#F87171")}
                         >
-                          Delete
+                          Remove
                         </button>
                       </div>
                     </td>

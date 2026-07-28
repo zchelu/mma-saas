@@ -53,6 +53,20 @@ export default defineSchema({
     // every row from the same CSV run is addressable as a batch — see
     // consentAttestations below, which the bulk-consent UI groups by this.
     importBatchId: v.optional(v.string()),
+    // Soft delete (members.ts:archiveMember). The row is never deleted: the
+    // consent/opt-out fields above are TCPA evidence and the privacy policy
+    // commits to honoring an opt-out even after a member is "removed" from the
+    // gym's roster, which a hard delete would destroy. Both optional with no
+    // backfill — undefined reads as "not archived" everywhere, so every
+    // pre-existing row stays valid.
+    //
+    // Every query that lists or counts members filters these out; the
+    // deliberate exceptions are documented at their call sites
+    // (members.ts:setSmsOptOutByPhone and generateUniqueCheckInToken must
+    // still see archived rows). Archived members are excluded from
+    // sendRetentionTexts.ts:getAtRiskMembers, so archiving stops texts.
+    archived: v.optional(v.boolean()),
+    archivedAt: v.optional(v.number()),
   })
     .index("by_gym", ["gymId"])
     .index("by_check_in_token", ["checkInToken"]),

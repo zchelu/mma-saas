@@ -21,6 +21,7 @@ export const getAll = query({
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .order("desc")
+      .filter((q) => q.neq(q.field("archived"), true))
       .collect();
     return members.map((m) => ({
       _id: m._id,
@@ -46,6 +47,7 @@ export const getActiveCount = query({
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .filter((q) => q.eq(q.field("status"), "active"))
+      .filter((q) => q.neq(q.field("archived"), true))
       .collect();
     return active.length;
   },
@@ -175,6 +177,37 @@ export const remove = mutation({
   },
 });
 
+// Soft delete — the dashboard's "Remove" action. This, not `remove` above, is
+// what the members page calls: a hard delete destroys the member's
+// smsOptedOut/smsConsentConfirmed fields, which are the TCPA evidence that a
+// given number opted in (or out), and the privacy policy commits to honoring
+// an opt-out even after the member record is removed from the roster. Archiving
+// keeps the row and its consent history intact while removing the member from
+// every list, count, and the retention-text audience.
+//
+// Deliberately patches ONLY the two archival fields. It must never touch
+// smsOptedOut, smsConsentConfirmed, smsConsentConfirmedAt, or smsConsentSource
+// — those have to survive archival for the reason above. It also leaves
+// `status` alone, so a member's active/inactive state is preserved if they're
+// ever unarchived (no UI for that yet — see the frontend copy, which promises
+// archival, not erasure).
+export const archiveMember = mutation({
+  args: { memberId: v.id("members") },
+  handler: async (ctx, { memberId }) => {
+    const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+    // Same ownership re-check every other write in this file does, not a
+    // filtered list read: a memberId belonging to another gym must throw, never
+    // archive. Cross-tenant write if this is missing.
+    const existing = await ctx.db.get(memberId);
+    if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
+    // Idempotent — re-archiving an already-archived member would otherwise
+    // move archivedAt, rewriting when the removal actually happened.
+    if (existing.archived) return;
+    await ctx.db.patch(memberId, { archived: true, archivedAt: Date.now() });
+  },
+});
+
 // Run when a member reports a lost/stolen card. Overwriting checkInToken is
 // itself the invalidation: by_check_in_token is keyed on the live field, so
 // the old token stops resolving to anything the instant this patch commits
@@ -205,6 +238,7 @@ export const getActiveForGym = query({
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .filter((q) => q.eq(q.field("status"), "active"))
+      .filter((q) => q.neq(q.field("archived"), true))
       .collect();
     return members.map((m) => ({
       _id: m._id,
@@ -233,7 +267,12 @@ export const resolveCheckInToken = query({
       .query("members")
       .withIndex("by_check_in_token", (q) => q.eq("checkInToken", token))
       .unique();
-    if (!member || !member.gymId) return null;
+    // Archived members resolve to null, same as a stale/unknown token: an
+    // archived member is off the roster, so their card must stop opening the
+    // kiosk. Paired with the archived filter on getActiveForGym (the kiosk's
+    // other lookup path) and the guard in checkIn below, so no kiosk route
+    // logs attendance for someone who's been removed.
+    if (!member || !member.gymId || member.archived) return null;
     return { memberId: member._id, gymId: member.gymId, name: member.name };
   },
 });
@@ -274,7 +313,12 @@ export const checkIn = mutation({
     if (!allowed) throw new Error("Too many check-ins right now — please try again in a few minutes.");
 
     const member = await ctx.db.get(id);
-    if (!member || member.gymId !== gymId) throw new Error("Member not found");
+    // Archived members are indistinguishable from unknown ones here. Both kiosk
+    // lookups (getActiveForGym, resolveCheckInToken) already exclude them, so
+    // this only closes a direct call with a remembered member id — but without
+    // it such a call would still patch lastVisit/status and insert a checkIns
+    // row for someone who's been removed from the roster.
+    if (!member || member.gymId !== gymId || member.archived) throw new Error("Member not found");
 
     const now = Date.now();
     const eventTime = clientScannedAt ?? now;
@@ -363,7 +407,7 @@ export const getAtRiskMembers = query({
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .collect();
     return all.filter(
-      (m) => m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
+      (m) => !m.archived && m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
     );
   },
 });
@@ -440,7 +484,7 @@ export const getUnconfirmedImportedMembers = query({
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .collect();
     return members
-      .filter((m) => !!m.phone && m.smsConsentConfirmed !== true)
+      .filter((m) => !m.archived && !!m.phone && m.smsConsentConfirmed !== true)
       .map((m) => ({ _id: m._id, name: m.name, phone: m.phone, importBatchId: m.importBatchId }));
   },
 });
@@ -461,7 +505,7 @@ export const getDormantMembers = query({
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     return all
-      .filter((m) => (m.winbackAttempts ?? 0) >= MAX_WINBACK_ATTEMPTS)
+      .filter((m) => !m.archived && (m.winbackAttempts ?? 0) >= MAX_WINBACK_ATTEMPTS)
       .sort((a, b) => (b.winbackDormantAt ?? 0) - (a.winbackDormantAt ?? 0))
       .map((m) => ({
         _id: m._id,
@@ -486,6 +530,13 @@ export function normalizePhoneDigits(phone: string): string {
 // because member phone numbers are stored as free-typed text (e.g.
 // "(720) 555-0100") while Twilio's inbound "From" is E.164
 // (+17205550100) — an exact match would never fire.
+//
+// DELIBERATELY does NOT skip archived members, unlike every list/count query in
+// this file. An archived member who texts STOP must still have smsOptedOut
+// recorded: the privacy policy commits to honoring an opt-out after removal
+// from the roster, and if that number is ever re-added or re-imported the
+// stored opt-out is the only thing that keeps it from being texted. Adding an
+// archived filter here would be a TCPA regression, not a cleanup.
 export const setSmsOptOutByPhone = internalMutation({
   args: { phone: v.string(), optedOut: v.boolean() },
   handler: async (ctx, { phone, optedOut }) => {
@@ -658,7 +709,10 @@ export const markInactiveMembers = internalMutation({
       // within 24 hours of setup — emptying getActiveForGym and with it the
       // check-in kiosk, so nobody could check in the next morning. Only a
       // member with a RECORDED visit older than the threshold flips now.
-      if (member.status === "active" && member.lastVisit !== undefined && member.lastVisit < threshold) {
+      // Archived members are skipped — flipping status on a row that no list
+      // or count reads is pointless write churn, and it would misdate the row
+      // as though something happened to it after it was removed.
+      if (!member.archived && member.status === "active" && member.lastVisit !== undefined && member.lastVisit < threshold) {
         await ctx.db.patch(member._id, { status: "inactive" });
       }
     }

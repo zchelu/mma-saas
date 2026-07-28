@@ -34,6 +34,15 @@ export const getAtRiskMembers = internalQuery({
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     return all.filter((m) => {
+      // Removal gate (members.ts:archiveMember). An archived member must NEVER
+      // receive a retention text — being removed from the roster is the gym
+      // owner saying to stop contacting them, and this is the only audience
+      // query the sender reads, so this check is what makes the dashboard's
+      // "they will stop receiving texts" copy true. Kept as its own statement
+      // rather than folded into the condition below so it can't be weakened by
+      // an edit to any of those unrelated clauses. Covered by
+      // convex/archiveMember.test.ts, which fails if this line is removed.
+      if (m.archived) return false;
       // smsConsentConfirmed gate: the public `add`/`update` mutations only
       // ever let a phone number in alongside confirmed consent, so this was
       // previously implied rather than checked here. That invariant breaks
