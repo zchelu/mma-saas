@@ -233,8 +233,17 @@ export default async function PricingPage() {
             of truth for whether this section (and its numbers) exist. Spot
             count and prices are read live off the coupon (slotsLeft,
             amountOffCents), never hardcoded, so this section can't drift out
-            of sync with what Stripe will actually charge. */}
-        {foundingOffer && (
+            of sync with what Stripe will actually charge.
+
+            slotsLeft !== 0 is defensive, not reachable today — getFoundingOffer
+            already returns null once times_redeemed >= max_redemptions, so
+            slotsLeft can't come back as 0. But that's an unstated contract
+            between producer and consumer; if the exhaustion check in
+            getFoundingOffer ever changes, this stops "0 spots. I'm taking on
+            0 gyms as founding members." from rendering with live CTAs. null
+            (unlimited coupon) must still pass through to "Founding pricing
+            open". */}
+        {foundingOffer && foundingOffer.slotsLeft !== 0 && (
           <div className="w-full max-w-2xl pb-24">
             <div
               className="rounded-xl px-8 py-10 text-left"
