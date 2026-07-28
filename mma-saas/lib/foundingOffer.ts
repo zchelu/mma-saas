@@ -38,15 +38,23 @@ const getCachedCoupon = unstable_cache(
 // (missing env var, deleted/invalid coupon, Stripe API error) degrades to
 // standard pricing, never a broken page or a blocked checkout.
 //
-// DELIBERATE MISMATCH — do not "fix": the coupon behind
-// STRIPE_FOUNDING_COUPON_ID is configured with duration_in_months=25, not 24.
-// A coupon's duration clock starts when it attaches to the subscription (at
-// Checkout Session creation, i.e. when the 30-day trial starts), not at first
-// charge — so the trial consumes the first coupon-month. 25 coupon-months
-// therefore delivers exactly 24 months of actually-discounted billing. 25 is
-// a backend implementation detail only; every customer-facing surface (the
-// /pricing founding block, any future copy) must say 24 months. Never
-// surface 25 in UI copy.
+// DELIBERATE MISMATCH — do not "fix".
+// Stripe coupon: duration_in_months = 25. UI copy says 24. Both correct.
+//
+// The discount clock starts at SUBSCRIPTION CREATION, not first invoice.
+// The 30-day trial does not consume or add a coupon month — it only
+// shifts the billing anchor. Verified 2026-07-27 on a live test sub:
+// created Jul 27 2026, discount.end Aug 27 2028, first invoice Aug 26
+// 2026, last discounted invoice Aug 26 2028 = 25 discounted bills.
+//
+// So why does UI copy say 24? Because the count varies by signup date.
+// A 31-day month lands the anchor one day inside the coupon boundary
+// (25 bills). A late-February signup pushes it past (24 bills). There is
+// no single true number. 24 is the FLOOR — promise the floor, deliver 24
+// or 25, nobody is ever shortchanged.
+//
+// Never print an ordinal month number in customer-facing copy.
+// Count bills, not months, or don't count at all.
 export async function getFoundingOffer(): Promise<FoundingOffer | null> {
   const couponId = process.env.STRIPE_FOUNDING_COUPON_ID;
   if (!couponId) return null;
