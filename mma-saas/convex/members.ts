@@ -1,6 +1,6 @@
 import { query, mutation, internalMutation, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
+import { requireGym, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
@@ -16,7 +16,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const members = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
@@ -379,7 +380,8 @@ export const checkIn = mutation({
 export const getCheckInHistory = query({
   args: { memberId: v.id("members") },
   handler: async (ctx, { memberId }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const member = await ctx.db.get(memberId);
     if (!member || member.gymId !== gym._id) throw new Error("Member not found");
     const rows = await ctx.db
@@ -474,7 +476,8 @@ export const attestBulkConsent = mutation({
 export const getUnconfirmedImportedMembers = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const members = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))

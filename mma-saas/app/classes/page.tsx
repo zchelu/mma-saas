@@ -37,7 +37,7 @@ export default function ClassesPage() {
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
       <AppHeader />
-      <main className="max-w-5xl mx-auto px-8 py-12">
+      <main className="max-w-7xl mx-auto px-8 py-12">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl" style={{ color: "#FFFFFF", fontWeight: 500 }}>Classes</h1>
           <button

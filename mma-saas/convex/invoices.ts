@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnMember, requireWriteAccess, tryGetGym } from "./gyms";
+import { requireGym, requireOwnMember, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength, assertInRange } from "./validate";
 
 const invoiceFields = {
@@ -18,7 +18,8 @@ function validateInvoiceFields(fields: { amount: number; dueDate: string }) {
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const invoices = await ctx.db
       .query("invoices")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))

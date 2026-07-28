@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess } from "./gyms";
+import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess, tryGetReadableGym } from "./gyms";
 import { assertMaxArrayLength } from "./validate";
 
 // Well above any real class roster — bounds the Promise.all fan-out below
@@ -10,7 +10,8 @@ const MAX_ATTENDANCE_MEMBERS = 500;
 export const getByClassAndDate = query({
   args: { classId: v.id("classes"), date: v.string() },
   handler: async (ctx, { classId, date }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const cls = await ctx.db.get(classId);
     if (!cls || cls.gymId !== gym._id) return [];
     return await ctx.db
@@ -23,7 +24,8 @@ export const getByClassAndDate = query({
 export const getSessionDates = query({
   args: { classId: v.id("classes") },
   handler: async (ctx, { classId }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const cls = await ctx.db.get(classId);
     if (!cls || cls.gymId !== gym._id) return [];
     const records = await ctx.db

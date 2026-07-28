@@ -24,8 +24,12 @@ export function hasWriteAccess(gym: { planStatus?: string }): boolean {
 // deployments don't, which is why this could look fine locally and still
 // ship broken). ConvexError's .data payload survives the redaction, which is
 // the only way the UI can show the real reason instead of a dead end.
+function hasReadAccess(gym: { planStatus?: string }): boolean {
+  return !!gym.planStatus && gym.planStatus !== "inactive";
+}
+
 function assertReadAccess(gym: Doc<"gyms">) {
-  if (!gym.planStatus || gym.planStatus === "inactive") {
+  if (!hasReadAccess(gym)) {
     throw new ConvexError("An active subscription is required to access this feature");
   }
 }
@@ -86,6 +90,37 @@ export async function tryGetGym(
     .query("gyms")
     .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", identity.subject))
     .unique();
+}
+
+// For QUERIES rendered inside "use client" components via useQuery. Separates
+// the two reasons requireGym can fail, which are NOT the same kind of event:
+//
+//   TRANSIENT -> return null, caller renders its empty state:
+//     - no identity yet  (Clerk's client-side session is still hydrating)
+//     - no gyms row yet  (getOrCreateGym is still provisioning a new signup)
+//   Both are expected instants during a normal load. requireGym threw a plain
+//   Error here, prod redacted it to a generic "Server Error", and with no
+//   error boundary that took down /dashboard, /classes and /invoices.
+//
+//   PERSISTENT -> still throws, unchanged:
+//     - gym exists but has no read access (never subscribed)
+//   This is a real permission state, not a loading instant. It must keep
+//   throwing the ConvexError so the UI can show "An active subscription is
+//   required" — collapsing it into an empty list would show a paying-to-be
+//   customer an empty roster and imply their data vanished. It also preserves
+//   the read gate added in the 7739cd4 security audit; a bare tryGetGym swap
+//   would have dropped it and served full member/class/invoice records to
+//   unpaid accounts. convex/planStatus.test.ts locks this in.
+//
+// MUTATIONS MUST KEEP USING requireGym. Throwing there is the tenant-isolation
+// gate, it is the correct behaviour, and a mutation has no route to crash.
+export async function tryGetReadableGym(
+  ctx: QueryCtx | MutationCtx
+): Promise<Doc<"gyms"> | null> {
+  const gym = await tryGetGym(ctx);
+  if (!gym) return null;
+  assertReadAccess(gym);
+  return gym;
 }
 
 // Shared ownership checks — throw for mutations and any read where a missing/

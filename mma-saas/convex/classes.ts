@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireWriteAccess, tryGetGym } from "./gyms";
+import { requireGym, requireOwnClass, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength } from "./validate";
 
 const classFields = {
@@ -20,7 +20,8 @@ function validateClassFields(fields: { name: string; instructor: string; dayOfWe
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     return await ctx.db
       .query("classes")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
@@ -31,7 +32,8 @@ export const getAll = query({
 export const getById = query({
   args: { id: v.id("classes") },
   handler: async (ctx, { id }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return null;
     const cls = await ctx.db.get(id);
     if (!cls || cls.gymId !== gym._id) return null;
     return cls;

@@ -2,7 +2,7 @@ import { query, internalQuery } from "./_generated/server";
 import { QueryCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireGym } from "./gyms";
+import { tryGetReadableGym } from "./gyms";
 
 async function fetchWinbackRecoveries(ctx: QueryCtx, gymId: Id<"gyms">, startMs: number, endMs: number) {
   const rows = await ctx.db
@@ -44,7 +44,8 @@ async function fetchWinbackRecoveries(ctx: QueryCtx, gymId: Id<"gyms">, startMs:
 export const getWinbackRecoveries = query({
   args: { gymId: v.id("gyms"), startMs: v.number(), endMs: v.number() },
   handler: async (ctx, { gymId, startMs, endMs }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return { count: 0, recoveries: [] };
     if (gym._id !== gymId) throw new Error("Gym not found");
     return fetchWinbackRecoveries(ctx, gymId, startMs, endMs);
   },

@@ -1,11 +1,12 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess } from "./gyms";
+import { requireGym, requireOwnClass, requireOwnMember, requireWriteAccess, tryGetReadableGym } from "./gyms";
 
 export const getByClass = query({
   args: { classId: v.id("classes") },
   handler: async (ctx, { classId }) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return [];
     const cls = await ctx.db.get(classId);
     if (!cls || cls.gymId !== gym._id) return [];
     const enrollments = await ctx.db
@@ -30,7 +31,8 @@ export const getByClass = query({
 export const getEnrollmentCounts = query({
   args: {},
   handler: async (ctx) => {
-    const gym = await requireGym(ctx);
+    const gym = await tryGetReadableGym(ctx);
+    if (!gym) return {};
     const classes = await ctx.db
       .query("classes")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
