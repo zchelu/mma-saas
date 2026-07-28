@@ -51,7 +51,7 @@ export default function InvoicesPage() {
 
         {deleteError && <div className="mb-6"><ErrorToast message={deleteError} /></div>}
 
-        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #333333" }}>
+        <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid #333333" }}>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs uppercase tracking-wider" style={{ borderBottom: "1px solid #333333", backgroundColor: "#1A1A1A", color: "#555555" }}>
@@ -91,7 +91,7 @@ export default function InvoicesPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4" style={{ color: "#888888" }}>{inv.dueDate}</td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex gap-3 justify-end">
                         <button
                           onClick={() => setModal(inv)}

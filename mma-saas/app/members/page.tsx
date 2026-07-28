@@ -159,7 +159,7 @@ export default function MembersPage() {
           </select>
         </div>
 
-        <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #333333" }}>
+        <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid #333333" }}>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs uppercase tracking-wider" style={{ borderBottom: "1px solid #333333", backgroundColor: "#1A1A1A", color: "#555555" }}>
@@ -236,7 +236,7 @@ export default function MembersPage() {
                     <td className="px-6 py-4 text-xs" style={{ color: "#888888" }}>
                       {m.lastVisit ? formatVisit(m.lastVisit) : "—"}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex gap-3 justify-end">
                         <button
                           onClick={() => setHistoryMember(m)}
