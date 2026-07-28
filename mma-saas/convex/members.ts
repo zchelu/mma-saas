@@ -162,28 +162,17 @@ export const update = mutation({
   },
 });
 
-export const remove = mutation({
-  args: { id: v.id("members") },
-  handler: async (ctx, { id }) => {
-    const gym = await requireGym(ctx);
-    requireWriteAccess(gym);
-    const existing = await ctx.db.get(id);
-    if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
-    const enrollments = await ctx.db.query("enrollments").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
-    for (const e of enrollments) await ctx.db.delete(e._id);
-    const attendance = await ctx.db.query("attendance").withIndex("by_member", (q) => q.eq("memberId", id)).collect();
-    for (const a of attendance) await ctx.db.delete(a._id);
-    await ctx.db.delete(id);
-  },
-});
-
-// Soft delete — the dashboard's "Remove" action. This, not `remove` above, is
-// what the members page calls: a hard delete destroys the member's
+// Soft delete — the dashboard's "Remove" action, and the ONLY member-removal
+// path. There is deliberately no hard-delete mutation: one existed until it was
+// removed as dead code, because deleting the row destroys the member's
 // smsOptedOut/smsConsentConfirmed fields, which are the TCPA evidence that a
-// given number opted in (or out), and the privacy policy commits to honoring
-// an opt-out even after the member record is removed from the roster. Archiving
-// keeps the row and its consent history intact while removing the member from
-// every list, count, and the retention-text audience.
+// given number opted in (or out). The privacy policy (§10) commits to retaining
+// an opt-out even after the member record is removed from the roster, and a
+// destroyed opt-out means a re-added or re-imported number can be texted again.
+// Do not reintroduce a delete path here without resolving that first — the old
+// one also cascade-deleted the member's attendance and enrollments rows.
+// Archiving keeps the row and its consent history intact while removing the
+// member from every list, count, and the retention-text audience.
 //
 // Deliberately patches ONLY the two archival fields. It must never touch
 // smsOptedOut, smsConsentConfirmed, smsConsentConfirmedAt, or smsConsentSource

@@ -45,9 +45,10 @@ function SortIcon({ col, sortCol, sortDir }: { col: ActiveSortCol; sortCol: Sort
 
 export default function MembersPage() {
   const members = useQuery(api.members.getAll);
-  // archiveMember, not the older hard-deleting `remove` mutation: removal here
-  // is a soft delete that keeps the member's attendance and consent record —
-  // see convex/members.ts:archiveMember for why that matters legally.
+  // Removal here is a soft delete that keeps the member's attendance and
+  // consent record — see convex/members.ts:archiveMember for why that matters
+  // legally. It's the only member-removal mutation; the hard-deleting one this
+  // button used to call has been deleted.
   const archiveMember = useMutation(api.members.archiveMember);
 
   const [modal, setModal] = useState<null | "add" | Member>(null);
