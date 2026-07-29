@@ -23,7 +23,21 @@ import { STOP_KEYWORDS, START_KEYWORDS } from "./smsKeywords";
 // One intended consequence: someone who already submitted under v1 is no
 // longer deduped and can submit again under v2, which is correct — new
 // wording is a new TCPA event, not a duplicate.
-export const CONSENT_VERSION = "2";
+// v3 (2026-07-28): replaces the unquantified "Message frequency varies." with
+// a specific cap — "Up to 4 automated messages per month, plus any messages
+// your gym sends directly." Matches what sendRetentionTexts.ts actually
+// enforces (one automated text per member per 7 days, 3-attempt cap until the
+// member checks in) and the wording already live in content/terms.html §23
+// Message Frequency and content/privacy-policy.html §5. A material TCPA
+// disclosure term changed, so the bump is required for the same reason v2's
+// was: consentSubmissions snapshots consentText per row, and leaving two
+// different frequency disclosures under one version label destroys the ability
+// to prove which one a given member saw. v2 rows are NOT backfilled or
+// mutated, members are NOT re-prompted (smsConsentConfirmed is unversioned, so
+// nobody already confirmed becomes untextable), and the only behavioural
+// effect is that a v2 submitter is no longer deduped if they return to the
+// form on their own.
+export const CONSENT_VERSION = "3";
 
 // Opt-out/opt-in keyword lists come from lib/smsKeywords.ts, shared with
 // convex/twilioWebhookAction.ts's actual STOP/START matching — that file is
@@ -45,7 +59,8 @@ export function getConsentText(gymName: string): string {
     `sent by KombatDesk on the gym's behalf, ` +
     `including a reminder if I haven't been in for a while, sent to the number above using ` +
     `an automatic telephone dialing system. Consent is not a condition of membership or of ` +
-    `purchasing anything. Message frequency varies. Message and data rates may apply. ` +
+    `purchasing anything. Up to 4 automated messages per month, plus any messages ` +
+    `your gym sends directly. Message and data rates may apply. ` +
     `Reply ${formatKeywordList(STOP_KEYWORDS)} to opt out at any time. ` +
     `Reply HELP for help. ` +
     `Reply ${formatKeywordList(START_KEYWORDS)} to opt back in.`
