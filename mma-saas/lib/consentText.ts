@@ -24,19 +24,34 @@ import { STOP_KEYWORDS, START_KEYWORDS } from "./smsKeywords";
 // longer deduped and can submit again under v2, which is correct — new
 // wording is a new TCPA event, not a duplicate.
 // v3 (2026-07-28): replaces the unquantified "Message frequency varies." with
-// a specific cap — "Up to 4 automated messages per month, plus any messages
-// your gym sends directly." Matches what sendRetentionTexts.ts actually
-// enforces (one automated text per member per 7 days, 3-attempt cap until the
-// member checks in) and the wording already live in content/terms.html §23
-// Message Frequency and content/privacy-policy.html §5. A material TCPA
-// disclosure term changed, so the bump is required for the same reason v2's
-// was: consentSubmissions snapshots consentText per row, and leaving two
-// different frequency disclosures under one version label destroys the ability
-// to prove which one a given member saw. v2 rows are NOT backfilled or
-// mutated, members are NOT re-prompted (smsConsentConfirmed is unversioned, so
-// nobody already confirmed becomes untextable), and the only behavioural
-// effect is that a v2 submitter is no longer deduped if they return to the
-// form on their own.
+// a specific ceiling — "Up to 5 automated msgs/month."
+//
+// 5, not 4. The 3-attempt winback cap is NOT the monthly bound: a check-in
+// clears winbackAttempts AND lastRetentionTextAt (members.ts:checkIn), which
+// rearms a member for a second sequence in the same month. The real bound is
+// the 7-day per-member spacing in sendRetentionTexts.ts:getAtRiskMembers,
+// which allows floor(30/7)+1 = 5 sends in a 30- or 31-day month. 4 is typical;
+// 5 is the ceiling under favourable cron/Twilio jitter. The disclosure states
+// the ceiling. Manual Elite sends are inside that 5, not additive — they run
+// through the same sendRetentionTextsCore, hit the same per-member gates, and
+// write the same recordRetentionText — so there is deliberately no "plus
+// messages your gym sends" clause; that channel does not exist.
+//
+// This sentence must stay BYTE-IDENTICAL in three places, because carriers
+// cross-check the HELP reply against the opt-in disclosure and the terms:
+//   - lib/consentText.ts (here)
+//   - convex/twilioWebhookAction.ts (HELP auto-reply body)
+//   - content/terms.html §23 Program Description
+//
+// A material TCPA disclosure term changed, so the bump was required for the
+// same reason v2's was: consentSubmissions snapshots consentText per row, and
+// leaving two different frequency disclosures under one version label destroys
+// the ability to prove which one a given member saw. This edit corrects the
+// wording INSIDE v3 before any v3 row is stamped in prod, so it is not a
+// second bump. v2 rows are NOT backfilled or mutated, members are NOT
+// re-prompted (smsConsentConfirmed is unversioned, so nobody already confirmed
+// becomes untextable), and the only behavioural effect is that a v2 submitter
+// is no longer deduped if they return to the form on their own.
 export const CONSENT_VERSION = "3";
 
 // Opt-out/opt-in keyword lists come from lib/smsKeywords.ts, shared with
@@ -59,8 +74,7 @@ export function getConsentText(gymName: string): string {
     `sent by KombatDesk on the gym's behalf, ` +
     `including a reminder if I haven't been in for a while, sent to the number above using ` +
     `an automatic telephone dialing system. Consent is not a condition of membership or of ` +
-    `purchasing anything. Up to 4 automated messages per month, plus any messages ` +
-    `your gym sends directly. Message and data rates may apply. ` +
+    `purchasing anything. Up to 5 automated msgs/month. Message and data rates may apply. ` +
     `Reply ${formatKeywordList(STOP_KEYWORDS)} to opt out at any time. ` +
     `Reply HELP for help. ` +
     `Reply ${formatKeywordList(START_KEYWORDS)} to opt back in.`

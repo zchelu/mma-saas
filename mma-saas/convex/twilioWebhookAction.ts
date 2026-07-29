@@ -141,7 +141,7 @@ export const verifyAndProcess = internalAction({
       return {
         status: "ok",
         replyMessage:
-          "KombatDesk: attendance reminders from your gym. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out. Help: kombatdesk@outlook.com",
+          "KombatDesk: attendance reminders from your gym. Up to 5 automated msgs/month. Msg & data rates may apply. Reply STOP to opt out. Help: kombatdesk@outlook.com",
       };
     }
 

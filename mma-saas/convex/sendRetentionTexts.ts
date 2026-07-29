@@ -27,6 +27,23 @@ export const WINBACK_ATTRIBUTION_WINDOW_DAYS = 14;
 export const getAtRiskMembers = internalQuery({
   args: { gymId: v.id("gyms") },
   handler: async (ctx, { gymId }) => {
+    // THIS 7 IS A CUSTOMER-FACING DISCLOSURE NUMBER. It is the minimum spacing
+    // between two texts to the same member, and it — not MAX_WINBACK_ATTEMPTS —
+    // is what bounds the monthly total. The 3-attempt cap only bounds a single
+    // cold streak: members.ts:checkIn clears BOTH winbackAttempts and
+    // lastRetentionTextAt, so a member who returns and lapses again inside the
+    // same month starts a fresh sequence. With 7-day spacing the ceiling is
+    // floor(30/7)+1 = 5 sends in a 30- or 31-day month (4 is typical; 5 needs
+    // favourable cron/Twilio jitter against the strict `<` comparisons below).
+    //
+    // Changing this number changes what the law requires us to have disclosed.
+    // Update all three of these in the same commit, byte-identical to each
+    // other, and bump CONSENT_VERSION in lib/consentText.ts:
+    //   - lib/consentText.ts            (opt-in checkbox text)
+    //   - convex/twilioWebhookAction.ts (HELP auto-reply body)
+    //   - content/terms.html §23        (Program Description)
+    // content/terms.html §23 Message Frequency and content/privacy-policy.html
+    // also state the "one per 7-day period" rule in prose and would need review.
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const sevenDaysAgoISO = new Date(sevenDaysAgoMs).toISOString();
     const all = await ctx.db
