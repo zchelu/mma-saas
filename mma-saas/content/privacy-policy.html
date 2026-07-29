@@ -141,11 +141,35 @@
 <h2 id="payments">8. Payments</h2>
 <p>All payments are processed by Stripe. When you subscribe to a plan, your payment card details and billing address are provided directly to Stripe through its secure checkout; KombatDesk receives confirmation of the transaction, your subscription status, and limited billing metadata, but never receives or stores full payment card numbers. Stripe's handling of your information is governed by the <a href="https://stripe.com/privacy" rel="noopener noreferrer" target="_blank">Stripe Privacy Policy</a>.</p>
 
+<!-- MANUAL EDIT — REAPPLY AFTER ANY REGENERATION OF THIS FILE.
+     This document is a generated static export (see the header comment at the
+     top of this file) that has been hand-edited. In the "Frequency" bullet of
+     Section 9 below, "(approximately 4 per month)" was removed and replaced
+     with the sentence "Up to 5 automated msgs/month.", and the claim that
+     manual gym messages are "not capped by KombatDesk" was removed: manual
+     sends run through sendRetentionTextsCore, hit the same per-member gates,
+     and write the same recordRetentionText, so they are inside the 5, not
+     additive.
+     That sentence must stay BYTE-IDENTICAL across five sites, because carriers
+     cross-check the HELP reply against the opt-in disclosure and the linked
+     legal documents — and /privacy is reachable in one click from the consent
+     page footer, so it is read alongside /terms:
+       - content/privacy-policy.html §9 Frequency (here)
+       - content/terms.html §23 Program Description
+       - content/terms.html §23 Message Frequency
+       - lib/consentText.ts getConsentText() — the checkbox text a member
+         actually agrees to, frozen onto every consentSubmissions row as
+         evidence.
+       - convex/twilioWebhookAction.ts — the HELP auto-reply body.
+     If they drift, bump CONSENT_VERSION in lib/consentText.ts and fix all five
+     at the same time. Section 2's "one per member per 7-day period" states the
+     cadence rule without a monthly count and is deliberately left alone.
+     Regenerating this file will silently revert this edit. -->
 <h2 id="sms">9. SMS Text Messaging</h2>
 <p>The Services send SMS text messages to gym members on behalf of their gym. These messages are <strong>membership and attendance-related notices and replies to messages a member sends us</strong> — for example, a check-in message when a member has not attended class recently. We do not send marketing or promotional text messages.</p>
 <ul>
   <li><strong>Consent:</strong> A member's number is only messaged once consent has been recorded, by one of two routes: the member opts in themselves through the member opt-in page described in Section 4, or the gym confirms to us that it has already obtained that member's consent directly. Where the gym confirms it, the gym is responsible for having obtained that consent, as described in Section 4 and in our <a href="/terms">Terms of Service</a>.</li>
-  <li><strong>Frequency:</strong> Automatic messages are limited to at most one message per member per 7-day period (approximately 4 per month). Gyms can also send messages to opted-in members manually; the frequency of those messages is set by the gym and is not capped by KombatDesk.</li>
+  <li><strong>Frequency:</strong> Automatic retention messages are limited to one per 7-day period per member. Up to 5 automated msgs/month. Messages a gym owner sends manually are delivered through the same automated retention system and are subject to the same per-member limits, so they are included in that total rather than added to it.</li>
   <li><strong>The number messages are sent from:</strong> KombatDesk currently sends messages for every gym on its platform from a single shared phone number. There is a practical consequence you should know about. Because opting out is tied to that phone number, replying STOP stops messages from <em>every</em> gym that uses KombatDesk, not only the gym whose message you received — and replying START resumes them for every such gym. If you train at more than one gym that uses KombatDesk and want to stop messages from only one of them, contact that gym directly.</li>
   <li><strong>Opt-out:</strong> Members may opt out at any time by replying <strong>STOP</strong>, <strong>STOPALL</strong>, <strong>UNSUBSCRIBE</strong>, <strong>CANCEL</strong>, <strong>END</strong>, or <strong>QUIT</strong> to any message, and may opt back in by replying <strong>START</strong>, <strong>YES</strong>, or <strong>UNSTOP</strong>. Opt-out status is recorded and honored across the Services. Members can reply <strong>HELP</strong> for assistance, or contact us using the details in Section 18.</li>
   <li><strong>Rates:</strong> Message and data rates may apply, depending on the member's mobile carrier and plan.</li>

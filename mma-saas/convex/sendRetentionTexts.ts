@@ -37,13 +37,18 @@ export const getAtRiskMembers = internalQuery({
     // favourable cron/Twilio jitter against the strict `<` comparisons below).
     //
     // Changing this number changes what the law requires us to have disclosed.
-    // Update all three of these in the same commit, byte-identical to each
-    // other, and bump CONSENT_VERSION in lib/consentText.ts:
-    //   - lib/consentText.ts            (opt-in checkbox text)
-    //   - convex/twilioWebhookAction.ts (HELP auto-reply body)
-    //   - content/terms.html §23        (Program Description)
-    // content/terms.html §23 Message Frequency and content/privacy-policy.html
-    // also state the "one per 7-day period" rule in prose and would need review.
+    // The sentence "Up to 5 automated msgs/month." appears byte-identically at
+    // FIVE sites — carriers cross-check the HELP reply against the opt-in
+    // disclosure and both linked legal documents, so all five must move in the
+    // same commit, and CONSENT_VERSION in lib/consentText.ts must be bumped
+    // with them:
+    //   - lib/consentText.ts             (opt-in checkbox text)
+    //   - convex/twilioWebhookAction.ts  (HELP auto-reply body)
+    //   - content/terms.html §23         (Program Description)
+    //   - content/terms.html §23         (Message Frequency subsection)
+    //   - content/privacy-policy.html §9 (Frequency bullet)
+    // privacy-policy.html §2 states the "one per member per 7-day period"
+    // cadence rule without a monthly count — accurate as written, left alone.
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const sevenDaysAgoISO = new Date(sevenDaysAgoMs).toISOString();
     const all = await ctx.db

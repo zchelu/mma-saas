@@ -37,11 +37,14 @@ import { STOP_KEYWORDS, START_KEYWORDS } from "./smsKeywords";
 // write the same recordRetentionText — so there is deliberately no "plus
 // messages your gym sends" clause; that channel does not exist.
 //
-// This sentence must stay BYTE-IDENTICAL in three places, because carriers
-// cross-check the HELP reply against the opt-in disclosure and the terms:
+// This sentence must stay BYTE-IDENTICAL in five places, because carriers
+// cross-check the HELP reply against the opt-in disclosure and both linked
+// legal documents (/privacy is one click from the consent page footer):
 //   - lib/consentText.ts (here)
 //   - convex/twilioWebhookAction.ts (HELP auto-reply body)
 //   - content/terms.html §23 Program Description
+//   - content/terms.html §23 Message Frequency
+//   - content/privacy-policy.html §9 Frequency
 //
 // A material TCPA disclosure term changed, so the bump was required for the
 // same reason v2's was: consentSubmissions snapshots consentText per row, and
