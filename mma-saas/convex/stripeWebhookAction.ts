@@ -10,6 +10,83 @@ import { alertUnresolvedPrice } from "../lib/alerts";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 
+// Every customer-facing date in this file renders in this zone, never the
+// runtime default. Convex runs UTC. A subscription created after ~6pm Mountain
+// falls on the NEXT UTC day, so an unqualified toLocaleDateString reported a
+// trial ending "August 29" when Stripe was set to charge on Aug 28.
+//
+// Caught live on 2026-07-29 by diffing the sent email against the Stripe
+// dashboard for sub_1Tyio4QztS1N9xLGpntyR1Pm. This is the C.R.S. 6-1-732 record,
+// and a date that reads LATER than the real charge is the dangerous direction:
+// the customer cancels on the morning of the date we gave them and has already
+// been billed. Matching the Stripe dashboard's zone also means the email and
+// the dashboard never disagree when a customer calls to argue about it.
+const BUSINESS_TIME_ZONE = "America/Denver";
+
+// Billing amounts are written with explicit cents. "$129.00/month" is what a
+// payment disclosure should look like, and it matches the Stripe dashboard.
+const money = (usd: number) => `$${usd.toFixed(2)}`;
+
+// The amount the customer will ACTUALLY be billed each period: list price minus
+// any fixed-amount discount on the subscription. Founding gyms pay list minus
+// $50, and quoting them list price in the C.R.S. 6-1-732 confirmation states a
+// charge that will never happen.
+//
+// Never throws, and degrades to list price on any failure — which is exactly
+// what this email said before this function existed. A number that is too HIGH
+// is survivable; not sending the email at all is not, because Stripe never
+// re-fires customer.subscription.created and there is no second chance to
+// produce the compliance record.
+//
+// This re-reads the subscription rather than widening retrieveSubscription's
+// expand list on purpose. If "discounts" were ever rejected as an expand path
+// there, the throw would take out the whole webhook and no billing state would
+// be written for a customer who just paid. Here the blast radius is one wrong
+// number in one email.
+async function resolveMonthlyChargeUsd(
+  stripe: Stripe,
+  subscriptionId: string,
+  listPriceUsd: number
+): Promise<number> {
+  try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId, {
+      // Nested path, and it has to be. `discounts` alone turns the array of ids
+      // into Discount objects but leaves each discount's coupon as a bare id
+      // string, which has no amount_off on it. Stripe expands parents
+      // implicitly, so this one path covers both levels.
+      expand: ["discounts.source.coupon"],
+    });
+    // Typed `Array<string | Discount>` and non-nullable in stripe v22. Guarded
+    // anyway: this function's whole contract is that it never throws.
+    const discounts: Array<string | Stripe.Discount> = Array.isArray(sub.discounts)
+      ? sub.discounts
+      : [];
+    let amountOffCents = 0;
+    for (const discount of discounts) {
+      // A bare string means it came back unexpanded and there is nothing to
+      // read. Skip rather than guess.
+      if (typeof discount === "string") continue;
+      // stripe v22 moved the coupon behind `source`; there is no
+      // `discount.coupon` any more. Verified against the installed typings:
+      // `source.coupon` is `string | Coupon | null`, and a string here means
+      // the expand above didn't reach it.
+      const coupon = discount.source?.coupon;
+      if (!coupon || typeof coupon === "string") continue;
+      if (typeof coupon.amount_off === "number") amountOffCents += coupon.amount_off;
+    }
+    if (amountOffCents <= 0) return listPriceUsd;
+    const charged = listPriceUsd - amountOffCents / 100;
+    // A discount exceeding list price means nothing is due, not a negative bill.
+    return charged > 0 ? charged : 0;
+  } catch (err) {
+    console.error(
+      `Could not resolve the discounted charge for subscription ${subscriptionId}; quoting list price in the confirmation email instead:`,
+      err
+    );
+    return listPriceUsd;
+  }
+}
+
 // Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires written
 // post-purchase confirmation of price/frequency/cancellation — the
 // onboarding wizard's on-screen disclosure alone doesn't satisfy that.
@@ -36,6 +113,7 @@ const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 // without expansion.
 async function sendTrialConfirmationEmail(
   stripe: Stripe,
+  subscriptionId: string,
   customerRef: string | Stripe.Customer | Stripe.DeletedCustomer,
   plan: string | undefined,
   trialEnd: number | null,
@@ -71,7 +149,17 @@ async function sendTrialConfirmationEmail(
         year: "numeric",
         month: "long",
         day: "numeric",
+        timeZone: BUSINESS_TIME_ZONE,
       });
+
+    // What they will actually be charged, which is not `price` for a founding
+    // gym. Falls back to `price` if the discount can't be read.
+    const charge = await resolveMonthlyChargeUsd(stripe, subscriptionId, price);
+    const discountPerMonth = price - charge;
+    const foundingLine =
+      discountPerMonth > 0
+        ? `Founding rate applied: ${money(discountPerMonth)} off per month for at least your next 24 bills, then ${money(price)}/month.`
+        : null;
 
     const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -84,7 +172,8 @@ async function sendTrialConfirmationEmail(
         text: [
           `Your ${TRIAL_DAYS}-day free trial of KombatDesk ${planLabel} has started.`,
           ``,
-          `Plan: KombatDesk ${planLabel} — $${price}/month`,
+          `Plan: KombatDesk ${planLabel} — ${money(charge)}/month`,
+          ...(foundingLine ? [foundingLine] : []),
           `Trial: ${TRIAL_DAYS} days, ends ${trialEndDate}`,
           `Billing frequency: monthly, starting ${trialEndDate}`,
           `Total due today: $0.00`,
@@ -101,7 +190,7 @@ async function sendTrialConfirmationEmail(
       // comes from the subscription's current_period_end, not a computed
       // guess, since Stripe's actual billing anchor is the source of truth.
       const nextChargeLine = currentPeriodEnd
-        ? `Next charge: $${price} on ${formatDate(currentPeriodEnd)}`
+        ? `Next charge: ${money(charge)} on ${formatDate(currentPeriodEnd)}`
         : `Billing frequency: monthly`;
       await resend.emails.send({
         from: "KombatDesk <billing@kombatdesk.com>",
@@ -110,8 +199,9 @@ async function sendTrialConfirmationEmail(
         text: [
           `Your KombatDesk ${planLabel} subscription is now active.`,
           ``,
-          `Plan: KombatDesk ${planLabel} — $${price}/month`,
-          `Total charged today: $${price}`,
+          `Plan: KombatDesk ${planLabel} — ${money(charge)}/month`,
+          ...(foundingLine ? [foundingLine] : []),
+          `Total charged today: ${money(charge)}`,
           nextChargeLine,
           ``,
           `Cancel anytime. Manage or cancel your subscription here:`,
@@ -229,7 +319,7 @@ async function applySubscriptionState(
     // current_period_end lives on the subscription item, not the subscription
     // itself, as of this Stripe API version.
     const currentPeriodEnd = sub.items.data[0]?.current_period_end ?? null;
-    await sendTrialConfirmationEmail(stripe, sub.customer, plan, sub.trial_end, currentPeriodEnd);
+    await sendTrialConfirmationEmail(stripe, sub.id, sub.customer, plan, sub.trial_end, currentPeriodEnd);
   }
 }
 
