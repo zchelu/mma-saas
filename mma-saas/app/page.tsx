@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "./components/footer";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 export default async function Home() {
   const user = await currentUser();
@@ -99,7 +100,7 @@ export default async function Home() {
             style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
           >
             <p className="text-2xl font-bold leading-snug" style={{ color: "#FFFFFF" }}>
-              Your first 30 days are free. If I haven&apos;t brought back at least one member
+              {`Your first ${TRIAL_DAYS} days are free.`} If I haven&apos;t brought back at least one member
               who&apos;d gone cold by day 90, I refund every dollar you&apos;ve paid.
             </p>
           </div>

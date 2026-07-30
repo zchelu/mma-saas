@@ -1,10 +1,26 @@
 // Free-trial length, in days. Single source of truth: this is both the value
 // handed to Stripe (subscription_data.trial_period_days in
-// app/api/stripe/checkout/route.ts) and the number quoted in user-facing copy
-// (the onboarding wizard's renewal disclosure, the Stripe trial confirmation
-// email), so the promise and the actual grant can't drift apart. Trial
-// *status* is never derived from this — planStatus === "trialing" comes from
-// Stripe, and the trial end date comes from the subscription's trial_end.
+// app/api/stripe/checkout/route.ts) and the number quoted in user-facing copy,
+// so the promise and the actual grant can't drift apart. Trial *status* is
+// never derived from this — planStatus === "trialing" comes from Stripe, and
+// the trial end date comes from the subscription's trial_end.
+//
+// Every TSX/TS consumer imports this constant. Do not hardcode the number
+// again anywhere; "day 31" phrasing is TRIAL_DAYS + 1, also computed.
+// Verified consumers as of 2026-07-30:
+//   app/api/stripe/checkout/route.ts  trial_period_days (the actual grant)
+//   app/pricing/page.tsx              x3 — tier footnote, guarantee block,
+//                                     founding block
+//   app/page.tsx                      homepage guarantee block
+//   app/onboarding/onboarding-wizard.tsx  renewal disclosure
+//   convex/stripeWebhookAction.ts     trial confirmation email
+//
+// ONE EXCEPTION that cannot import this — content/terms.html "Free Trial"
+// section says "30-day free trial" as literal text. It is a Termly static
+// export, so it has no build step to interpolate through AND a Termly
+// re-export silently reverts manual edits. If TRIAL_DAYS ever changes, that
+// clause must be updated by hand or the Terms become a false statement about
+// billing. Change this constant => grep content/terms.html for "30-day".
 export const TRIAL_DAYS = 30;
 
 // Single source of truth for displayed plan prices and labels — referenced by

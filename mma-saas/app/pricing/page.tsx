@@ -3,6 +3,7 @@ import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "../components/footer";
 import { getFoundingOffer } from "@/lib/foundingOffer";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 // The founding coupon's redemption count can change between requests (someone
 // else closes a founding gym), so this page must never be served from a
@@ -174,7 +175,7 @@ export default async function PricingPage() {
             ))}
           </div>
           <p className="text-sm text-center mt-8" style={{ color: "#888888" }}>
-            30 days free. Cancel anytime. Card isn&apos;t charged until day 31.
+            {`${TRIAL_DAYS} days free. Cancel anytime. Card isn't charged until day ${TRIAL_DAYS + 1}.`}
           </p>
         </div>
 
@@ -211,7 +212,7 @@ export default async function PricingPage() {
               The Saved Member Guarantee
             </h2>
             <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
-              Your first 30 days are free. Card on file, nothing charged until day 31.
+              {`Your first ${TRIAL_DAYS} days are free. Card on file, nothing charged until day ${TRIAL_DAYS + 1}.`}
             </p>
             <p className="text-base leading-relaxed mb-4" style={{ color: "#CCCCCC" }}>
               After that: if KombatDesk hasn&apos;t brought back at least one member who&apos;d gone
@@ -324,7 +325,7 @@ export default async function PricingPage() {
               </p>
 
               <p className="text-sm leading-relaxed mb-6" style={{ color: "#AAAAAA" }}>
-                Your first 30 days are free. Then 24 months at the founding rate. After that you&apos;re on
+                {`Your first ${TRIAL_DAYS} days are free.`} Then 24 months at the founding rate. After that you&apos;re on
                 standard pricing. Decide on the results, not on a discount.
               </p>
 
