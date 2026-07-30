@@ -325,7 +325,11 @@ export default async function PricingPage() {
               </p>
 
               <p className="text-sm leading-relaxed mb-6" style={{ color: "#AAAAAA" }}>
-                {`Your first ${TRIAL_DAYS} days are free.`} Then 24 months at the founding rate. After that you&apos;re on
+                {/* {" "} is load-bearing: JSX drops the whitespace between an
+                    expression container and the text that follows it, which
+                    shipped "free.Then 24 months" to production on 2026-07-29. */}
+                {`Your first ${TRIAL_DAYS} days are free.`}{" "}
+                Then 24 months at the founding rate. After that you&apos;re on
                 standard pricing. Decide on the results, not on a discount.
               </p>
 

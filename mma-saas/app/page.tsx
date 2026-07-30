@@ -100,7 +100,11 @@ export default async function Home() {
             style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E" }}
           >
             <p className="text-2xl font-bold leading-snug" style={{ color: "#FFFFFF" }}>
-              {`Your first ${TRIAL_DAYS} days are free.`} If I haven&apos;t brought back at least one member
+              {/* {" "} is load-bearing: JSX drops the whitespace between an
+                  expression container and the text that follows it, which
+                  shipped "free.If I haven't" to production on 2026-07-29. */}
+              {`Your first ${TRIAL_DAYS} days are free.`}{" "}
+              If I haven&apos;t brought back at least one member
               who&apos;d gone cold by day 90, I refund every dollar you&apos;ve paid.
             </p>
           </div>
