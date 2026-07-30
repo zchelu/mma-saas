@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -45,16 +45,39 @@ export default function WinbackPanel({
   gymId: Id<"gyms"> | null;
   gymCreatedAt: number | null;
 }) {
-  const defaultStart = gymCreatedAt ?? Date.now() - 90 * MS_PER_DAY;
-  const [startDate, setStartDate] = useState(() => toDateInputValue(defaultStart));
-  const [endDate, setEndDate] = useState(() => toDateInputValue(Date.now()));
+  // Null until mounted, then filled in on the client. Both defaults depend on
+  // "today", and today is not the same on both sides of the render: Vercel runs
+  // UTC, a Colorado gym is UTC-6. Computed during render (which includes SSR
+  // and useState lazy initializers), any load between 6pm and midnight Mountain
+  // produced HTML carrying TOMORROW's date, then hydrated to today's — a
+  // mismatch on both inputs and a wrong default range during exactly the
+  // evening hours a gym owner is at the desk. Same class of bug as the trial
+  // confirmation email's dates. Deferring to an effect means one clock, the
+  // user's.
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
 
-  const startMs = startOfDayMs(startDate);
-  const endMs = endOfDayMs(endDate);
+  useEffect(() => {
+    // Deliberate, and the one case set-state-in-effect is wrong about:
+    // deferring a value that MUST NOT be computed during SSR. Deriving these in
+    // render is precisely what caused the hydration mismatch above. Block form
+    // rather than -next-line because two calls need covering, and because a
+    // -next-line directive only suppresses the literal next line — putting
+    // explanatory prose between the directive and the statement silently
+    // disables nothing, which is how this shipped broken the first time.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setStartDate(toDateInputValue(gymCreatedAt ?? Date.now() - 90 * MS_PER_DAY));
+    setEndDate(toDateInputValue(Date.now()));
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [gymCreatedAt]);
+
+  const ready = startDate !== null && endDate !== null;
+  const startMs = ready ? startOfDayMs(startDate) : 0;
+  const endMs = ready ? endOfDayMs(endDate) : 0;
 
   const report = useQuery(
     api.winbackReport.getWinbackRecoveries,
-    gymId ? { gymId, startMs, endMs } : "skip"
+    gymId && ready ? { gymId, startMs, endMs } : "skip"
   );
 
   return (
@@ -64,7 +87,7 @@ export default function WinbackPanel({
         <div className="flex items-center gap-2 text-sm" style={{ color: "#888888" }}>
           <input
             type="date"
-            value={startDate}
+            value={startDate ?? ""}
             onChange={(e) => setStartDate(e.target.value)}
             className="rounded px-2 py-1"
             style={{ backgroundColor: "#111111", border: "1px solid #333333", color: "#FFFFFF" }}
@@ -72,7 +95,7 @@ export default function WinbackPanel({
           <span>to</span>
           <input
             type="date"
-            value={endDate}
+            value={endDate ?? ""}
             onChange={(e) => setEndDate(e.target.value)}
             className="rounded px-2 py-1"
             style={{ backgroundColor: "#111111", border: "1px solid #333333", color: "#FFFFFF" }}

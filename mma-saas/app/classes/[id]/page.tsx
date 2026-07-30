@@ -9,8 +9,22 @@ import { ErrorToast, getErrorMessage } from "../../components/error-toast";
 
 import { getInitials, getAvatarColor } from "../../lib/avatar";
 
+// Local calendar date, NOT toISOString(). toISOString() is UTC, so for a
+// Colorado gym every class after 6pm resolved to TOMORROW: a Monday 6:00 PM
+// session logged itself under Tuesday. That silently corrupted Session History,
+// and because getByClassAndDate keys on the date string, the real day always
+// came back empty — so a coach could log the same session twice and see no
+// "Logged" markers telling them they already had.
+//
+// Caught 2026-07-29 with the date field reading 07/30/2026 at 9pm Mountain.
+// formatDate below already parses correctly, and winback-panel.tsx carries a
+// comment warning against exactly this. Do not reintroduce a "Z"/UTC path here.
 function today() {
-  return new Date().toISOString().split("T")[0];
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function formatDate(s: string) {
@@ -26,8 +40,28 @@ export default function ClassDetailPage() {
   const gymClass = useQuery(api.classes.getById, { id: classId });
   const enrolled = useQuery(api.enrollments.getByClass, { classId });
   const allMembers = useQuery(api.members.getAll);
-  const [attendanceDate, setAttendanceDate] = useState(today());
-  const alreadyLogged = useQuery(api.attendance.getByClassAndDate, { classId, date: attendanceDate });
+  // Null until mounted. today() now reads the LOCAL calendar date, which the
+  // server (UTC) and the browser (Mountain) disagree about all evening — so
+  // computing it during render would swap a wrong-date bug for a hydration
+  // mismatch. Deferring to the effect below means one clock, the coach's.
+  const [attendanceDate, setAttendanceDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Deliberate, same as the effect in dashboard/winback-panel.tsx: this is
+    // the one case set-state-in-effect is wrong about, deferring a value that
+    // MUST NOT be computed during SSR. The rule flags any direct setState in an
+    // effect body — an empty dependency array is not an exemption. Block form,
+    // because a -next-line directive only suppresses the literal next line and
+    // putting rationale between it and the statement silences nothing.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setAttendanceDate(today());
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  const alreadyLogged = useQuery(
+    api.attendance.getByClassAndDate,
+    attendanceDate ? { classId, date: attendanceDate } : "skip"
+  );
   const sessionDates = useQuery(api.attendance.getSessionDates, { classId });
 
   const enroll = useMutation(api.enrollments.enroll);
@@ -39,7 +73,18 @@ export default function ClassDetailPage() {
     [alreadyLogged]
   );
 
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  // Who the coach has explicitly marked present. Starts EMPTY, deliberately.
+  //
+  // This used to seed to "every enrolled member who isn't already logged",
+  // i.e. everyone pre-checked. That made the reflex action — open the class,
+  // hit Save — mark the entire roster as having trained. logAttendance patches
+  // lastVisit and status:"active" on each one, so every absentee got their
+  // at-risk clock reset and never went cold. The retention engine this whole
+  // product is built around would quietly never fire, and the dashboard would
+  // look healthy the entire time. Checking people in matches what a coach
+  // actually does (look at the mats and count); unchecking ghosts does not.
+  // "Mark all present" below keeps the everyone-showed case to one tap.
+  const [present, setPresent] = useState<Set<string>>(new Set());
   const [addMemberId, setAddMemberId] = useState("");
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -54,22 +99,49 @@ export default function ClassDetailPage() {
     [allMembers, enrolledIds]
   );
 
-  useEffect(() => {
-    if (!enrolled) return;
-    setChecked(new Set(
-      enrolled
-        .filter((m) => !alreadyLoggedIds.has(m._id))
-        .map((m) => m._id as string)
-    ));
-  }, [enrolled, alreadyLoggedIds]);
+  // Enrolled members still awaiting a log for this date.
+  const pending = useMemo(
+    () => (enrolled ?? []).filter((m) => !alreadyLoggedIds.has(m._id)),
+    [enrolled, alreadyLoggedIds]
+  );
+
+  // Derived, never stored. `enrolled` and `alreadyLogged` are live Convex
+  // queries and the front-desk kiosk at /checkin writes attendance for this
+  // same class and date — so a member badging in mid-session used to re-run a
+  // seeding effect that replaced the whole selection and wiped every box the
+  // coach had ticked. Keeping the coach's intent in `present` and subtracting
+  // whatever has since been logged means an external write just quietly drops
+  // that person off the pending list instead of resetting the screen.
+  const checked = useMemo(() => {
+    const s = new Set<string>();
+    for (const id of present) {
+      if (!alreadyLoggedIds.has(id as Id<"members">)) s.add(id);
+    }
+    return s;
+  }, [present, alreadyLoggedIds]);
+
+  const allPendingChecked = pending.length > 0 && pending.every((m) => checked.has(m._id as string));
 
   function toggleCheck(memberId: string) {
-    setChecked((prev) => {
+    setPresent((prev) => {
       const next = new Set(prev);
       if (next.has(memberId)) next.delete(memberId);
       else next.add(memberId);
       return next;
     });
+  }
+
+  function toggleAllPending() {
+    setPresent(allPendingChecked ? new Set() : new Set(pending.map((m) => m._id as string)));
+  }
+
+  // Changing the date changes which session is being logged, so the coach's
+  // in-progress selection is meaningless against the new one. Cleared here, in
+  // the handler where the intent actually happens, rather than in an effect
+  // watching the date — that is what kept this component honest and effect-free.
+  function changeDate(next: string) {
+    setAttendanceDate(next);
+    setPresent(new Set());
   }
 
   async function handleEnroll() {
@@ -94,12 +166,21 @@ export default function ClassDetailPage() {
   }
 
   async function handleLogAttendance() {
-    const newIds = [...checked].filter((id) => !alreadyLoggedIds.has(id as Id<"members">)) as Id<"members">[];
+    // Declared above the render guard, so attendanceDate is still string|null
+    // here as far as the compiler is concerned. Unreachable in practice: the
+    // Save button only exists after that guard has passed.
+    if (attendanceDate === null) return;
+    // `checked` already excludes anything logged since the coach ticked it.
+    const newIds = [...checked] as Id<"members">[];
     if (newIds.length === 0) return;
     setSavingAttendance(true);
     setActionError(null);
     try {
       await logAttendance({ classId, date: attendanceDate, memberIds: newIds });
+      // Those members are now "Logged" and render from alreadyLoggedIds, so
+      // holding them in `present` would only let a later date change resurrect
+      // a stale selection.
+      setPresent(new Set());
     } catch (err) {
       setActionError(getErrorMessage(err, "Couldn't save attendance — try refreshing the page."));
     } finally {
@@ -107,7 +188,9 @@ export default function ClassDetailPage() {
     }
   }
 
-  if (gymClass === undefined || enrolled === undefined) {
+  // attendanceDate is null for the first paint only (see the effect above), so
+  // everything below can treat it as a string.
+  if (gymClass === undefined || enrolled === undefined || attendanceDate === null) {
     return (
       <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
         <AppHeader />
@@ -212,11 +295,11 @@ export default function ClassDetailPage() {
             <input
               type="date"
               value={attendanceDate}
-              onChange={(e) => setAttendanceDate(e.target.value)}
+              onChange={(e) => changeDate(e.target.value)}
               className="input w-44"
             />
             <button
-              onClick={() => setAttendanceDate(today())}
+              onClick={() => changeDate(today())}
               className="text-xs transition-colors hover:text-white"
               style={{ color: "#888888" }}
             >
@@ -228,6 +311,21 @@ export default function ClassDetailPage() {
             <p className="text-sm" style={{ color: "#555555" }}>Enroll members first to log attendance.</p>
           ) : (
             <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs" style={{ color: "#888888" }}>
+                  Tap each member who trained.
+                </span>
+                {pending.length > 0 && (
+                  <button
+                    onClick={toggleAllPending}
+                    className="text-xs transition-colors hover:text-white"
+                    style={{ color: "#888888" }}
+                  >
+                    {allPendingChecked ? "Clear all" : "Mark all present"}
+                  </button>
+                )}
+              </div>
+
               <ul className="mb-5" style={{ borderColor: "#333333" }}>
                 {enrolled.map((m) => {
                   const alreadyDone = alreadyLoggedIds.has(m._id as Id<"members">);
@@ -273,7 +371,7 @@ export default function ClassDetailPage() {
 
               <button
                 onClick={handleLogAttendance}
-                disabled={savingAttendance || [...checked].filter((id) => !alreadyLoggedIds.has(id as Id<"members">)).length === 0}
+                disabled={savingAttendance || checked.size === 0}
                 className="w-full rounded-lg font-semibold py-2.5 text-sm transition-colors disabled:opacity-40"
                 style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
                 onMouseEnter={e => { if (!e.currentTarget.disabled) e.currentTarget.style.backgroundColor = "#B91C1C"; }}

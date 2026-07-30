@@ -60,7 +60,7 @@ export default async function BillingPage() {
             style={{ border: "1px solid #E02020", backgroundColor: "#1A0E0E", color: "#F87171" }}
           >
             Your subscription is canceled and will end on{" "}
-            {new Date(cancelAt * 1000).toLocaleDateString()}. You'll keep access until then.
+            {new Date(cancelAt * 1000).toLocaleDateString()}. You&apos;ll keep access until then.
           </div>
         )}
 

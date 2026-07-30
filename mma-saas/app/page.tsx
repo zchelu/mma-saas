@@ -33,6 +33,11 @@ export default async function Home() {
               Dashboard
             </a>
           ) : (
+            // Same deliberate plain <a> as the /dashboard branch above, for the
+            // same reason: a full page load into the auth boundary rather than
+            // a client-side RSC transition. Swapping in <Link> is exactly the
+            // change that reintroduces the router bug diagnosed live.
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
             <a
               href="/sign-in"
               className="text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
