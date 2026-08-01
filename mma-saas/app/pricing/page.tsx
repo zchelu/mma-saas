@@ -313,16 +313,7 @@ export default async function PricingPage() {
                   </span>
                   Your logo on this page.
                 </li>
-                <li className="flex items-start gap-2 text-sm leading-snug" style={{ color: "#CCCCCC" }}>
-                  <span className="font-bold flex-shrink-0" style={{ color: "#E02020" }}>
-                    —
-                  </span>
-                  One introduction to another gym owner you&apos;d vouch for.
-                </li>
               </ul>
-              <p className="text-sm mb-8" style={{ color: "#AAAAAA" }}>
-                That&apos;s it. No case study shoot, no committee, no extra calls.
-              </p>
 
               <p className="text-sm leading-relaxed mb-6" style={{ color: "#AAAAAA" }}>
                 {/* {" "} is load-bearing: JSX drops the whitespace between an
