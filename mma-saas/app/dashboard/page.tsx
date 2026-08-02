@@ -11,6 +11,7 @@ import RetentionButton from "./retention-button";
 import AtRiskPanel from "./at-risk";
 import SettlingGate from "./settling-gate";
 import WinbackPanel from "./winback-panel";
+import OwnerLinks from "./owner-links";
 
 export default async function DashboardPage({
   searchParams,
@@ -105,6 +106,7 @@ export default async function DashboardPage({
         <StatsGrid />
         <AtRiskPanel />
         <WinbackPanel gymId={subscription.gymId} gymCreatedAt={subscription.createdAt} />
+        <OwnerLinks slug={subscription.slug} gymId={subscription.gymId} />
       </main>
     </div>
   );

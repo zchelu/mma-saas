@@ -407,6 +407,7 @@ export const getSubscription = query({
         stripeSubscriptionId: null,
         onboardingCompleted: false,
         hasSlug: false,
+        slug: null,
         gymId: null,
         createdAt: null,
       };
@@ -431,6 +432,20 @@ export const getSubscription = query({
       // requires before it will resolve the consent page at all. Boolean rather
       // than the slug itself: nothing client-side needs the value here.
       hasSlug: !!gym?.slug,
+      // The slug itself, for app/dashboard/owner-links.tsx — the owner has to
+      // be able to find their own /consent/[gymSlug] URL. Until this existed
+      // the only way to get it was to read the gyms table in the Convex
+      // dashboard by hand, which meant an owner who lost the link could not
+      // collect member consent, and a gym that cannot collect consent can
+      // never send a text. Same dead end as the guest-checkout trap, reached
+      // a different way.
+      //
+      // Not sensitive: the slug is the public part of a URL handed to every
+      // member of the gym. hasSlug above is kept as its own field so the
+      // onboarding redirect guard doesn't have to change shape — see
+      // app/onboarding/page.tsx, where getting that guard wrong routes every
+      // paying gym into the setup wizard.
+      slug: gym?.slug ?? null,
       // Exposed for app/dashboard/winback-panel.tsx: the panel's default range
       // start is this gym's own createdAt, not a trailing window — see that
       // file for why.
