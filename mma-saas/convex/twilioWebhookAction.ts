@@ -10,6 +10,29 @@ import {
   HELP_KEYWORDS_HANDLED,
 } from "../lib/smsKeywords";
 
+// THE HELP REPLY. NOT SENT FROM HERE — AND STILL LOAD-BEARING. READ BEFORE EDITING.
+//
+// This string is not returned by the HELP branch below (see the comment there:
+// Twilio's Advanced Opt-Out answers HELP at the carrier layer, and returning it
+// here too delivered the member two identical texts). It is kept in the repo
+// because it is one of the FIVE sites that must carry the frequency disclosure
+// byte-identically — carriers cross-check the HELP reply against the opt-in
+// disclosure and both linked legal documents. The full list and the rules live
+// at convex/sendRetentionTexts.ts:39-51, and that list names THIS FILE as the
+// HELP auto-reply body.
+//
+// Deleting this constant would move the only copy of the live HELP text into a
+// Twilio console field that nobody greps, and the next time the 7-day cadence
+// changes, four sites would be updated and the fifth silently left behind.
+//
+// SO: if you change the frequency wording, you must ALSO update the Advanced
+// Opt-Out HELP message on messaging service MG3df4bb11fd47a0f0b562ba9605aacd9d
+// in the Twilio console to match this string exactly. That console field is the
+// one a member actually receives. This constant is the version-controlled
+// mirror of it, and the thing a future grep will find.
+export const HELP_REPLY_MIRRORS_TWILIO_CONSOLE =
+  "KombatDesk: attendance reminders from your gym. Up to 5 automated msgs/month. Msg & data rates may apply. Reply STOP to opt out. Help: kombatdesk@outlook.com";
+
 // Twilio's standard opt-out/opt-in keyword set (case-insensitive, exact match
 // on the trimmed message body) — https://www.twilio.com/docs/messaging/compliance/messaging-policy
 //
@@ -164,12 +187,22 @@ export const verifyAndProcess = internalAction({
     // Twilio numbers. Support address (kombatdesk@outlook.com) is the one
     // already published in content/terms.html, not the send-only Resend
     // identity.
+    // DELIBERATELY NO replyMessage — same call as the STOP branch above, for a
+    // different reason. Verified on a handset 2026-08-02 16:41: after the XML
+    // escaping fix landed, texting HELP returned TWO word-for-word identical
+    // messages. Twilio's Advanced Opt-Out HELP message on messaging service
+    // MG3df4bb11fd47a0f0b562ba9605aacd9d is configured with this exact wording,
+    // so the carrier layer was already delivering the correct text the whole
+    // time our reply was being rejected as malformed XML — which is precisely
+    // why the bug was invisible from the phone for so long. Once ours started
+    // working, the member just got it twice.
+    //
+    // Letting Twilio own this reply is also the safer compliance posture, not
+    // merely the tidier one: HELP is carrier-mandated, and Twilio answers it
+    // even when this deployment is down, erroring, or mid-deploy. A webhook
+    // cannot make that guarantee about itself.
     if (from && HELP_KEYWORDS_HANDLED.includes(body)) {
-      return {
-        status: "ok",
-        replyMessage:
-          "KombatDesk: attendance reminders from your gym. Up to 5 automated msgs/month. Msg & data rates may apply. Reply STOP to opt out. Help: kombatdesk@outlook.com",
-      };
+      return { status: "ok" };
     }
 
     return { status: "ok" };
