@@ -7,7 +7,8 @@ import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
 import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
 import { getFoundingOfferResult } from "@/lib/foundingOffer";
-import { sendAlertEmail } from "@/lib/alerts";
+import { planCheckout } from "@/lib/foundingOfferPolicy";
+import { alertFoundingCouponMisconfigured, sendAlertEmail } from "@/lib/alerts";
 
 export async function POST(request: NextRequest) {
   // checkRateLimit is internalMutation now — this goes through the
@@ -44,23 +45,42 @@ export async function POST(request: NextRequest) {
 
   // Founding pricing is never read from client input — the coupon's own
   // redemption count (via getFoundingOfferResult) is the only thing that
-  // decides whether a discount applies, same as the pricing page. Unlike the
-  // pricing page, checkout can't collapse "sold out" and "couldn't tell" into
-  // the same outcome: a transient Stripe error or cold-start cache miss must
-  // never silently fall through to a full-price charge for someone who
-  // should have gotten the founding rate — only a confirmed exhausted coupon
-  // is allowed to proceed at full price.
+  // decides whether a discount applies, same as the pricing page.
+  //
+  // planCheckout (lib/foundingOfferPolicy.ts) turns that state into the one
+  // decision this route needs, and it is the single place the /pricing-vs-
+  // checkout invariant is enforced: a discount is attached if and only if
+  // /pricing was advertising one. Sold out and misconfigured both mean
+  // /pricing is showing no founding block, so nobody was promised anything
+  // and the sale proceeds at list price. Only "unknown" — Stripe unreachable,
+  // where a retry may still resolve it and we cannot tell what other visitors
+  // are being shown — refuses, because falling through there would silently
+  // charge list price to someone who was just promised a discount.
   const foundingOfferResult = await getFoundingOfferResult();
-  if (foundingOfferResult.status === "unavailable") {
+  const checkoutPlan = planCheckout(foundingOfferResult);
+
+  if (!checkoutPlan.proceed) {
     console.error(
-      "Stripe checkout: founding coupon could not be resolved (not confirmed exhausted) — refusing to create a full-price session silently:",
-      foundingOfferResult.reason
+      "Stripe checkout: founding coupon state is unknown (Stripe unreachable, may resolve on retry) — refusing to create a full-price session silently:",
+      foundingOfferResult.status === "unknown" ? foundingOfferResult.reason : foundingOfferResult.status
     );
     return NextResponse.json(
       { error: "Something went wrong setting up checkout. Please try again in a moment." },
       { status: 503 }
     );
   }
+
+  // Deterministic config error. The sale goes through at list price rather
+  // than failing — but awaited, not fire-and-forget, so a checkout can't
+  // outrun the alert and leave the misconfiguration completely silent.
+  if (checkoutPlan.alert) {
+    console.error(
+      "Stripe checkout: founding coupon is misconfigured — selling at LIST PRICE and alerting:",
+      checkoutPlan.alert.reason
+    );
+    await alertFoundingCouponMisconfigured(checkoutPlan.alert);
+  }
+
   const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;
 
   function buildSessionParams(applyDiscount: boolean): Stripe.Checkout.SessionCreateParams {

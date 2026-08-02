@@ -9,21 +9,25 @@ import { unstable_cache } from "next/cache";
 // lib/plans.ts must stay free of Next/Stripe imports; this file is imported
 // only from app/* (Next.js runtime), never from convex/*.
 
-// slotsLeft: null means the coupon has no max_redemptions (unlimited) — not
-// Infinity, which doesn't survive the cache serialization below.
-export type FoundingOffer = { amountOffCents: number; slotsLeft: number | null; couponId: string };
+// Classification and the checkout decision live in lib/foundingOfferPolicy.ts
+// — pure, no I/O, no next/cache — so they can be unit-tested directly. This
+// file keeps the parts that touch the network and the cache. Re-exported here
+// so existing importers of these types don't have to change.
+import {
+  classifyCoupon,
+  classifyCouponError,
+  offerFromResult,
+  type FoundingOffer,
+  type FoundingOfferResult,
+} from "./foundingOfferPolicy";
 
-// Distinguishes "genuinely sold out" (safe to fall back to full price) from
-// "couldn't tell" (missing config, deleted/invalid coupon, or a Stripe API
-// error — must NOT be treated as sold out, since that silently overcharges
-// a customer who should have gotten the founding rate). getFoundingOffer()
-// below collapses both into null for callers that don't need the
-// distinction (the pricing page just hides the block either way); callers
-// that charge money (checkout) should use getFoundingOfferResult() instead.
-export type FoundingOfferResult =
-  | { status: "available"; offer: FoundingOffer }
-  | { status: "exhausted" }
-  | { status: "unavailable"; reason: string };
+export type { FoundingOffer, FoundingOfferResult };
+
+// getFoundingOffer() collapses every non-available state into null for callers
+// that don't need the distinction (the pricing page just hides the block
+// either way); callers that charge money (checkout) must use
+// getFoundingOfferResult() and route it through planCheckout(), which is the
+// only thing that knows a sellout from a misconfiguration from an outage.
 
 // Cached separately from the validation logic in getFoundingOffer below: only
 // the raw Stripe round-trip is memoized, so a transient Stripe error never
@@ -70,69 +74,55 @@ const getCachedCoupon = unstable_cache(
 async function resolveFoundingOffer(): Promise<FoundingOfferResult> {
   const couponId = process.env.STRIPE_FOUNDING_COUPON_ID;
   if (!couponId) {
-    console.warn(
-      "getFoundingOffer: STRIPE_FOUNDING_COUPON_ID is not set in this environment — founding block hidden. BROKEN, not sold out."
-    );
-    return { status: "unavailable", reason: "STRIPE_FOUNDING_COUPON_ID is not set" };
+    const result: FoundingOfferResult = {
+      status: "misconfigured",
+      couponId: null,
+      reason: "STRIPE_FOUNDING_COUPON_ID is not set in this environment",
+    };
+    logResult(result);
+    return result;
   }
 
+  let result: FoundingOfferResult;
   try {
-    const coupon = await getCachedCoupon(couponId);
-
-    if ("deleted" in coupon) {
-      console.warn(
-        `getFoundingOffer: coupon ${couponId} is deleted in Stripe — founding block hidden. BROKEN, not sold out.`
-      );
-      return { status: "unavailable", reason: `coupon ${couponId} is deleted in Stripe` };
-    }
-    // Stripe often flips valid=false on exhaustion before the explicit
-    // redemption-count check below is ever reached, so this path is not
-    // automatically "broken" — read the coupon before concluding either way.
-    // Not treated as confirmed exhaustion here either, for the same reason.
-    if (!coupon.valid) {
-      console.warn(
-        `getFoundingOffer: coupon ${couponId} reports valid=false (expired via redeem_by, or Stripe already marked it exhausted) — founding block hidden. Check redeem_by before assuming sold out.`
-      );
-      return {
-        status: "unavailable",
-        reason: `coupon ${couponId} reports valid=false (expired via redeem_by, or exhausted) — not confirmed as genuine sellout`,
-      };
-    }
-    if (coupon.max_redemptions != null && coupon.times_redeemed >= coupon.max_redemptions) {
-      console.warn(
-        `getFoundingOffer: coupon ${couponId} exhausted at ${coupon.times_redeemed}/${coupon.max_redemptions} redemptions — founding block hidden. SOLD OUT, working as intended.`
-      );
-      return { status: "exhausted" };
-    }
-    if (coupon.amount_off == null) {
-      console.warn(
-        `getFoundingOffer: coupon ${couponId} has no amount_off (percent_off=${coupon.percent_off}) — founding block hidden. BROKEN: this page renders fixed-amount coupons only.`
-      );
-      return {
-        status: "unavailable",
-        reason: `coupon ${couponId} has no amount_off (percent_off=${coupon.percent_off})`,
-      };
-    }
-
-    const slotsLeft =
-      coupon.max_redemptions != null ? coupon.max_redemptions - coupon.times_redeemed : null;
-
-    return { status: "available", offer: { amountOffCents: coupon.amount_off, slotsLeft, couponId } };
+    result = classifyCoupon(await getCachedCoupon(couponId), couponId);
   } catch (err) {
-    console.error(
-      `getFoundingOffer: failed to retrieve Stripe coupon ${couponId} — founding block hidden. BROKEN, not sold out. Most likely a test/live mode mismatch between STRIPE_SECRET_KEY and this coupon:`,
-      err
-    );
-    return {
-      status: "unavailable",
-      reason: `failed to retrieve Stripe coupon ${couponId}: ${err instanceof Error ? err.message : String(err)}`,
-    };
+    result = classifyCouponError(err, couponId);
+    // The raw error only matters for the retryable case — a 404 is fully
+    // described by the reason string, and logging a stack for a typo'd env var
+    // buries the one line that actually tells you what to fix.
+    if (result.status === "unknown") console.error("getFoundingOffer: Stripe call failed:", err);
+  }
+  logResult(result);
+  return result;
+}
+
+// One place to say what each state means operationally, so the log line and
+// the behaviour can't drift apart.
+function logResult(result: FoundingOfferResult): void {
+  switch (result.status) {
+    case "available":
+      return;
+    case "exhausted":
+      console.warn(
+        "getFoundingOffer: founding coupon is fully redeemed — founding block hidden and checkout will sell at list price. SOLD OUT, working as intended."
+      );
+      return;
+    case "misconfigured":
+      console.error(
+        `getFoundingOffer: founding coupon is MISCONFIGURED — founding block hidden and checkout will sell at LIST PRICE (an alert is sent from the checkout route). This does not fix itself: ${result.reason}`
+      );
+      return;
+    case "unknown":
+      console.error(
+        `getFoundingOffer: could not determine founding coupon state — founding block hidden and checkout will REFUSE the sale until this clears. Not sold out, may resolve on retry: ${result.reason}`
+      );
+      return;
   }
 }
 
 export async function getFoundingOffer(): Promise<FoundingOffer | null> {
-  const result = await resolveFoundingOffer();
-  return result.status === "available" ? result.offer : null;
+  return offerFromResult(await resolveFoundingOffer());
 }
 
 // For callers where treating "couldn't tell" the same as "sold out" would be

@@ -26,6 +26,41 @@ export async function sendAlertEmail(subject: string, text: string): Promise<voi
   }
 }
 
+// Fires from app/api/stripe/checkout when the founding coupon is
+// deterministically broken rather than sold out — a wrong/deleted coupon id, a
+// test/live key mismatch, an unset env var, or a coupon that isn't a
+// fixed-amount discount. Checkout keeps selling at list price through all of
+// those (a typo must not take revenue to zero), so without this email the
+// failure is completely silent: /pricing simply stops showing the founding
+// block and every founding buyer quietly pays full price.
+//
+// Deliberately NOT fired for a fully-redeemed coupon — that's the program
+// working as designed, not something to page about.
+export async function alertFoundingCouponMisconfigured(params: {
+  couponId: string | null;
+  reason: string;
+}): Promise<void> {
+  const { couponId, reason } = params;
+  await sendAlertEmail(
+    "KombatDesk: founding coupon is misconfigured — checkout is selling at LIST PRICE",
+    [
+      `The founding coupon could not be resolved, and the failure is deterministic — a retry will NOT fix it.`,
+      ``,
+      `Reason: ${reason}`,
+      `Coupon ID read from STRIPE_FOUNDING_COUPON_ID: ${couponId ?? "(env var not set)"}`,
+      ``,
+      `Current behaviour: /pricing has dropped the founding block entirely, and checkout is completing at LIST PRICE with no discount attached. Sales are still going through — this is not an outage — but nobody can get the founding rate until it's fixed, and anyone buying right now is paying full price.`,
+      ``,
+      `Most likely causes, in order:`,
+      `  1. STRIPE_FOUNDING_COUPON_ID has a typo, or points at a coupon that was deleted.`,
+      `  2. STRIPE_FOUNDING_COUPON_ID names a live-mode coupon while STRIPE_SECRET_KEY is a test key, or vice versa. Stripe reports both as a 404.`,
+      `  3. The env var is set in one Vercel environment (Production/Preview) but not the other.`,
+      ``,
+      `Stripe coupons are immutable except for name/metadata/currency_options — max_redemptions cannot be edited. If the coupon needs different terms, create a NEW coupon and repoint STRIPE_FOUNDING_COUPON_ID at it in BOTH Vercel Production and Preview, then redeploy.`,
+    ].join("\n")
+  );
+}
+
 // Fires only from Convex (stripeWebhookAction.ts / subscriptions.ts) — that's
 // the only side that ever resolves a Stripe priceId back to a plan slug.
 export async function alertUnresolvedPrice(params: {
