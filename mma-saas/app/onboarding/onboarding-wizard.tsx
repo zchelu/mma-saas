@@ -61,9 +61,17 @@ function StepHeader({ step, plan, labels }: { step: number; plan: string; labels
 export default function OnboardingWizard({
   initialPlan,
   priceIdByPlan,
+  repairMode = false,
 }: {
   initialPlan: string;
   priceIdByPlan: Record<string, string | undefined>;
+  // True only for a gym that already has an active/trialing plan but no slug —
+  // the guest-checkout dead-gym state (see app/onboarding/page.tsx). These
+  // owners have already paid; the wizard exists for them purely to capture the
+  // gym name so completeOnboarding can assign a slug and bring the consent page
+  // to life. THEY MUST NOT BE SENT TO STRIPE AGAIN — doing so creates a second
+  // subscription on the same customer.
+  repairMode?: boolean;
 }) {
   const plan = initialPlan;
   // No renamed tier skips the consent step: every academy/fightteam/blackbelt
@@ -98,6 +106,16 @@ export default function OnboardingWizard({
         ownerEmail: user?.primaryEmailAddress?.emailAddress,
       });
 
+      // Repair path: the subscription already exists and is active. The only
+      // thing that was missing is the gym name, and completeOnboarding above
+      // has now set it and generated the slug. Going on to /api/stripe/checkout
+      // here would open a SECOND subscription for a customer who is already
+      // paying — the one outcome worse than the dead-gym state this repairs.
+      if (repairMode) {
+        window.location.href = "/dashboard";
+        return;
+      }
+
       const priceId = priceIdByPlan[plan];
       if (!priceId) throw new Error("That plan isn't available right now.");
 
@@ -131,6 +149,15 @@ export default function OnboardingWizard({
           <h1 className="text-2xl font-bold mb-2" style={{ color: "#FFFFFF" }}>
             Tell us about your gym
           </h1>
+          {repairMode && (
+            <p
+              className="text-sm leading-relaxed rounded-lg p-4 mb-1"
+              style={{ color: "#CCCCCC", border: "1px solid #333333", backgroundColor: "#1A1A1A" }}
+            >
+              Your subscription is already active — nothing here will charge you. We just
+              need your gym&apos;s name to finish setting up your member consent page.
+            </p>
+          )}
           <input
             value={gymName}
             onChange={(e) => setGymName(e.target.value)}
@@ -207,7 +234,19 @@ export default function OnboardingWizard({
 
           {error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
 
-          <RenewalDisclosure plan={plan} />
+          {/* C.R.S. 6-1-732 wants the auto-renewal terms adjacent to the
+              ENROLLMENT button. In repair mode this button doesn't enroll
+              anyone — the subscription already exists — so showing "30-day free
+              trial, then $X/month" here would state terms that are no longer
+              the ones taking effect. Say what this button actually does. */}
+          {repairMode ? (
+            <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
+              This finishes your setup. Your existing subscription is unchanged and you
+              will not be charged again here.
+            </p>
+          ) : (
+            <RenewalDisclosure plan={plan} />
+          )}
 
           <div className="flex gap-3 mt-2">
             <button
@@ -226,7 +265,7 @@ export default function OnboardingWizard({
               className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
-              {submitting ? "Setting up…" : "Continue to payment"}
+              {submitting ? "Setting up…" : repairMode ? "Finish setup" : "Continue to payment"}
             </button>
           </div>
         </div>

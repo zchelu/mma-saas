@@ -406,6 +406,7 @@ export const getSubscription = query({
         stripeCustomerId: null,
         stripeSubscriptionId: null,
         onboardingCompleted: false,
+        hasSlug: false,
         gymId: null,
         createdAt: null,
       };
@@ -420,6 +421,16 @@ export const getSubscription = query({
       stripeCustomerId: gym?.stripeCustomerId ?? null,
       stripeSubscriptionId: gym?.stripeSubscriptionId ?? null,
       onboardingCompleted: gym?.onboardingCompleted ?? false,
+      // Exposed for app/onboarding/page.tsx's redirect guard, which must let a
+      // paying-but-slugless gym back into the wizard. A gym with no slug has no
+      // /consent/[gymSlug] page, so no member can ever confirm consent and the
+      // gym can never send a single retention text — the entire product, dead,
+      // on a paid subscription (see claude/guest-checkout-dead-gym-trap.md).
+      // slug is only ever assigned by onboarding.completeOnboarding from a real
+      // gym name, so "has a slug" also implies "has a name" — which getBySlug
+      // requires before it will resolve the consent page at all. Boolean rather
+      // than the slug itself: nothing client-side needs the value here.
+      hasSlug: !!gym?.slug,
       // Exposed for app/dashboard/winback-panel.tsx: the panel's default range
       // start is this gym's own createdAt, not a trailing window — see that
       // file for why.

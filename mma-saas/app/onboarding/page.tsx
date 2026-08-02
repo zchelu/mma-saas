@@ -32,7 +32,27 @@ export default async function OnboardingPage({
   // permanently landing on a fake unpurchased plan.
   const hasActivePlan =
     subscription.planStatus === "active" || subscription.planStatus === "trialing";
-  if ((subscription.onboardingCompleted || subscription.stripeCustomerId) && hasActivePlan) {
+
+  // A paying gym with no slug is the guest-checkout dead-gym state: slug is
+  // assigned in exactly one place (onboarding.completeOnboarding), the guest
+  // path never mounts this wizard, and no slug means no /consent/[gymSlug]
+  // page, which means no member can ever confirm SMS consent, which means the
+  // gym can never send a retention text. Before this guard existed the redirect
+  // below bounced them to /dashboard on sight, so there was no in-app route to
+  // ever set the name — a paid subscription permanently unable to do the one
+  // thing it was bought for. See claude/guest-checkout-dead-gym-trap.md.
+  //
+  // Letting them back in is only safe because the wizard is told not to charge
+  // them again — see repairMode below. Without that they'd be walked into a
+  // second Stripe subscription, which is a far worse failure than the one this
+  // fixes.
+  const needsSetupRepair = hasActivePlan && !subscription.hasSlug;
+
+  if (
+    (subscription.onboardingCompleted || subscription.stripeCustomerId) &&
+    hasActivePlan &&
+    !needsSetupRepair
+  ) {
     redirect("/dashboard");
   }
 
@@ -48,7 +68,11 @@ export default async function OnboardingPage({
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
-      <OnboardingWizard initialPlan={initialPlan} priceIdByPlan={priceIdByPlan} />
+      <OnboardingWizard
+        initialPlan={initialPlan}
+        priceIdByPlan={priceIdByPlan}
+        repairMode={needsSetupRepair}
+      />
     </div>
   );
 }
