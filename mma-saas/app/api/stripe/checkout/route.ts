@@ -8,7 +8,12 @@ import { readJsonBody } from "@/lib/http";
 import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
 import { getFoundingOfferResult } from "@/lib/foundingOffer";
 import { planCheckout } from "@/lib/foundingOfferPolicy";
-import { alertFoundingCouponMisconfigured, sendAlertEmail } from "@/lib/alerts";
+import {
+  alertCheckoutDown,
+  alertFoundingCouponMisconfigured,
+  sendAlertEmail,
+  shouldDeliverOutageAlert,
+} from "@/lib/alerts";
 
 export async function POST(request: NextRequest) {
   // checkRateLimit is internalMutation now — this goes through the
@@ -59,26 +64,40 @@ export async function POST(request: NextRequest) {
   const foundingOfferResult = await getFoundingOfferResult();
   const checkoutPlan = planCheckout(foundingOfferResult);
 
-  if (!checkoutPlan.proceed) {
-    console.error(
-      "Stripe checkout: founding coupon state is unknown (Stripe unreachable, may resolve on retry) — refusing to create a full-price session silently:",
-      foundingOfferResult.status === "unknown" ? foundingOfferResult.reason : foundingOfferResult.status
-    );
-    return NextResponse.json(
-      { error: "Something went wrong setting up checkout. Please try again in a moment." },
-      { status: 503 }
-    );
-  }
-
-  // Deterministic config error. The sale goes through at list price rather
-  // than failing — but awaited, not fire-and-forget, so a checkout can't
-  // outrun the alert and leave the misconfiguration completely silent.
-  if (checkoutPlan.alert) {
+  // Awaited, not fire-and-forget, so a response can't outrun its alert and
+  // leave the failure completely silent. Both kinds are sent before responding.
+  if (checkoutPlan.alert?.kind === "misconfigured") {
+    // Deterministic config error. The sale still goes through at list price.
     console.error(
       "Stripe checkout: founding coupon is misconfigured — selling at LIST PRICE and alerting:",
       checkoutPlan.alert.reason
     );
     await alertFoundingCouponMisconfigured(checkoutPlan.alert);
+  } else if (checkoutPlan.alert?.kind === "outage") {
+    // Stripe unreachable. This refuses the sale below, so it is the loud one.
+    // Logged in every environment; emailed only from production. Preview has
+    // no Stripe key by design (see shouldDeliverOutageAlert), so an outage
+    // alert from there would be a false alarm about intended behavior.
+    const deliver = shouldDeliverOutageAlert(process.env.VERCEL_ENV);
+    console.error(
+      `Stripe checkout: founding coupon state is unknown (Stripe unreachable, may resolve on retry) — REFUSING the sale${deliver ? " and alerting" : "; alert email suppressed outside production"}:`,
+      checkoutPlan.alert.reason
+    );
+    if (deliver) {
+      await alertCheckoutDown({
+        source: "api/stripe/checkout",
+        ...checkoutPlan.alert,
+        vercelEnv: process.env.VERCEL_ENV,
+        deploymentUrl: process.env.VERCEL_URL,
+      });
+    }
+  }
+
+  if (!checkoutPlan.proceed) {
+    return NextResponse.json(
+      { error: "Something went wrong setting up checkout. Please try again in a moment." },
+      { status: 503 }
+    );
   }
 
   const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;

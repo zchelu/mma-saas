@@ -45,7 +45,10 @@ export type FoundingOfferResult =
   | { status: "available"; offer: FoundingOffer }
   | { status: "exhausted" }
   | { status: "misconfigured"; couponId: string | null; reason: string }
-  | { status: "unknown"; reason: string };
+  // errorType/statusCode are carried so the outage alert can be diagnosed from
+  // the email alone — a 401 (revoked key, never self-heals) and a 503 (Stripe
+  // outage, self-heals) both land here and want opposite responses.
+  | { status: "unknown"; couponId: string; reason: string; errorType: string; statusCode?: number };
 
 export function classifyCoupon(
   coupon: Stripe.Coupon | Stripe.DeletedCoupon,
@@ -118,7 +121,29 @@ export function classifyCouponError(err: unknown, couponId: string): FoundingOff
   }
   return {
     status: "unknown",
+    couponId,
     reason: `failed to retrieve Stripe coupon ${couponId}: ${err instanceof Error ? err.message : String(err)}`,
+    ...stripeErrorMeta(err),
+  };
+}
+
+// Stripe SDK errors expose `type` ("StripeAuthenticationError",
+// "StripeRateLimitError", …) and `statusCode`. Both are read duck-typed to keep
+// this module free of runtime imports. A raw network failure has neither, so
+// the JS constructor name stands in — the alert still names a class either way.
+function stripeErrorMeta(err: unknown): { errorType: string; statusCode?: number } {
+  const e = (typeof err === "object" && err !== null ? err : {}) as {
+    type?: unknown;
+    statusCode?: unknown;
+  };
+  return {
+    errorType:
+      typeof e.type === "string"
+        ? e.type
+        : err instanceof Error
+          ? err.constructor.name
+          : typeof err,
+    ...(typeof e.statusCode === "number" ? { statusCode: e.statusCode } : {}),
   };
 }
 
@@ -136,13 +161,22 @@ export function offerFromResult(result: FoundingOfferResult): FoundingOffer | nu
   return result.status === "available" ? result.offer : null;
 }
 
+// Two different alerts, because the two states need opposite reactions and a
+// single generic "coupon problem" subject line buries the one that matters:
+//   misconfigured -> sales continue at list price. Fix it today, not tonight.
+//   outage        -> EVERY sale is being refused. Fix it now.
+export type CheckoutAlert =
+  | { kind: "misconfigured"; couponId: string | null; reason: string }
+  | { kind: "outage"; couponId: string; reason: string; errorType: string; statusCode?: number };
+
 export type CheckoutPlan = {
   // false => refuse the sale (503). Only ever set for status "unknown".
   proceed: boolean;
   // The coupon to attach, or null to sell at list price.
   couponId: string | null;
-  // Non-null => fire the misconfiguration alert before proceeding.
-  alert: { couponId: string | null; reason: string } | null;
+  // Non-null => fire this alert before responding. Fires on both the
+  // proceed-at-list-price path and the refuse path; `kind` selects which email.
+  alert: CheckoutAlert | null;
 };
 
 // The checkout side of the invariant. Note that `couponId` is non-null in
@@ -163,9 +197,23 @@ export function planCheckout(result: FoundingOfferResult): CheckoutPlan {
       return {
         proceed: true,
         couponId: null,
-        alert: { couponId: result.couponId, reason: result.reason },
+        alert: { kind: "misconfigured", couponId: result.couponId, reason: result.reason },
       };
     case "unknown":
-      return { proceed: false, couponId: null, alert: null };
+      // Refuses the sale AND shouts. Without the alert this state was the one
+      // silent failure left in the design: a revoked Stripe key 503s every
+      // checkout indefinitely, /pricing stays up looking healthy, and nothing
+      // anywhere reports it until a customer complains.
+      return {
+        proceed: false,
+        couponId: null,
+        alert: {
+          kind: "outage",
+          couponId: result.couponId,
+          reason: result.reason,
+          errorType: result.errorType,
+          ...(result.statusCode !== undefined ? { statusCode: result.statusCode } : {}),
+        },
+      };
   }
 }

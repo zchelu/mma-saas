@@ -16,6 +16,7 @@
 // session objects read back from the API.
 import { describe, expect, test } from "vitest";
 import type Stripe from "stripe";
+import { shouldDeliverOutageAlert } from "./alerts";
 import {
   classifyCoupon,
   classifyCouponError,
@@ -46,6 +47,16 @@ function coupon(over: Partial<Stripe.Coupon> = {}): Stripe.Coupon {
     ...over,
   } as Stripe.Coupon;
 }
+
+// The shape classifyCouponError produces for a revoked/rolled Stripe key —
+// the case the outage alert exists for.
+const UNKNOWN: FoundingOfferResult = {
+  status: "unknown",
+  couponId: "founding-5-gyms-50off",
+  reason: "failed to retrieve Stripe coupon founding-5-gyms-50off: Invalid API Key",
+  errorType: "StripeAuthenticationError",
+  statusCode: 401,
+};
 
 describe("classifyCoupon", () => {
   test("a live coupon with slots left is available, with the amount read off Stripe", () => {
@@ -112,6 +123,28 @@ describe("classifyCouponError", () => {
     expect(result).toMatchObject({ couponId: "founding-5-gyms-50of" });
   });
 
+  // Captured off a real StripeAuthenticationError on 2026-08-01: the alert has
+  // to name the class and status or a revoked key is undiagnosable from email.
+  test("a revoked key carries the Stripe error class and status through to the alert", () => {
+    const err = Object.assign(new Error("Invalid API Key provided: sk_live_***"), {
+      type: "StripeAuthenticationError",
+      statusCode: 401,
+    });
+    const result = classifyCouponError(err, "founding-5-gyms-50off");
+    expect(result).toMatchObject({
+      status: "unknown",
+      couponId: "founding-5-gyms-50off",
+      errorType: "StripeAuthenticationError",
+      statusCode: 401,
+    });
+  });
+
+  test("a bare network failure still names a class, and omits statusCode", () => {
+    const result = classifyCouponError(new Error("ECONNRESET"), "c_1");
+    expect(result).toMatchObject({ status: "unknown", errorType: "Error" });
+    expect(result).not.toHaveProperty("statusCode");
+  });
+
   test("a bare 404 with no code is still misconfigured", () => {
     const result = classifyCouponError(Object.assign(new Error("nope"), { statusCode: 404 }), "c_1");
     expect(result.status).toBe("misconfigured");
@@ -154,14 +187,66 @@ describe("planCheckout", () => {
     const plan = planCheckout({ status: "misconfigured", couponId: "typo", reason: "404" });
     expect(plan.proceed).toBe(true);
     expect(plan.couponId).toBeNull();
-    expect(plan.alert).toEqual({ couponId: "typo", reason: "404" });
+    expect(plan.alert).toEqual({ kind: "misconfigured", couponId: "typo", reason: "404" });
   });
 
   test("unknown -> refuse. This guard must NOT be downgraded", () => {
-    const plan = planCheckout({ status: "unknown", reason: "ECONNRESET" });
+    const plan = planCheckout(UNKNOWN);
     expect(plan.proceed).toBe(false);
     expect(plan.couponId).toBeNull();
-    expect(plan.alert).toBeNull();
+  });
+
+  // REGRESSION: the last silent failure in the design. A revoked Stripe key
+  // 503s every checkout indefinitely while /pricing stays up looking healthy;
+  // before this, nothing anywhere reported it until a customer complained.
+  test("REGRESSION: unknown alerts AND still refuses the sale", () => {
+    const plan = planCheckout(UNKNOWN);
+
+    expect(plan.proceed).toBe(false); // still 503 — the refusal is not traded away
+    expect(plan.alert).toEqual({
+      kind: "outage",
+      couponId: "founding-5-gyms-50off",
+      reason: "failed to retrieve Stripe coupon founding-5-gyms-50off: Invalid API Key",
+      errorType: "StripeAuthenticationError",
+      statusCode: 401,
+    });
+  });
+
+  test("the outage alert is a different kind from the misconfigured one", () => {
+    expect(planCheckout(UNKNOWN).alert?.kind).toBe("outage");
+    expect(
+      planCheckout({ status: "misconfigured", couponId: "typo", reason: "404" }).alert?.kind
+    ).toBe("misconfigured");
+  });
+
+  // The gate is a DELIVERY concern, not a policy one — planCheckout stays pure
+  // and env-blind, and the route decides whether the intent becomes an email.
+  // Preview has no Stripe key by design, so every preview checkout would
+  // otherwise page "CHECKOUT IS DOWN" about intended behavior.
+  test("REGRESSION: outage intent is env-blind; only delivery is gated", () => {
+    const plan = planCheckout(UNKNOWN);
+
+    // Unchanged in every environment: still refuses, still emits the intent.
+    expect(plan.proceed).toBe(false);
+    expect(plan.alert?.kind).toBe("outage");
+
+    // Only the send is suppressed.
+    expect(shouldDeliverOutageAlert("production")).toBe(true);
+    expect(shouldDeliverOutageAlert("preview")).toBe(false);
+    expect(shouldDeliverOutageAlert("development")).toBe(false);
+    expect(shouldDeliverOutageAlert(undefined)).toBe(false);
+  });
+
+  test("an unknown with no statusCode still alerts", () => {
+    const plan = planCheckout({
+      status: "unknown",
+      couponId: "c_1",
+      reason: "ECONNRESET",
+      errorType: "Error",
+    });
+    expect(plan.proceed).toBe(false);
+    expect(plan.alert?.kind).toBe("outage");
+    expect(plan.alert).not.toHaveProperty("statusCode");
   });
 });
 
@@ -171,7 +256,7 @@ describe("INVARIANT: /pricing and checkout agree about the founding offer", () =
     { status: "exhausted" },
     { status: "misconfigured", couponId: "typo", reason: "404 resource_missing" },
     { status: "misconfigured", couponId: null, reason: "env var not set" },
-    { status: "unknown", reason: "ECONNRESET" },
+    UNKNOWN,
   ];
 
   // The core contract: checkout attaches a discount if and only if /pricing
@@ -194,7 +279,16 @@ describe("INVARIANT: /pricing and checkout agree about the founding offer", () =
     else expect(planCheckout(result).proceed).toBe(true);
   });
 
-  test.each(everyState)("$status: an alert fires only when misconfigured", (result) => {
-    expect(planCheckout(result).alert !== null).toBe(result.status === "misconfigured");
+  // Every state that is not a healthy offer or an intended sellout is now
+  // reported. "available" and "exhausted" are the only two silent states, and
+  // both are silent because they are working as designed.
+  test.each(everyState)("$status: an alert fires unless the state is normal", (result) => {
+    const isNormal = result.status === "available" || result.status === "exhausted";
+    expect(planCheckout(result).alert !== null).toBe(!isNormal);
+  });
+
+  test.each(everyState)("$status: a refused sale is never silent", (result) => {
+    const plan = planCheckout(result);
+    if (!plan.proceed) expect(plan.alert).not.toBeNull();
   });
 });

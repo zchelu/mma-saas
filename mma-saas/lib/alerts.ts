@@ -2,6 +2,7 @@ const ALERT_TO = "kombatdesk@outlook.com";
 const ALERT_FROM = "KombatDesk <billing@kombatdesk.com>";
 const PRICE_ENV_VAR_NAMES =
   "STRIPE_STARTER_PRICE_ID, STRIPE_PRO_PRICE_ID, STRIPE_ELITE_PRICE_ID";
+const ALERT_SEND_TIMEOUT_MS = 5000;
 
 // Raw fetch to Resend's REST API, not the SDK — so this same function works
 // unmodified from a Convex action (either runtime) and from Next server code,
@@ -12,6 +13,12 @@ export async function sendAlertEmail(subject: string, text: string): Promise<voi
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: ALERT_FROM, to: ALERT_TO, subject, text }),
+      // Callers await this before responding — deliberately, since a
+      // fire-and-forget send can be killed when a serverless response returns,
+      // and delivery matters more than latency on an already-failing request.
+      // The bound is only so a hung Resend can't hold that response open
+      // indefinitely; a timeout lands in the catch below and is logged.
+      signal: AbortSignal.timeout(ALERT_SEND_TIMEOUT_MS),
     });
     // fetch only rejects on network failure — a 4xx/5xx from Resend (bad key,
     // unverified from-address) resolves normally and would otherwise vanish
@@ -54,9 +61,80 @@ export async function alertFoundingCouponMisconfigured(params: {
       `Most likely causes, in order:`,
       `  1. STRIPE_FOUNDING_COUPON_ID has a typo, or points at a coupon that was deleted.`,
       `  2. STRIPE_FOUNDING_COUPON_ID names a live-mode coupon while STRIPE_SECRET_KEY is a test key, or vice versa. Stripe reports both as a 404.`,
-      `  3. The env var is set in one Vercel environment (Production/Preview) but not the other.`,
+      `  3. The var is missing from Vercel Production. It is scoped to Production ONLY by design — do NOT add it to Preview.`,
       ``,
-      `Stripe coupons are immutable except for name/metadata/currency_options — max_redemptions cannot be edited. If the coupon needs different terms, create a NEW coupon and repoint STRIPE_FOUNDING_COUPON_ID at it in BOTH Vercel Production and Preview, then redeploy.`,
+      `Stripe coupons are immutable except for name/metadata/currency_options — max_redemptions cannot be edited. If the coupon needs different terms, create a NEW coupon and repoint STRIPE_FOUNDING_COUPON_ID at it in Vercel PRODUCTION ONLY, then redeploy. Never set any Stripe var on Preview: a preview deploy with a live key can charge a real card and permanently burn a founding slot.`,
+    ].join("\n")
+  );
+}
+
+// Whether an outage alert should actually be DELIVERED, as opposed to merely
+// intended. Pure and env-injected so it can be tested without touching
+// process.env; the route supplies process.env.VERCEL_ENV.
+//
+// The six server-side Stripe vars are scoped to Vercel Production only —
+// Preview deliberately has no Stripe key, so that a preview deploy can never
+// charge a real card or burn a live founding slot. The consequence is that on
+// Preview the founding coupon is permanently unresolvable, which is CORRECT
+// behavior, not an incident. Without this gate every preview checkout would
+// email "CHECKOUT IS DOWN" about a system working exactly as designed, and the
+// alert that matters would get filtered as noise.
+//
+// Deliberately gates delivery ONLY. The 503, the console.error, and
+// planCheckout's alert intent are unchanged in every environment — preview
+// still fails loudly in logs, it just doesn't page anyone.
+export function shouldDeliverOutageAlert(vercelEnv: string | undefined): boolean {
+  return vercelEnv === "production";
+}
+
+// The companion to alertFoundingCouponMisconfigured, for the state where the
+// coupon's condition can't be read at all rather than read and found wrong.
+// Named for the impact, not the cause: this one means NO SALES ARE COMPLETING,
+// which is a different order of urgency from "the founding rate isn't applying"
+// and must not read like another coupon nag in an inbox.
+//
+// Deliberately NOT throttled or deduplicated — one email per blocked checkout,
+// matching alertUnresolvedPrice above. At current traffic that's a handful of
+// messages, and the volume is itself the signal.
+export async function alertCheckoutDown(params: {
+  source: "api/stripe/checkout";
+  couponId: string;
+  reason: string;
+  errorType: string;
+  statusCode?: number;
+  vercelEnv?: string;
+  deploymentUrl?: string;
+}): Promise<void> {
+  const { source, couponId, reason, errorType, statusCode, vercelEnv, deploymentUrl } = params;
+  await sendAlertEmail(
+    "KombatDesk: CHECKOUT IS DOWN — every sale is being refused",
+    [
+      `Checkout is returning 503 to EVERY visitor right now, including buyers who would have paid full price. No one can complete a purchase until this clears.`,
+      ``,
+      `KombatDesk could not determine the founding coupon's state, and the failure is the kind that may resolve on retry. It is NOT a wrong or deleted coupon id — that case is handled separately and keeps selling at list price. Because the state is genuinely unknown here, checkout refuses rather than risk charging list price to someone /pricing may have just promised a discount. That guard is correct. The outage behind it is not.`,
+      ``,
+      `Fired from: ${source}`,
+      // Delivery is gated to production (see shouldDeliverOutageAlert), so this
+      // should always read "production" — if it ever doesn't, the gate leaked
+      // and that is itself the bug to chase.
+      `Environment: ${vercelEnv ?? "(VERCEL_ENV not set — local dev)"}`,
+      `Deployment: ${deploymentUrl ?? "(VERCEL_URL not set)"}`,
+      `Coupon ID read from STRIPE_FOUNDING_COUPON_ID: ${couponId}`,
+      `Stripe error class: ${errorType}`,
+      `Stripe HTTP status: ${statusCode ?? "(no response — request never completed)"}`,
+      `Detail: ${reason}`,
+      ``,
+      `WHAT TO DO, by status:`,
+      `  401  STRIPE_SECRET_KEY is invalid, revoked, or was rolled. This will NOT`,
+      `       recover on its own. Set a working key in Vercel PRODUCTION ONLY,`,
+      `       then redeploy. Do NOT add a Stripe key to Preview — previews are`,
+      `       meant to fail here; a Preview key would let a preview deploy charge`,
+      `       a real card and permanently consume a founding slot.`,
+      `  429  Stripe rate limit. Usually clears within minutes on its own.`,
+      `  5xx  Stripe-side outage. Check https://status.stripe.com — self-resolving.`,
+      `  none No response at all: network/DNS failure reaching Stripe from Vercel.`,
+      ``,
+      `/pricing is still up and has already hidden the founding block, so nobody is being shown an offer they can't buy. The damage is confined to checkout.`,
     ].join("\n")
   );
 }
