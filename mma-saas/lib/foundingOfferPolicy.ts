@@ -156,6 +156,35 @@ function isMissingResourceError(err: unknown): boolean {
   return e.code === "resource_missing" || e.statusCode === 404;
 }
 
+// errorType for the one failure the Stripe SDK can never report itself: with no
+// STRIPE_SECRET_KEY the client cannot be constructed, so there is no request, no
+// response, and no Stripe error object. Named rather than inlined so
+// lib/alerts.ts can branch its remediation copy on the same constant.
+export const MISSING_API_KEY = "MissingStripeApiKey";
+
+// STRIPE_SECRET_KEY absent entirely. Not a coupon state — but operationally
+// identical to "unknown": we cannot determine whether an offer exists, so
+// checkout must refuse rather than guess, and it must say so out loud.
+//
+// Modeled as unknown with no statusCode, because there is no HTTP exchange to
+// have a status. Distinct from a 401: an invalid key means a key was sent and
+// rejected (rotate it), a missing key means none was ever configured for this
+// environment (set it). Neither self-heals, but the remediation differs.
+//
+// Exists because new Stripe(undefined!) throws synchronously, above the route's
+// try/catch and above all of this classification — a missing key produced a raw
+// 500 with a stack trace, no 503, and no alert. That is a silent outage, which
+// is the exact failure alertCheckoutDown was added to prevent.
+export function missingApiKeyResult(couponId: string | undefined): FoundingOfferResult {
+  return {
+    status: "unknown",
+    couponId: couponId ?? "(STRIPE_FOUNDING_COUPON_ID is not set either)",
+    reason:
+      "STRIPE_SECRET_KEY is not set in this environment — the Stripe client cannot be constructed, so no Stripe call was attempted at all",
+    errorType: MISSING_API_KEY,
+  };
+}
+
 // What /pricing sees. Any non-available state hides the founding block.
 export function offerFromResult(result: FoundingOfferResult): FoundingOffer | null {
   return result.status === "available" ? result.offer : null;

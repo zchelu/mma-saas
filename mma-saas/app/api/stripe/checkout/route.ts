@@ -7,7 +7,7 @@ import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
 import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
 import { getFoundingOfferResult } from "@/lib/foundingOffer";
-import { planCheckout } from "@/lib/foundingOfferPolicy";
+import { missingApiKeyResult, planCheckout } from "@/lib/foundingOfferPolicy";
 import {
   alertCheckoutDown,
   alertFoundingCouponMisconfigured,
@@ -30,7 +30,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  // Read, don't construct. `new Stripe(undefined!)` throws synchronously —
+  // above the try/catch and above the four-state classification below — so a
+  // missing key used to produce a raw 500 with a stack trace, no 503, and no
+  // alert: a silent outage, which is exactly what alertCheckoutDown exists to
+  // catch. The client is constructed further down, only once the key is known
+  // to be present. See missingApiKeyResult in lib/foundingOfferPolicy.ts.
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   const user = await currentUser();
 
   const body = await readJsonBody<{ priceId?: string }>(request);
@@ -61,7 +67,15 @@ export async function POST(request: NextRequest) {
   // where a retry may still resolve it and we cannot tell what other visitors
   // are being shown — refuses, because falling through there would silently
   // charge list price to someone who was just promised a discount.
-  const foundingOfferResult = await getFoundingOfferResult();
+  // An absent key short-circuits to the same `unknown` state a rejected key
+  // reaches, so both get the identical 503 + alert treatment rather than one
+  // being handled and the other crashing. getFoundingOfferResult would in fact
+  // also land on `unknown` here (its Stripe construction is inside a try), but
+  // it is not called at all without a key — there is nothing it could tell us,
+  // and the explicit result carries far better remediation copy.
+  const foundingOfferResult = stripeSecretKey
+    ? await getFoundingOfferResult()
+    : missingApiKeyResult(process.env.STRIPE_FOUNDING_COUPON_ID);
   const checkoutPlan = planCheckout(foundingOfferResult);
 
   // Awaited, not fire-and-forget, so a response can't outrun its alert and
@@ -80,7 +94,7 @@ export async function POST(request: NextRequest) {
     // alert from there would be a false alarm about intended behavior.
     const deliver = shouldDeliverOutageAlert(process.env.VERCEL_ENV);
     console.error(
-      `Stripe checkout: founding coupon state is unknown (Stripe unreachable, may resolve on retry) — REFUSING the sale${deliver ? " and alerting" : "; alert email suppressed outside production"}:`,
+      `Stripe checkout: founding coupon state is unknown — REFUSING the sale${deliver ? " and alerting" : "; alert email suppressed outside production"}:`,
       checkoutPlan.alert.reason
     );
     if (deliver) {
@@ -93,12 +107,20 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (!checkoutPlan.proceed) {
+  // The `!stripeSecretKey` half is redundant — an absent key always yields
+  // `unknown`, which is the only state that fails to proceed — but it is what
+  // narrows the type below, and it guarantees the client is never constructed
+  // with an empty key no matter how this classification later changes.
+  // Always the same generic body: never leak a stack trace or an env var name
+  // to an anonymous caller.
+  if (!checkoutPlan.proceed || !stripeSecretKey) {
     return NextResponse.json(
       { error: "Something went wrong setting up checkout. Please try again in a moment." },
       { status: 503 }
     );
   }
+
+  const stripe = new Stripe(stripeSecretKey);
 
   const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;
 

@@ -1,3 +1,5 @@
+import { MISSING_API_KEY } from "./foundingOfferPolicy";
+
 const ALERT_TO = "kombatdesk@outlook.com";
 const ALERT_FROM = "KombatDesk <billing@kombatdesk.com>";
 const PRICE_ENV_VAR_NAMES =
@@ -111,7 +113,10 @@ export async function alertCheckoutDown(params: {
     [
       `Checkout is returning 503 to EVERY visitor right now, including buyers who would have paid full price. No one can complete a purchase until this clears.`,
       ``,
-      `KombatDesk could not determine the founding coupon's state, and the failure is the kind that may resolve on retry. It is NOT a wrong or deleted coupon id — that case is handled separately and keeps selling at list price. Because the state is genuinely unknown here, checkout refuses rather than risk charging list price to someone /pricing may have just promised a discount. That guard is correct. The outage behind it is not.`,
+      errorType === MISSING_API_KEY
+        ? `KombatDesk could not determine the founding coupon's state because there is no Stripe key to ask with. This will NOT resolve on its own and no retry will help — it stays broken until the env var is set and the app redeployed.`
+        : `KombatDesk could not determine the founding coupon's state, and the failure is the kind that may resolve on retry.`,
+      `It is NOT a wrong or deleted coupon id — that case is handled separately and keeps selling at list price. Because the state is genuinely unknown here, checkout refuses rather than risk charging list price to someone /pricing may have just promised a discount. That guard is correct. The outage behind it is not.`,
       ``,
       `Fired from: ${source}`,
       // Delivery is gated to production (see shouldDeliverOutageAlert), so this
@@ -121,10 +126,21 @@ export async function alertCheckoutDown(params: {
       `Deployment: ${deploymentUrl ?? "(VERCEL_URL not set)"}`,
       `Coupon ID read from STRIPE_FOUNDING_COUPON_ID: ${couponId}`,
       `Stripe error class: ${errorType}`,
-      `Stripe HTTP status: ${statusCode ?? "(no response — request never completed)"}`,
+      `Stripe HTTP status: ${
+        statusCode ??
+        (errorType === MISSING_API_KEY
+          ? "(no request was made — there was no API key to make it with)"
+          : "(no response — request never completed)")
+      }`,
       `Detail: ${reason}`,
       ``,
       `WHAT TO DO, by status:`,
+      `  ${MISSING_API_KEY}`,
+      `       STRIPE_SECRET_KEY is not set at all for this environment — no key`,
+      `       was sent, so this is NOT a rotation problem. Most likely it was`,
+      `       wiped or mis-pasted during a hand edit of the Vercel env vars. Set`,
+      `       it in Vercel PRODUCTION ONLY and redeploy. Nothing recovers until`,
+      `       you do; there is no retry that can fix an absent key.`,
       `  401  STRIPE_SECRET_KEY is invalid, revoked, or was rolled. This will NOT`,
       `       recover on its own. Set a working key in Vercel PRODUCTION ONLY,`,
       `       then redeploy. Do NOT add a Stripe key to Preview — previews are`,

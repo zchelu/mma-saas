@@ -20,6 +20,8 @@ import { shouldDeliverOutageAlert } from "./alerts";
 import {
   classifyCoupon,
   classifyCouponError,
+  missingApiKeyResult,
+  MISSING_API_KEY,
   offerFromResult,
   planCheckout,
   type FoundingOfferResult,
@@ -235,6 +237,58 @@ describe("planCheckout", () => {
     expect(shouldDeliverOutageAlert("preview")).toBe(false);
     expect(shouldDeliverOutageAlert("development")).toBe(false);
     expect(shouldDeliverOutageAlert(undefined)).toBe(false);
+  });
+
+  // REGRESSION: new Stripe(undefined!) threw synchronously above the route's
+  // try/catch, so an absent STRIPE_SECRET_KEY produced a raw 500 with a stack
+  // trace, no 503, and no alert — a silent outage. Live-verified 2026-08-01
+  // against a stripped env before the fix.
+  describe("REGRESSION: absent STRIPE_SECRET_KEY", () => {
+    test("routes through unknown -> 503 + outage alert intent", () => {
+      const result = missingApiKeyResult("founding-5-gyms-50off");
+      expect(result.status).toBe("unknown");
+
+      const plan = planCheckout(result);
+      expect(plan.proceed).toBe(false); // 503, not a thrown 500
+      expect(plan.alert?.kind).toBe("outage"); // and it is not silent
+    });
+
+    test("carries the missing-key status, distinct from a rejected key", () => {
+      const absent = missingApiKeyResult("c_1");
+      const rejected = classifyCouponError(
+        Object.assign(new Error("Invalid API Key provided"), {
+          type: "StripeAuthenticationError",
+          statusCode: 401,
+        }),
+        "c_1"
+      );
+
+      expect(absent).toMatchObject({ errorType: MISSING_API_KEY });
+      // No HTTP status: no key means no request was ever made to have one.
+      expect(absent).not.toHaveProperty("statusCode");
+
+      // Both are "unknown", but an operator must be able to tell them apart —
+      // rotate a rejected key vs. set an absent one.
+      expect(rejected.status).toBe(absent.status);
+      expect((rejected as { errorType: string }).errorType).not.toBe(MISSING_API_KEY);
+      expect(rejected).toMatchObject({ statusCode: 401 });
+    });
+
+    test("no stack trace or raw error text reaches the alert payload", () => {
+      const alert = planCheckout(missingApiKeyResult("c_1")).alert;
+      const serialized = JSON.stringify(alert);
+      expect(serialized).not.toMatch(/\bat\s+\w+\s*\(/); // no "at fn (file:line)"
+      expect(serialized).not.toMatch(/node_modules|\.ts:\d+/);
+      // Names the variable to fix, without echoing its value anywhere.
+      expect(serialized).toContain("STRIPE_SECRET_KEY is not set");
+    });
+
+    test("still produces a usable alert when the coupon id is unset too", () => {
+      const plan = planCheckout(missingApiKeyResult(undefined));
+      expect(plan.proceed).toBe(false);
+      expect(plan.alert?.kind).toBe("outage");
+      expect(plan.alert?.couponId).toContain("not set");
+    });
   });
 
   test("an unknown with no statusCode still alerts", () => {
