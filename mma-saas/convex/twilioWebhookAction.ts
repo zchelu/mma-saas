@@ -119,14 +119,30 @@ export const verifyAndProcess = internalAction({
     // Only the state change is skipped on a replay, never the reply — the
     // response stays byte-identical to a first delivery, so nothing about it
     // reveals that this message was recognized as a duplicate.
+    // DELIBERATELY NO replyMessage. This branch used to return
+    // "You've been unsubscribed and won't receive further texts. Reply START
+    // to resume." That reply is structurally undeliverable and always was:
+    // with Advanced Opt-Out enabled (7/30), Twilio blocks every outbound
+    // message to the number at the moment it processes the STOP — before our
+    // TwiML is handed over. The reply came back 21610 "attempt to send to
+    // unsubscribed recipient" every time, verified in Twilio's error log
+    // 2026-08-02 at 21:59 and 22:08 UTC, one per STOP.
+    //
+    // Removing it is not a compliance regression. Twilio's own opt-out
+    // confirmation IS delivered and is what carriers require; the member sees
+    // exactly one confirmation either way. What changes is that we stop
+    // minting a guaranteed 21610 in the error log on every single opt-out —
+    // noise that buries real 21610s, which is the precise error that caused
+    // the 7/30 misdiagnosis of a blocked send.
+    //
+    // Do not "restore" this reply. If it ever needs to exist, Advanced
+    // Opt-Out has to be reconfigured first, and that is a carrier-facing
+    // change, not a code change.
     if (from && STOP_KEYWORDS_HANDLED.includes(body)) {
       if (!isReplay) {
         await ctx.runMutation(internal.members.setSmsOptOutByPhone, { phone: from, optedOut: true });
       }
-      return {
-        status: "ok",
-        replyMessage: "You've been unsubscribed and won't receive further texts. Reply START to resume.",
-      };
+      return { status: "ok" };
     }
 
     if (from && START_KEYWORDS_HANDLED.includes(body)) {

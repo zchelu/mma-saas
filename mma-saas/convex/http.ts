@@ -81,8 +81,27 @@ http.route({
         return new Response("Too many requests", { status: 429 });
       }
 
+      // MUST escape. The reply body was previously interpolated raw, and the
+      // HELP text contains a bare "&" ("Msg & data rates may apply") — not
+      // well-formed XML. Twilio rejected the whole document with 12200
+      // ("The entity name must immediately follow the '&' in the entity
+      // reference") and delivered nothing, verified in Twilio's error log
+      // 2026-08-02 at 21:45 and 21:53 UTC. The member still got a HELP reply
+      // because Twilio's own messaging-service Advanced Opt-Out answer is
+      // configured with the identical wording, so the failure was invisible
+      // from the handset and our route still returned 200. STOP and START
+      // survived only by luck of containing no XML metacharacters.
+      //
+      // Escaping here rather than sanitising the copy is deliberate: the HELP
+      // sentence is part of the five-site disclosure set that carriers
+      // cross-check (see sendRetentionTexts.ts:39-51), so it must stay
+      // byte-identical to lib/consentText.ts, terms.html §23 and
+      // privacy-policy.html §9. Fix the encoder, never the disclosure.
+      const escapeXml = (s: string) =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
       const twiml = result.replyMessage
-        ? `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${result.replyMessage}</Message></Response>`
+        ? `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(result.replyMessage)}</Message></Response>`
         : `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`;
       return new Response(twiml, { headers: { "Content-Type": "text/xml" } });
     } catch (err) {
