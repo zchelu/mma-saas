@@ -4,12 +4,23 @@ import crypto from "crypto";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { STOP_KEYWORDS, START_KEYWORDS, HELP_KEYWORDS } from "../lib/smsKeywords";
+import {
+  STOP_KEYWORDS_HANDLED,
+  START_KEYWORDS_HANDLED,
+  HELP_KEYWORDS_HANDLED,
+} from "../lib/smsKeywords";
 
 // Twilio's standard opt-out/opt-in keyword set (case-insensitive, exact match
 // on the trimmed message body) — https://www.twilio.com/docs/messaging/compliance/messaging-policy
-// Shared with lib/consentText.ts via lib/smsKeywords.ts so the copy shown to
-// members and the keywords actually matched here can never drift apart.
+//
+// Matches the *_HANDLED lists, NOT the advertised ones. Twilio's standard set
+// accepts OPTOUT and REVOKE for opt-out and INFO for help, which our consent
+// copy does not advertise. Matching only the advertised six meant a member
+// texting REVOKE was opted out inside Twilio while members.smsOptedOut stayed
+// unset here — Twilio blocked the sends (21610) so nobody was messaged, but our
+// own records contradicted the member's actual choice and the opt-out lived
+// only in Twilio. See the long comment in lib/smsKeywords.ts for why the
+// advertised lists must not simply be widened to match.
 
 // Verifies X-Twilio-Signature per Twilio's documented algorithm: HMAC-SHA1 of
 // the exact webhook URL with all POST params (sorted by key, no separators)
@@ -108,7 +119,7 @@ export const verifyAndProcess = internalAction({
     // Only the state change is skipped on a replay, never the reply — the
     // response stays byte-identical to a first delivery, so nothing about it
     // reveals that this message was recognized as a duplicate.
-    if (from && STOP_KEYWORDS.includes(body)) {
+    if (from && STOP_KEYWORDS_HANDLED.includes(body)) {
       if (!isReplay) {
         await ctx.runMutation(internal.members.setSmsOptOutByPhone, { phone: from, optedOut: true });
       }
@@ -118,7 +129,7 @@ export const verifyAndProcess = internalAction({
       };
     }
 
-    if (from && START_KEYWORDS.includes(body)) {
+    if (from && START_KEYWORDS_HANDLED.includes(body)) {
       if (!isReplay) {
         await ctx.runMutation(internal.members.setSmsOptOutByPhone, { phone: from, optedOut: false });
       }
@@ -137,7 +148,7 @@ export const verifyAndProcess = internalAction({
     // Twilio numbers. Support address (kombatdesk@outlook.com) is the one
     // already published in content/terms.html, not the send-only Resend
     // identity.
-    if (from && HELP_KEYWORDS.includes(body)) {
+    if (from && HELP_KEYWORDS_HANDLED.includes(body)) {
       return {
         status: "ok",
         replyMessage:
