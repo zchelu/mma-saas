@@ -67,8 +67,23 @@ function beltLabel(belt, stripes) {
   return `${cap} (${stripes} stripe${stripes === 1 ? "" : "s"})`;
 }
 
+// The domain must be one we own. Same rule as the DEMO_PHONE comment in
+// convex/seedDemoGym.ts: a realistic-looking address at a domain we don't
+// control belongs to a real person (tyler.brandt@gmail.com almost certainly
+// exists), and this roster is visible on a sales call where a prospect could
+// try one. A subdomain of kombatdesk.com — which already sends as
+// reports@kombatdesk.com — is unroutable to any stranger no matter what we
+// generate, while still reading as an ordinary email on screen.
+//
+// This replaced "@demo.kombatdesk.test". `.test` is RFC 2606 reserved and was
+// safe for the same reason, but a reserved TLD renders as visibly fake in the
+// /members Email column and cost more in demo credibility than it bought.
+// Keep the "demo." label: it is what stops a seeded row from ever being
+// mistaken for a real member, and convex/relabelDemoEmails.ts matches on it.
+const DEMO_EMAIL_DOMAIN = "demo.kombatdesk.com";
+
 function slugEmail(name) {
-  return name.toLowerCase().replace(/[^a-z\s]/g, "").trim().replace(/\s+/g, ".") + "@demo.kombatdesk.test";
+  return name.toLowerCase().replace(/[^a-z\s]/g, "").trim().replace(/\s+/g, ".") + "@" + DEMO_EMAIL_DOMAIN;
 }
 
 // Walks the last 60 days backward from "now", rolling a per-day chance of a
