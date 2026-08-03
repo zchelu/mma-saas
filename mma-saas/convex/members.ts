@@ -296,8 +296,18 @@ export const checkIn = mutation({
     gymId: v.id("gyms"),
     idempotencyKey: v.optional(v.string()),
     clientScannedAt: v.optional(v.number()),
+    // Which class the kiosk had selected when this tap happened. Optional
+    // forever — open mat and off-hours training are real check-ins with no
+    // class. Validated against this gym below rather than trusted: the kiosk
+    // is unauthenticated, so a hand-crafted call could otherwise attach a
+    // walk-in to another gym's class.
+    classId: v.optional(v.id("classes")),
+    // The tablet's own local date, "YYYY-MM-DD". See the schema comment on
+    // checkIns.localDate: this deployment runs in UTC, so an evening check-in
+    // bucketed server-side would land on the following day.
+    localDate: v.optional(v.string()),
   },
-  handler: async (ctx, { id, gymId, idempotencyKey, clientScannedAt }) => {
+  handler: async (ctx, { id, gymId, idempotencyKey, clientScannedAt, classId, localDate }) => {
     if (idempotencyKey) {
       const existing = await ctx.db
         .query("checkIns")
@@ -373,7 +383,32 @@ export const checkIn = mutation({
       await ctx.db.patch(id, { winbackAttempts: 0, winbackDormantAt: undefined });
     }
 
-    await ctx.db.insert("checkIns", { memberId: id, gymId, timestamp: now, clientScannedAt, idempotencyKey });
+    // Never trust the kiosk's classId. This mutation is reachable
+    // unauthenticated (the kiosk has no login), so a hand-crafted call could
+    // otherwise pin a walk-in onto a class belonging to a different gym and
+    // corrupt that gym's attendance. A class that doesn't resolve, or that
+    // belongs to someone else, degrades to a plain no-class check-in rather
+    // than throwing — the member is standing at the door and the check-in
+    // itself matters far more than the class label on it.
+    let resolvedClassId = undefined;
+    if (classId) {
+      const cls = await ctx.db.get(classId);
+      if (cls && cls.gymId === gymId) resolvedClassId = classId;
+    }
+
+    await ctx.db.insert("checkIns", {
+      memberId: id,
+      gymId,
+      timestamp: now,
+      clientScannedAt,
+      idempotencyKey,
+      classId: resolvedClassId,
+      // Only meaningful alongside a class — it exists so the classes page can
+      // match kiosk check-ins to a roll-call date. Stored whenever the kiosk
+      // sends it regardless, since it costs nothing and a local date is
+      // strictly more information than an absolute timestamp alone.
+      localDate,
+    });
   },
 });
 

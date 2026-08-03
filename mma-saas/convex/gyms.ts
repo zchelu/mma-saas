@@ -1,6 +1,7 @@
-import { query, QueryCtx, MutationCtx } from "./_generated/server";
+import { query, mutation, QueryCtx, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { ConvexError, v } from "convex/values";
+import { assertMaxLength } from "./validate";
 
 // Statuses that unlock write access. Neither "inactive" (never subscribed)
 // nor a lapsed "canceled"/"past_due" qualifies. Also the definition of
@@ -171,8 +172,12 @@ function randomSlugSuffix(): string {
 // case (one gym per name) gets a clean "colorado-springs-bjj" rather than
 // always carrying a random tail; only a genuine collision (two gyms
 // slugifying to the same base) falls through to a suffixed retry, checked
-// against by_slug the same way generateUniqueCheckInToken checks
-// by_check_in_token.
+// against by_slug.
+//
+// (An earlier version of this comment referenced generateUniqueCheckInToken
+// and a by_check_in_token index as the precedent. Neither exists anywhere in
+// this codebase — the kiosk is reached at /checkin?gym=<raw gym id> with no
+// token at all. Removed 2026-08-02 after it nearly got designed around.)
 export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<string> {
   const base = slugifyGymName(name);
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -191,6 +196,47 @@ export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<s
 // the name: the public consent page needs it to render "Welcome to X" and
 // nothing else, so there's no reason for this to ever hand back a gym's
 // Convex document id (or any other field) to an unauthenticated caller.
+// The automatic winback message is the one text that goes out in a gym
+// owner's name without them writing it. This lets them write it.
+//
+// 480 matches MAX_MESSAGE_LENGTH in convex/sendRetentionTexts.ts — roughly
+// three SMS segments once the opt-out footer is appended. Deliberately the
+// same ceiling as a manual send: the automatic path is not a more permissive
+// channel just because it fires on a schedule.
+//
+// The STOP footer is NOT part of what's stored and cannot be removed by an
+// owner — sendRetentionTextsCore appends it to every branch. That is a TCPA
+// requirement, not a formatting preference.
+//
+// An empty string clears the override and restores the built-in default,
+// which is why this stores `undefined` rather than "" for a blank submission:
+// a stored empty template would send a text consisting of nothing but the
+// opt-out footer.
+export const setRetentionMessageTemplate = mutation({
+  args: { template: v.string() },
+  handler: async (ctx, { template }) => {
+    const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+
+    const trimmed = template.trim();
+    assertMaxLength(trimmed, 480, "Message");
+
+    await ctx.db.patch(gym._id, {
+      retentionMessageTemplate: trimmed.length > 0 ? trimmed : undefined,
+    });
+  },
+});
+
+// What the owner has saved, for the settings field to render. Null means
+// they've never set one and the built-in default is in use.
+export const getRetentionMessageTemplate = query({
+  args: {},
+  handler: async (ctx) => {
+    const gym = await tryGetGym(ctx);
+    return gym?.retentionMessageTemplate ?? null;
+  },
+});
+
 export const getBySlug = query({
   args: { slug: v.string() },
   handler: async (ctx, { slug }) => {

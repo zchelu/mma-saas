@@ -96,12 +96,35 @@ export const getAtRiskMembers = internalQuery({
 // writes, and keeping them in one transaction means there's no window where a
 // member is marked as texted but not counted (or counted twice).
 export const recordRetentionText = internalMutation({
-  args: { memberId: v.id("members"), gymId: v.id("gyms") },
-  handler: async (ctx, { memberId, gymId }) => {
+  args: {
+    memberId: v.id("members"),
+    gymId: v.id("gyms"),
+    // The exact body Twilio accepted, opt-out footer included, plus which
+    // path sent it. Written to sentTexts in this same transaction as the
+    // counter bump — see the schema comment on that table for why a durable
+    // record has to exist at all. Optional so the offline/older callers and
+    // any future one that lacks the body still advance the counter correctly
+    // rather than throwing mid-send-loop.
+    body: v.optional(v.string()),
+    twilioSid: v.optional(v.string()),
+    kind: v.optional(v.union(v.literal("automatic"), v.literal("manual"))),
+  },
+  handler: async (ctx, { memberId, gymId, body, twilioSid, kind }) => {
     const member = await ctx.db.get(memberId);
     // gymId is passed and checked rather than trusted from the caller's loop
     // so this internal mutation can't be made to write across gym boundaries.
     if (!member || member.gymId !== gymId) throw new Error("Member not found");
+
+    if (body) {
+      await ctx.db.insert("sentTexts", {
+        gymId,
+        memberId,
+        body,
+        sentAt: Date.now(),
+        twilioSid,
+        kind: kind ?? "automatic",
+      });
+    }
 
     const attempts = (member.winbackAttempts ?? 0) + 1;
     await ctx.db.patch(memberId, {
@@ -167,7 +190,13 @@ async function sendRetentionTextsCore(
   ctx: ActionCtx,
   gymId: Id<"gyms">,
   gymName: string,
-  customMessage?: string
+  customMessage?: string,
+  // Set only on the automatic path, from gyms.retentionMessageTemplate. Kept
+  // as a separate parameter from customMessage rather than collapsed into it,
+  // because the two differ in `kind` for the sentTexts record and because
+  // conflating them would make an owner's saved automatic wording silently
+  // become the body of a manual send that failed to pass one.
+  automaticTemplate?: string
 ): Promise<{ attempted: number; succeeded: number }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -197,8 +226,13 @@ async function sendRetentionTextsCore(
     // wording untouched. The opt-out footer is always appended server-side,
     // never left to the composed text, so an owner can't accidentally ship a
     // message with no STOP instructions (TCPA requirement).
-    const body = customMessage
-      ? `${customMessage.replace(/\{name\}/gi, firstName)} Reply STOP to opt out.`
+    // Precedence: an explicit manual message, else the gym's saved automatic
+    // wording, else the built-in default. The STOP footer is appended in every
+    // branch, server-side, so no path an owner can influence is able to ship a
+    // message without opt-out instructions.
+    const composed = customMessage ?? automaticTemplate;
+    const body = composed
+      ? `${composed.replace(/\{name\}/gi, firstName)} Reply STOP to opt out.`
       : `Hey ${firstName}, we missed you at the gym! Come back this week and keep that momentum going. - ${gymName}. Reply STOP to opt out.`;
 
     try {
@@ -213,7 +247,18 @@ async function sendRetentionTextsCore(
 
       if (res.ok) {
         console.log(`SMS sent to ${member.name} (${member.phone})`);
-        await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, { memberId: member._id, gymId });
+        // Twilio's SID, for cross-referencing their log while it still exists.
+        // Parsed defensively: losing the SID is acceptable, losing the record
+        // of a sent message is not, so a malformed body must not throw here
+        // and skip recordRetentionText entirely.
+        const payload = (await res.json().catch(() => null)) as { sid?: string } | null;
+        await ctx.runMutation(internal.sendRetentionTexts.recordRetentionText, {
+          memberId: member._id,
+          gymId,
+          body,
+          twilioSid: typeof payload?.sid === "string" ? payload.sid : undefined,
+          kind: customMessage ? "manual" : "automatic",
+        });
         succeeded++;
       } else {
         const text = await res.text();
@@ -247,7 +292,14 @@ export const sendRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId}: retention run cooldown active — skipping automated run`);
       return;
     }
-    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym");
+    const { attempted, succeeded } = await sendRetentionTextsCore(
+      ctx,
+      gymId,
+      gym.name ?? "your gym",
+      undefined,
+      // The owner's saved wording for the automatic text, if they've set one.
+      gym.retentionMessageTemplate
+    );
     if (succeeded === 0) {
       // Zero successes out of a non-empty attempt (or a config error before
       // any attempt) means the failure is systemic, not a few bad numbers —

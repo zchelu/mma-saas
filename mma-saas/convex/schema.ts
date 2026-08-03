@@ -115,10 +115,36 @@ export default defineSchema({
     // mutation call after a dropped ack doesn't insert a second row for
     // the same physical scan. Undefined for live/online taps.
     idempotencyKey: v.optional(v.string()),
+    // Which class this walk-in was for, when the kiosk had one selected.
+    //
+    // Before this existed, the kiosk and the classes page recorded the same
+    // physical event into two tables that never met: the kiosk wrote checkIns
+    // (no class), while attendance rows — the only per-class record — were
+    // created solely by a coach hitting "mark all present". A gym that put the
+    // kiosk at the door, which is exactly what we tell them to do, saw every
+    // class sit at zero attendance forever. lastVisit is patched either way so
+    // at-risk detection was never affected; it was only the class-level view
+    // that was blind.
+    //
+    // Optional on purpose and permanently: open mat, off-hours training, and
+    // gyms that don't run a fixed schedule are all legitimate check-ins with no
+    // class attached. Never make this required.
+    classId: v.optional(v.id("classes")),
+    // The kiosk tablet's own local calendar date, "YYYY-MM-DD".
+    //
+    // `timestamp` is absolute, and this deployment runs in UTC — so a 6pm
+    // Denver check-in carries a timestamp that is already the NEXT day in UTC.
+    // Bucketing kiosk check-ins by date server-side would therefore file every
+    // evening class on the wrong day, which is most of them. attendance.date
+    // has always been a local date string supplied by the client; this is the
+    // same contract, so the two sources can be matched against each other
+    // without a timezone field on gyms.
+    localDate: v.optional(v.string()),
   })
     .index("by_member", ["memberId"])
     .index("by_gym", ["gymId"])
     .index("by_gym_timestamp", ["gymId", "timestamp"])
+    .index("by_class", ["classId"])
     .index("by_idempotency_key", ["idempotencyKey"]),
   // One row per winback recovery, not per member — a member can lapse and be
   // won back more than once, and members.ts:checkIn's own rearm logic (a
@@ -266,10 +292,55 @@ export default defineSchema({
     // name yet and so have nothing to slugify — see convex/migrations.ts's
     // backfillGymSlugs for existing rows.
     slug: v.optional(v.string()),
+    // The owner's own wording for the AUTOMATIC winback text. Unset means the
+    // built-in default in convex/sendRetentionTexts.ts is used, so existing
+    // gyms need no backfill.
+    //
+    // Until this existed the automatic message was hardcoded, which meant a
+    // text went out in the gym owner's name, to their member, in words they
+    // had never seen and could not change. Manual sends were always
+    // owner-composed; only the cron path was locked.
+    //
+    // Supports the same {name} token as a manual send. The STOP footer is
+    // appended server-side and is NOT part of this string — an owner must not
+    // be able to ship a message with no opt-out instructions.
+    retentionMessageTemplate: v.optional(v.string()),
   })
     .index("by_clerk_user", ["clerkUserId"])
     .index("by_stripe_customer", ["stripeCustomerId"])
     .index("by_slug", ["slug"]),
+  // Every winback text this product has actually sent.
+  //
+  // There was no such record. Texts went out and the ONLY copy of what was
+  // said, to whom, and when lived in Twilio's message log, which ages out on a
+  // retention window we don't control. That failed in two directions: the
+  // Saved Member Guarantee requires showing an owner the text that brought a
+  // member back, and a TCPA complaint months later needs evidence of exactly
+  // what was sent and that consent preceded it.
+  //
+  // Written from sendRetentionTexts.ts inside the `res.ok` branch only, in the
+  // same mutation that advances the winback counter — so a row exists if and
+  // only if Twilio accepted the message, and the count and the record can
+  // never disagree.
+  sentTexts: defineTable({
+    gymId: v.id("gyms"),
+    memberId: v.id("members"),
+    // The exact body handed to Twilio, opt-out footer included. Stored rather
+    // than reconstructed: the template can change afterwards, and the whole
+    // point is what was sent at the time.
+    body: v.string(),
+    sentAt: v.number(),
+    // Twilio's message SID, for cross-referencing their log while it still
+    // exists. Optional — a send is recorded even if the response body can't be
+    // parsed, since losing the SID is far better than losing the record.
+    twilioSid: v.optional(v.string()),
+    // Which path sent it. "automatic" is the daily cron; "manual" is the
+    // owner pressing Send Retention Texts.
+    kind: v.union(v.literal("automatic"), v.literal("manual")),
+  })
+    .index("by_gym", ["gymId"])
+    .index("by_member", ["memberId"])
+    .index("by_gym_sentAt", ["gymId", "sentAt"]),
   // Generic fixed-window rate limiter backing convex/rateLimit.ts. `key` is
   // "<bucket>:<identifier>" (e.g. "checkout:203.0.113.4") so unrelated
   // buckets never collide even if an identifier repeats across them.

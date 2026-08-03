@@ -19,6 +19,9 @@ type Stage =
   | { type: "success"; firstName: string };
 
 import { getInitials, getAvatarColor } from "../lib/avatar";
+// The tablet's own clock, never the server's — see lib/localDate.ts for the
+// four times this has gone wrong in this codebase.
+import { localDateString, localDayPrefix } from "@/lib/localDate";
 
 export default function CheckInPage() {
   return (
@@ -43,10 +46,54 @@ function CheckInPageInner() {
     api.members.getActiveForGym,
     gymId ? { gymId } : "skip"
   );
+  const classes = useQuery(
+    api.classes.listForKiosk,
+    gymId ? { gymId } : "skip"
+  );
   const checkIn = useMutation(api.members.checkIn);
 
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState<Stage>({ type: "idle" });
+  // What the front desk tapped. Sticky on purpose: set once when the 6pm class
+  // starts, and every member arriving for it then taps only their own name.
+  // Making each member pick a class would double the taps at the busiest
+  // moment of the day and get ignored within a week.
+  const [selectedClassId, setSelectedClassId] = useState<Id<"classes"> | null>(null);
+
+  // dayOfWeek is free text the owner typed ("Monday", "Mon", "Mon/Wed",
+  // "Tuesday & Thursday"), so match loosely on the three-letter prefix rather
+  // than parsing. Structured scheduling is what automatic current-class
+  // detection needs and is deliberately not part of this change.
+  const todaysClasses = useMemo(() => {
+    if (!classes) return [];
+    const today = localDayPrefix();
+    return classes
+      .filter((c) => c.dayOfWeek.toLowerCase().includes(today))
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [classes]);
+
+  // DERIVED, NEVER STORED — same pattern as `checked` in
+  // app/classes/[id]/page.tsx, and for the same reason.
+  //
+  // A tablet left running overnight, or an owner editing the schedule
+  // mid-session, can leave a selection pointing at a class that is no longer
+  // on today's list. Attributing tomorrow's check-ins to yesterday's class
+  // would be silent and wrong.
+  //
+  // The obvious version of this — an effect that watches the selection and
+  // resets it — is the react-hooks/set-state-in-effect anti-pattern, and this
+  // is the case the rule is actually about: storing something that can simply
+  // be computed. Deriving it also removes a render where the stale id is
+  // still live. The eslint-disable in classes/[id]/page.tsx is NOT precedent
+  // for suppressing it here; that one defers a value that must not be
+  // computed during SSR, which is a different problem.
+  const classId = useMemo(
+    () =>
+      selectedClassId && todaysClasses.some((c) => c._id === selectedClassId)
+        ? selectedClassId
+        : null,
+    [selectedClassId, todaysClasses]
+  );
 
   useEffect(() => {
     if (stage.type !== "success") return;
@@ -67,7 +114,14 @@ function CheckInPageInner() {
 
   async function confirmCheckIn(member: Member) {
     if (!gymId) return;
-    await checkIn({ id: member._id, gymId });
+    await checkIn({
+      id: member._id,
+      gymId,
+      // Both optional server-side. A gym with no schedule, an open mat, or a
+      // member arriving outside class hours all check in with neither.
+      ...(classId ? { classId } : {}),
+      localDate: localDateString(),
+    });
     setStage({ type: "success", firstName: member.name.trim().split(/\s+/)[0] });
   }
 
@@ -149,6 +203,33 @@ function CheckInPageInner() {
           <h1 className="text-5xl font-extrabold tracking-tight" style={{ color: "#FFFFFF" }}>Check In</h1>
         </div>
 
+        {/* Set once by the front desk when a class starts; every member
+            arriving for it then taps only their own name. Hidden entirely when
+            nothing is scheduled today, so a gym that doesn't run a timetable
+            never sees it. */}
+        {todaysClasses.length > 0 && (
+          <div className="mb-8">
+            <p className="text-sm font-semibold uppercase tracking-widest mb-3" style={{ color: "#555555" }}>
+              Class in session
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <ClassChip
+                label="No class"
+                selected={classId === null}
+                onClick={() => setSelectedClassId(null)}
+              />
+              {todaysClasses.map((c) => (
+                <ClassChip
+                  key={c._id}
+                  label={`${c.time} · ${c.name}`}
+                  selected={classId === c._id}
+                  onClick={() => setSelectedClassId(c._id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <input
           type="text"
           placeholder="Search your name..."
@@ -199,5 +280,32 @@ function CheckInPageInner() {
         )}
       </div>
     </div>
+  );
+}
+
+function ClassChip({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      // Generous tap target: this is a tablet at a door, used by people with
+      // gym bags in one hand.
+      className="rounded-xl px-5 py-3 text-base font-semibold transition-all active:scale-95"
+      style={{
+        backgroundColor: selected ? "#E02020" : "#222222",
+        border: `1px solid ${selected ? "#E02020" : "#333333"}`,
+        color: selected ? "#FFFFFF" : "#888888",
+      }}
+    >
+      {label}
+    </button>
   );
 }

@@ -20,20 +20,47 @@ export default async function BillingPage() {
 
   const token = await getConvexToken();
   const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-  const invoices = subscription.stripeCustomerId
-    ? (
-        await stripe.invoices.list({
-          customer: subscription.stripeCustomerId,
-          limit: 12,
-        })
-      ).data
-    : [];
+  // Read, don't construct — `new Stripe(undefined!)` throws synchronously, and
+  // in a Server Component that means the whole billing page 500s rather than
+  // degrading. Same class of bug as app/api/stripe/checkout/route.ts:39, which
+  // was fixed while this one was missed.
+  //
+  // A missing key must NOT take the page down: plan, status and the Manage
+  // Subscription button all come from Convex and stay useful. Only the
+  // Stripe-sourced parts (invoice history, cancellation date) are unavailable,
+  // so those degrade to an honest notice. No alert is raised here — this is a
+  // read-only page, and app/api/stripe/portal/route.ts alerts on the same
+  // condition when the customer actually tries to do something.
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 
-  const cancelAt = subscription.stripeSubscriptionId
-    ? (await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)).cancel_at
-    : null;
+  if (!stripeSecretKey) {
+    console.error("Billing page: STRIPE_SECRET_KEY is missing — invoice history unavailable");
+  }
+
+  // Wrapped: a Stripe outage or a revoked key would otherwise crash a page the
+  // customer opened specifically to cancel. Failing to a notice keeps the
+  // Manage Subscription path reachable, which is the one FAQ #4 promises.
+  let invoices: Stripe.Invoice[] = [];
+  let cancelAt: number | null = null;
+  let stripeUnavailable = !stripeSecretKey;
+
+  if (stripe) {
+    try {
+      if (subscription.stripeCustomerId) {
+        invoices = (
+          await stripe.invoices.list({ customer: subscription.stripeCustomerId, limit: 12 })
+        ).data;
+      }
+      if (subscription.stripeSubscriptionId) {
+        cancelAt = (await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)).cancel_at;
+      }
+    } catch (err) {
+      console.error("Billing page: Stripe read failed — showing page without invoice history:", err);
+      stripeUnavailable = true;
+    }
+  }
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
@@ -68,7 +95,12 @@ export default async function BillingPage() {
           Invoice history
         </h2>
 
-        {invoices.length === 0 ? (
+        {stripeUnavailable ? (
+          <p style={{ color: "#888888" }}>
+            Invoice history is temporarily unavailable. Your subscription is unaffected —
+            use Manage Subscription above, or email kombatdesk@outlook.com and I&apos;ll sort it.
+          </p>
+        ) : invoices.length === 0 ? (
           <p style={{ color: "#555555" }}>No invoices yet.</p>
         ) : (
           <div className="flex flex-col gap-2">

@@ -29,6 +29,42 @@ export const getAll = query({
   },
 });
 
+// PUBLIC AND UNAUTHENTICATED — the check-in kiosk is a tablet at the front
+// door with no login, the same trust model as members.getActiveForGym, which
+// already exposes the full active roster for a gymId. Class names, instructor
+// names and times are strictly less sensitive than that, so this widens
+// nothing that isn't already open.
+//
+// Returns EVERY class for the gym, not just today's, and deliberately does no
+// day filtering server-side. Convex runs in UTC: after 6pm in Denver it is
+// already tomorrow in UTC, so a server-side "today" would show the wrong day's
+// classes during exactly the evening hours a gym is busiest. The kiosk tablet
+// is physically in the gym, so its own local day is the correct one — the
+// client filters. That also means this needs no timezone field on gyms.
+//
+// dayOfWeek and time are free-text strings the owner typed (see classFields
+// above). No parsing is attempted here; the kiosk matches loosely on the
+// three-letter day prefix, which handles "Monday", "Mon", "Mon/Wed" and
+// "Monday & Wednesday" alike. Structuring the schedule properly is what
+// automatic current-class detection would require, and is deliberately not
+// part of this change.
+export const listForKiosk = query({
+  args: { gymId: v.id("gyms") },
+  handler: async (ctx, { gymId }) => {
+    const classes = await ctx.db
+      .query("classes")
+      .withIndex("by_gym", (q) => q.eq("gymId", gymId))
+      .collect();
+    return classes.map((c) => ({
+      _id: c._id,
+      name: c.name,
+      instructor: c.instructor,
+      dayOfWeek: c.dayOfWeek,
+      time: c.time,
+    }));
+  },
+});
+
 export const getById = query({
   args: { id: v.id("classes") },
   handler: async (ctx, { id }) => {

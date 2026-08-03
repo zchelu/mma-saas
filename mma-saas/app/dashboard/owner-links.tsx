@@ -57,6 +57,85 @@ export default function OwnerLinks({ slug, gymId }: { slug: string | null; gymId
       </div>
 
       <ConsentGap />
+      <AutomaticMessage />
+    </div>
+  );
+}
+
+const DEFAULT_PREVIEW =
+  "Hey Alex, we missed you at the gym! Come back this week and keep that momentum going. - Your Gym.";
+
+// The automatic winback text is the only message that goes out in the owner's
+// name without them writing it. Until this field existed it was hardcoded at
+// convex/sendRetentionTexts.ts:202 and changing it meant a deploy.
+function AutomaticMessage() {
+  const saved = useQuery(api.gyms.getRetentionMessageTemplate);
+  const save = useMutation(api.gyms.setRetentionMessageTemplate);
+
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  // `saved` is undefined while loading and null when unset. Only adopt it as
+  // the draft once, on first load — re-syncing on every query update would
+  // wipe what the owner is mid-way through typing.
+  const value = draft ?? saved ?? "";
+
+  async function onSave() {
+    if (saving) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      await save({ template: value });
+      setStatus(
+        value.trim().length === 0
+          ? "Cleared — back to the default wording."
+          : "Saved. This goes out on the next automatic send."
+      );
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Couldn't save that. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl p-6 mt-6" style={{ backgroundColor: "#222222", border: "1px solid #333333" }}>
+      <p className="text-sm font-semibold mb-1" style={{ color: "#FFFFFF" }}>
+        Your automatic check-in text
+      </p>
+      <p className="text-xs mb-4 leading-relaxed" style={{ color: "#888888" }}>
+        Sent in your name when a member goes quiet. Use <code style={{ color: "#CCCCCC" }}>{"{name}"}</code> and
+        it fills in their first name. Leave it empty to use the default.
+      </p>
+
+      <textarea
+        value={value}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={3}
+        maxLength={480}
+        placeholder={DEFAULT_PREVIEW}
+        className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none"
+        style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333", color: "#FFFFFF" }}
+      />
+
+      <p className="text-xs mt-2" style={{ color: "#555555" }}>
+        &ldquo;Reply STOP to opt out.&rdquo; is added automatically to every message — you don&apos;t
+        need to type it, and it can&apos;t be removed.
+      </p>
+
+      <div className="flex items-center gap-3 mt-4">
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving || saved === undefined}
+          className="text-xs font-semibold rounded-lg px-4 py-2 disabled:opacity-40"
+          style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+        >
+          {saving ? "Saving…" : "Save message"}
+        </button>
+        {status && <span className="text-xs" style={{ color: "#888888" }}>{status}</span>}
+      </div>
     </div>
   );
 }
