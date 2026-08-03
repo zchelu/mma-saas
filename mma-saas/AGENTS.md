@@ -15,25 +15,31 @@ the newest `claude/handoff-*.md` there.
 
 ## 1. Who runs git and deploys
 
-> **DECISION REQUIRED — Zain, pick one and delete the other.**
->
-> Two lanes have been operating under contradictory rules, and on 2026-08-02 a
-> `globals.css` change that neither lane authored was swept into a commit
-> described as another lane's work. That is what an unresolved rule costs.
->
-> **Option A — Zain runs everything (the /pricing lane's Rule 10).** Agents read
-> and edit files; Zain runs every `git`, build, `npx convex` and deploy command.
-> *Known cost: this is why `convex/demoSmsMember.ts`, `convex/refreshDemoGym.ts`
-> and both demo scripts reached production on 7/31 and still are not in git —
-> code shipped without passing through version control, because the agent that
-> deployed it could not commit it.*
->
-> **Option B — agents may run git and deploys under per-step authorization.**
-> Each stage/commit/push/deploy is proposed with an explicit file list and run
-> only after Zain approves that step. *Known cost: more trust in a staging list
-> nobody re-reads carefully at 11pm.*
+**RESOLVED 2026-08-03. Agents may run git and deploys, under per-step
+authorization.** This supersedes the /pricing lane's Rule 10 ("no git, no
+build, no Convex CLI, no deploy from an agent"). That rule is retired — do not
+reinstate it without replacing this section.
 
-Until this is resolved, the safe default is **Option A**.
+How it works:
+
+- Propose each stage / commit / push / deploy as its own step, with the
+  **explicit file list** and the commit message written out. Run it only after
+  Zain approves that specific step.
+- **Never `git add -A` or `git commit -a`.** Explicit paths only. That is how
+  `app/globals.css` ended up inside an unrelated commit on 8/2.
+- **Never `git commit` without `-m`.** It opens an editor an agent can't drive.
+- `npx convex deploy` is interactive. Propose it; let Zain run it.
+- If the plan changed while you were mid-flight, **stop and re-read it**. On
+  8/3 a superseded file list was executed as agreed, which put an inconsistent
+  `api.d.ts` commit permanently in master — see
+  `claude/typecheck-blind-spot-api-d-ts.md`.
+
+Why this rather than the stricter rule: the stricter rule is what caused
+`convex/demoSmsMember.ts`, `convex/refreshDemoGym.ts` and both demo scripts to
+run in production from 7/31 to 8/3 with no copy in git. The agent that deployed
+them was not permitted to commit them. **Code reaching production without
+passing through version control is the worse failure**, and Convex deploys from
+the working directory, so the two cannot be separated in practice.
 
 ## 2. Never guess when you can look
 
