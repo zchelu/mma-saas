@@ -1,0 +1,73 @@
+<html><head><meta charset="utf-8"><style>
+@page { size: 3.75in 2.25in; margin: 0; }
+*{box-sizing:border-box;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html,body{background:#0A0A0A}
+.card{
+  width:3.75in;height:2.25in;background:#0A0A0A;position:relative;overflow:hidden;
+  font-family:Arial,Helvetica,sans-serif;page-break-after:always;
+}
+.card:last-child{page-break-after:auto}
+/* 0.125in bleed on every side; everything meaningful lives inside .safe */
+.safe{position:absolute;left:.25in;top:.25in;right:.25in;bottom:.25in}
+.glow{position:absolute;width:3in;height:3in;left:-.9in;top:-1.1in;border-radius:50%;
+      background:radial-gradient(circle,rgba(224,32,32,.20) 0%,rgba(224,32,32,0) 62%)}
+.glow-b{position:absolute;width:2.4in;height:2.4in;right:-.8in;bottom:-1in;border-radius:50%;
+      background:radial-gradient(circle,rgba(79,210,255,.09) 0%,rgba(79,210,255,0) 60%)}
+
+/* ---------- FRONT ---------- */
+.front .safe{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.front img{height:.62in;width:auto}
+.front .rule{width:.55in;height:.035in;background:#E02020;border-radius:.02in;margin:.17in 0 .13in}
+.front .tag{color:#8A8A94;font-size:6.6pt;letter-spacing:.2em;font-weight:700}
+
+/* ---------- BACK ---------- */
+.back .safe{display:flex;flex-direction:column;justify-content:space-between}
+.name{color:#FFFFFF;font-size:15pt;font-weight:800;letter-spacing:.005em;line-height:1}
+.role{color:#E02020;font-size:7pt;font-weight:700;letter-spacing:.2em;margin-top:.055in}
+.hr{width:.42in;height:.03in;background:#E02020;border-radius:.02in;margin:.11in 0}
+.det{color:#D6D6DC;font-size:8.2pt;line-height:1.72;letter-spacing:.01em}
+.det .site{color:#E02020;font-weight:700}
+.backrow{display:flex;align-items:flex-end;justify-content:space-between;width:100%}
+/* QR: black modules on a white plate. An inverted QR (light modules on the dark
+   card) scans fine on new phones and badly on old ones — a business card has to
+   work on every phone in the room, so the plate stays white. */
+.qr{display:flex;flex-direction:column;align-items:center;gap:.045in}
+.qr .plate{background:#fff;border-radius:.06in;padding:.05in;line-height:0}
+.qr img{width:.78in;height:.78in;display:block}
+.qr .cap{color:#7A7A84;font-size:5pt;letter-spacing:.16em;font-weight:700}
+</style></head><body>
+
+<div class="card front">
+  <div class="glow"></div><div class="glow-b"></div>
+  <div class="safe">
+    <img src="kombatdesk-lockup-dark.svg">
+    <div class="rule"></div>
+    <div class="tag">MEMBER RETENTION FOR FIGHT GYMS</div>
+  </div>
+</div>
+
+<div class="card back">
+  <div class="glow"></div>
+  <div class="safe">
+    <div>
+      <div class="name">Zain</div>
+      <div class="role">FOUNDER &middot; KOMBATDESK LLC</div>
+    </div>
+    <div class="backrow">
+      <div>
+        <div class="hr"></div>
+        <div class="det">
+          (719) 229-8105<br>
+          kombatdesk@outlook.com<br>
+          <span class="site">kombatdesk.com</span>
+        </div>
+      </div>
+      <div class="qr">
+        <div class="plate"><img src="qr.svg" alt="kombatdesk.com"></div>
+        <div class="cap">SCAN ME</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body></html>
