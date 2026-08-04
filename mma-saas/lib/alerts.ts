@@ -169,7 +169,7 @@ export async function alertUnresolvedPrice(params: {
     [
       `A Stripe subscription references a price ID that doesn't match any known plan.`,
       ``,
-      `Detected in: convex/${source}. This always fires from Convex — if the price WAS accepted at checkout (Vercel's allowedPriceIds), check whether the Convex dashboard's env is missing this price ID or has a different value than Vercel's. The two stores can drift.`,
+      `Detected in: convex/${source}. This always fires from Convex — if the price WAS accepted at checkout (Vercel's allowedPriceIds), the Convex deployment's env is missing this price ID or holds a different value than the Vercel scope it pairs with. The two stores drift independently, and since 2026-08-04 there are TWO of each. The pairs are: Vercel PRODUCTION <-> Convex prod (limitless-raven-596) <-> live Stripe prices; Vercel PREVIEW <-> Convex dev (polished-peacock-100) <-> SANDBOX prices. Fix only the pair this alert came from, and never copy a value across the pair boundary — that re-creates the cross-environment mixing the 2026-08-04 separation removed.`,
       ``,
       `Price ID: ${priceId ?? "(none on subscription)"}`,
       `Gym ID: ${gymId ?? "(unresolved)"}`,
@@ -181,7 +181,7 @@ export async function alertUnresolvedPrice(params: {
       ``,
       `ACTION REQUIRED, and it does not fix itself: sendTrialConfirmationEmail only fires on the customer.subscription.created event, which Stripe never re-fires for this subscription. That email is the ONLY C.R.S. 6-1-732 written record of price/frequency/cancellation terms. Fixing gym.plan by hand after the fact will NOT retroactively send it — you must manually send this customer their price/frequency/cancellation confirmation yourself once you've identified the correct plan, or that compliance record is permanently missing for them.`,
       ``,
-      `All three price env vars, must match in both Vercel and the Convex dashboard:`,
+      `All three price env vars. These must match ACROSS the pair named above (one Vercel scope with its own Convex deployment) and must NOT match across the two pairs — production holds live price IDs, preview/dev holds sandbox ones:`,
       PRICE_ENV_VAR_NAMES,
     ].join("\n")
   );

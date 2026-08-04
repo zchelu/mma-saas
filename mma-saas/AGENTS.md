@@ -103,7 +103,36 @@ routed every paying gym into the setup wizard, because `!undefined === true`.
 try/catch it yields a raw 500 with no alert — a silent outage. Read the key into
 a variable, branch on it, construct the client afterwards.
 
-## 8. Priorities
+## 8. Preview and production are separate stacks
+
+Since 2026-08-04, Vercel **Preview** points at Convex dev
+(`polished-peacock-100`) and the Clerk **Development** instance. Vercel
+**Production** points at Convex prod (`limitless-raven-596`) and Clerk
+Production. They pair one-to-one, and values never cross the pair boundary.
+
+| Scope | Convex | Clerk | Stripe | Twilio | Resend |
+|---|---|---|---|---|---|
+| Production | `limitless-raven-596` | Production | live | live | live |
+| Preview | `polished-peacock-100` | Development | none | none | none |
+
+- **Never add a Stripe, Twilio or Resend credential to Vercel Preview or to the
+  dev Convex deployment.** A preview that can charge burns a founding slot
+  permanently; one that can text sends from an unregistered number; one that can
+  email pages a real inbox from a branch. Their *absence* is the control, and
+  each degrades to a documented no-op rather than an error.
+- **`consentSubmissions` is why this matters most.** It is the TCPA evidence
+  table — append-only by design, with no delete path anywhere in the consent
+  system. A branch pointed at prod Convex can write a fabricated consent row
+  into real evidence, and there is no way to take it back. Never repoint a
+  preview at prod "just to test something".
+- `NEXT_PUBLIC_*` is read at **build** time, so omitting one fails the preview
+  build outright instead of failing safe. Those two get real Preview values;
+  server-side secrets are safely absent instead.
+- Your production login will **not** work on a preview — dev Clerk has no users.
+  That is the boundary working, not a bug.
+- Runbook: `claude/preview-prod-separation-runbook.md`.
+
+## 9. Priorities
 
 Revenue and customer-facing work first. Infrastructure only when it unblocks a
 sale. Nothing is "done" until it is demoable on the live site. Push back on
