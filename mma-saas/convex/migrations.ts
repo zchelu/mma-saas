@@ -364,6 +364,16 @@ export const backfillGymSlugs = internalMutation({
 // above: a slug is derived from the gym's name and a nameless gym has nothing
 // to slugify, but an smsCode is random and every gym can have one.
 //
+// THE CONVEX CLI CAN RETRY A MUTATION INVISIBLY, SO EVERY MIGRATION IN THIS
+// CODEBASE MUST BE RE-RUN SAFE. Observed 2026-08-03: this migration's only
+// successful invocation returned updated: 0, skippedAlreadySet: 13 while all
+// thirteen gyms had in fact just been stamped — consistent with the first
+// execution committing and its response being lost, so the retry saw the work
+// already done. Because the skip-if-set guard exists, that was a confusing
+// return value and nothing more. Without it, the retry would have reissued
+// thirteen codes, leaving a dashboard showing one value and a poster showing
+// another, with no way to tell which gyms were affected.
+//
 // WHY THIS STILL MATTERS AFTER THE ONBOARDING CALL SITE EXISTS. There are six
 // places that insert a gyms row (onboarding.ts and four in subscriptions.ts,
 // plus migrations.ts itself) and only onboarding.ts generates identifiers. A
