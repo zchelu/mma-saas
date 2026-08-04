@@ -150,20 +150,29 @@
      sends run through sendRetentionTextsCore, hit the same per-member gates,
      and write the same recordRetentionText, so they are inside the 5, not
      additive.
-     That sentence must stay BYTE-IDENTICAL across five sites, because carriers
+     That sentence must stay BYTE-IDENTICAL across every site listed in
+     convex/sendRetentionTexts.ts's getAtRiskMembers, because carriers
      cross-check the HELP reply against the opt-in disclosure and the linked
      legal documents — and /privacy is reachable in one click from the consent
-     page footer, so it is read alongside /terms:
-       - content/privacy-policy.html §9 Frequency (here)
-       - content/terms.html §23 Program Description
-       - content/terms.html §23 Message Frequency
-       - lib/consentText.ts getConsentText() — the checkbox text a member
-         actually agrees to, frozen onto every consentSubmissions row as
-         evidence.
-       - convex/twilioWebhookAction.ts — the HELP auto-reply body.
-     If they drift, bump CONSENT_VERSION in lib/consentText.ts and fix all five
-     at the same time. Section 2's "one per member per 7-day period" states the
-     cadence rule without a monthly count and is deliberately left alone.
+     page footer, so it is read alongside /terms. ONE of those sites is in
+     this file: §9 Frequency, below.
+
+     THE LIST IS NOT DUPLICATED HERE ANY MORE, ON PURPOSE. This comment used
+     to carry its own copy naming five sites. The SMS keyword opt-in added
+     two more plus the Twilio console copy, and this list — being a comment
+     inside a legal document that nothing typechecks, lints or greps in the
+     course of normal work — would have kept saying five indefinitely. It is
+     read at exactly the wrong moment: by whoever is reapplying this manual
+     edit after a regeneration, which is the one time someone actually counts.
+     One list, one place.
+
+     If they drift, fix them all in the same commit and bump the version that
+     tracks the surface you changed — CONSENT_VERSION for getConsentText, the
+     keyword-N namespace for the keyword signage/confirmation text. A change
+     to THIS file is shared by both, so both move.
+
+     Section 2's "one per member per 7-day period" states the cadence rule
+     without a monthly count and is deliberately left alone.
      Regenerating this file will silently revert this edit. -->
 <h2 id="sms">9. SMS Text Messaging</h2>
 <p>The Services send SMS text messages to gym members on behalf of their gym. These messages are <strong>membership and attendance-related notices and replies to messages a member sends us</strong> — for example, a check-in message when a member has not attended class recently. We do not send marketing or promotional text messages.</p>

@@ -145,21 +145,29 @@ word-break: break-word !important;
          The claim that manual gym messages are "not capped by KombatDesk" was
          also removed: manual sends run through sendRetentionTextsCore and hit
          the same per-member gates, so they are inside the 5, not additive.
-     That sentence must stay BYTE-IDENTICAL across five sites in total, because
-     carriers cross-check the HELP reply against the opt-in disclosure and both
-     linked legal documents (/privacy is one click from the consent page
-     footer, so it is read alongside these terms):
-       - content/terms.html §23 Program Description (here)
-       - content/terms.html §23 Message Frequency (here)
-       - content/privacy-policy.html §9 Frequency — carries the identical
-         hand edit, including the removal of the same "not capped" claim.
-       - lib/consentText.ts getConsentText() — the checkbox text a member
-         actually agrees to, frozen onto every consentSubmissions row as
-         evidence.
-       - convex/twilioWebhookAction.ts — the HELP auto-reply body.
-     If they drift, bump CONSENT_VERSION in lib/consentText.ts and fix all
-     five at the same time. Re-exporting from Termly will silently revert
-     both edits. -->
+     That sentence must stay BYTE-IDENTICAL across every site listed in
+     convex/sendRetentionTexts.ts's getAtRiskMembers, because carriers
+     cross-check the HELP reply against the opt-in disclosure and both linked
+     legal documents (/privacy is one click from the consent page footer, so
+     it is read alongside these terms). TWO of those sites are in this file:
+     §23 Program Description and §23 Message Frequency, both below.
+
+     THE LIST IS NOT DUPLICATED HERE ANY MORE, ON PURPOSE. This comment used
+     to carry its own copy naming five sites. The SMS keyword opt-in added
+     two more plus the Twilio console copy, and this list — being a comment
+     inside a legal document that nothing typechecks, lints or greps in the
+     course of normal work — would have kept saying five indefinitely. It is
+     read at exactly the wrong moment: by whoever is reapplying these manual
+     edits after a Termly re-export, which is the one time someone actually
+     counts. One list, one place.
+
+     If they drift, fix them all in the same commit and bump the version that
+     tracks the surface you changed — CONSENT_VERSION for getConsentText, the
+     keyword-N namespace for the keyword signage/confirmation text. A change
+     to THIS file is shared by both, so both move. See the canonical comment
+     for why bumping the wrong one is harmful in either direction.
+
+     Re-exporting from Termly will silently revert both edits. -->
 <div class="MsoNormal" data-custom-class="heading_1" id="sms" style="line-height: 1.5;"><strong><h2>23. SMS TEXT MESSAGING</h2></strong></div><div class="MsoNormal" data-custom-class="heading_2" style="line-height: 1.5;"><strong><h3>Program Description</h3></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">KombatDesk provides text messaging on behalf of the gyms and academies that use our platform. If you are a member of a gym that uses KombatDesk and you have given consent to receive text messages, you may receive messages from your gym sent through KombatDesk. These messages relate to your membership and your attendance, and may include: reminders when you have not attended in a while, encouragement to return to class, class and schedule information, account and billing notices, and replies to messages you send us. Consent to receive these messages is not a condition of membership or of purchasing anything. Up to 5 automated msgs/month.</div><div class="MsoNormal" data-custom-class="heading_2" style="line-height: 1.5;"><strong><h3>Message Frequency</h3></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">Automatic retention messages are limited to one per 7-day period per member. Up to 5 automated msgs/month. Messages a gym owner sends manually are delivered through the same automated retention system and are subject to the same per-member limits, so they are included in that total rather than added to it.</div><div class="MsoNormal" data-custom-class="heading_2" style="line-height: 1.5;"><strong><h3>Opting Out</h3></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">You can stop receiving messages at any time by replying STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, or QUIT to any message. You will receive a single confirmation and no further messages. To start receiving messages again, reply START, YES, or UNSTOP.</div><div class="MsoNormal" data-custom-class="heading_2" style="line-height: 1.5;"><strong><h3>Message and Data Rates</h3></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">Please be aware that message and data rates may apply to any SMS messages sent or received. The rates are determined by your carrier and the specifics of your mobile plan. Carriers are not liable for delayed or undelivered messages. If you have any questions about your text plan or data plan, contact your wireless provider.</div><div class="MsoNormal" data-custom-class="heading_2" style="line-height: 1.5;"><strong><h3>Support</h3></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">If you have any questions or need assistance regarding our SMS communications, please reply with the keyword HELP. You can also email us at <a target="_blank" data-custom-class="link" href="mailto:kombatdesk@outlook.com">kombatdesk@outlook.com</a> or call at 7192298105.</div>
 
 <div class="MsoNormal" data-custom-class="heading_1" id="california" style="line-height: 1.5;"><strong><h2>24. CALIFORNIA USERS AND RESIDENTS</h2></strong></div><div class="MsoNormal" data-custom-class="body_text" style="line-height: 1.5;">If any complaint with us is not satisfactorily resolved, you can contact the Complaint Assistance Unit of the Division of Consumer Services of the California Department of Consumer Affairs in writing at 1625 North Market Blvd., Suite N 112, Sacramento, California 95834 or by telephone at (800) 952-5210 or (916) 445-1254.</div>
