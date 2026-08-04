@@ -55,6 +55,10 @@ nothing.
 - Say "I haven't checked that" instead of filling the gap.
 - A verifier handed your *interpretation* cannot falsify it. Hand over the
   source and the question.
+- **A test that cannot fail is the testing form of guessing.** Pin fixtures as
+  literals, never as a list filtered through the code under test — a filter
+  drops every wrong fixture silently and reports green. See the comment on
+  `KNOWN_GOOD` in `convex/smsCode.test.ts` for the live example.
 
 ## 3. Dates are local, never UTC
 
@@ -84,12 +88,20 @@ App code frequently reads Convex fields and queries that must exist first. Ship
 Convex, confirm, then push. Getting this backwards on 2026-08-02 would have
 routed every paying gym into the setup wizard, because `!undefined === true`.
 
-`npx convex codegen` is **not filesystem-only.** It contacts the configured
-deployment, uploads functions, and pushes the schema before it writes local
-types — its own output says `Downloading current deployment state… Uploading
-functions to Convex…`. Check `CONVEX_DEPLOYMENT` before running it. Harmless
-against dev with an additive change; not something to run casually while
-pointed at `limitless-raven-596`.
+`npx convex codegen` is **not filesystem-only, and it is also not a deploy.**
+Both halves have been guessed wrong in this repo, in both directions:
+
+- It contacts the configured deployment. Its output reads `Downloading current
+  deployment state… Uploading functions to Convex…`, so check
+  `CONVEX_DEPLOYMENT` before running it — it is not a local no-op.
+- That upload does **not** make new functions callable. Verified 2026-08-03: a
+  freshly written `internalMutation` was still missing after codegen, and
+  `npx convex run` answered `Could not find function … Did you forget to run
+  npx convex dev?`. The "Uploading functions" line means type analysis, not
+  deployment.
+
+To actually push to dev, use `npx convex dev --once`. Prod stays with
+`npx convex deploy`, which is interactive — propose it, don't run it.
 
 ## 6. Money and consent
 

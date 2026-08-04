@@ -21,9 +21,21 @@ const modules = import.meta.glob("./**/*.ts");
 const ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 // Known-good fixtures, computed against the Luhn mod 30 definition and pinned
-// as literals so the algorithm can't be quietly redefined. Deliberately NOT
-// filtered through isValidSmsCode — filtering would let a wrong fixture drop
-// out silently instead of failing, which is the whole point of pinning.
+// as literals so the algorithm can't be quietly redefined.
+//
+// A TEST THAT CANNOT FAIL. The first version of this line read:
+//
+//   const KNOWN_GOOD = ["2222", "3334", "ABCD"].filter(isValidSmsCode);
+//
+// which pins nothing. The filter discards every fixture the validator already
+// rejects, so the loop below only ever sees codes that pass, and the suite
+// reports green no matter what the algorithm does. Two of those three guesses
+// were in fact wrong ("3334" and "ABCD"); the test never said so. A validator
+// rewritten to `return true` would also have passed.
+//
+// Pin fixtures as bare literals. If a fixture is wrong, the test must say so
+// on the first run — that is the entire job. Never derive the expected values
+// from the code under test, and never filter a fixture list through it.
 //
 // If a change makes these fail, that change reissues every code in every
 // deployment and invalidates anything already printed. That is the signal.
@@ -54,20 +66,38 @@ test("generated codes are the right shape and drawn from the restricted alphabet
   }
 });
 
-test("generated codes are distinct across many calls", async () => {
+test("generated codes are distinct when each one is persisted", async () => {
   const t = convexTest(schema, modules);
 
+  // EACH CODE IS WRITTEN TO A gyms ROW BEFORE THE NEXT IS DRAWN, and that is
+  // the entire point of the test rather than incidental setup.
+  //
+  // generateUniqueSmsCode enforces uniqueness by checking a candidate against
+  // the by_sms_code INDEX, which only sees codes already persisted. Generating
+  // 200 codes without inserting them tests nothing about that mechanism — it
+  // is 200 draws from 27,000 with replacement, and the birthday bound puts the
+  // expected number of collisions at 200^2/(2*27,000) ~= 0.74, so P(at least
+  // one) ~= 52%. The first version of this test did exactly that and therefore
+  // FAILED ROUGHLY HALF THE TIME; it went green twice by luck before the flake
+  // surfaced.
+  //
+  // A flaky test is the same failure as a test that cannot fail, one bit
+  // rotated: both report a result uncorrelated with the property they claim to
+  // check. Persisting makes the index do its job and the assertion becomes a
+  // real statement about the generator.
   const codes = await t.run(async (ctx) => {
     const results: string[] = [];
     for (let i = 0; i < 200; i++) {
-      results.push(await generateUniqueSmsCode(ctx));
+      const smsCode = await generateUniqueSmsCode(ctx);
+      await ctx.db.insert("gyms", {
+        clerkUserId: `user_${Math.random().toString(36).slice(2)}`,
+        smsCode,
+      });
+      results.push(smsCode);
     }
     return results;
   });
 
-  // generateUniqueSmsCode checks each candidate against by_sms_code, but that
-  // index only sees codes already written to a gyms row — these are never
-  // persisted, so this asserts the generator's own spread, not the index's.
   expect(new Set(codes).size).toBe(codes.length);
 });
 
@@ -166,9 +196,12 @@ test("a code is never reassigned once set", async () => {
     const gym = await ctx.db.get(gymId);
     // Mirrors onboarding.ts: an existing code short-circuits generation.
     const next = gym?.smsCode ? undefined : await generateUniqueSmsCode(ctx);
-    // Returned as a boolean, not as `next` itself — convex-test serializes the
-    // return value and undefined comes back as null, so asserting on the raw
-    // value tests the harness rather than the rule.
+    // CONVEX-TEST SERIALIZES undefined TO null ACROSS t.run. Returning `next`
+    // directly and asserting toBeUndefined() fails with "expected null to be
+    // undefined" — a harness artifact, not a bug in the rule being tested.
+    // Collapse to a boolean inside the callback so the assertion is about the
+    // never-reassign rule rather than about how convex-test marshals values.
+    // Applies to any t.run that can return undefined, not just this one.
     return { regenerated: next !== undefined, stored: gym?.smsCode };
   });
 
