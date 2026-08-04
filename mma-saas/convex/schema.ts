@@ -33,7 +33,13 @@ export default defineSchema({
       v.union(
         v.literal("member_self_serve"),
         v.literal("owner_attestation"),
-        v.literal("member_modal")
+        v.literal("member_modal"),
+        // Inbound SMS keyword opt-in (convex/twilioWebhookAction.ts). The
+        // strongest source in this union: the other three record what someone
+        // typed or attested, this one records that the handset itself sent a
+        // message, with Twilio's carrier-verified E.164 From and a MessageSid
+        // on the matching consentSubmissions row.
+        v.literal("keyword")
       )
     ),
     smsOptedOut: v.optional(v.boolean()),
@@ -202,8 +208,46 @@ export default defineSchema({
     normalizedPhone: v.string(),
     consentedAt: v.number(),
     consentText: v.string(),
+    // TWO VERSION NAMESPACES LIVE IN THIS ONE FIELD. Web-form rows carry
+    // lib/consentText.ts's CONSENT_VERSION ("3"); keyword rows carry
+    // "keyword-1" / "keyword-2". That is deliberate — a poster and a web form
+    // are different disclosures, so they cannot share a version counter — but
+    // it means NOTHING MAY NUMERICALLY COMPARE OR SORT THIS FIELD. String
+    // equality only. parseInt("keyword-1") is NaN and every comparison against
+    // it is silently false, which would read as "never consented".
     consentVersion: v.string(),
-    source: v.literal("member_self_serve"),
+    // Widened from v.literal("member_self_serve") when the SMS keyword path
+    // landed. Written as a union at two members because the kiosk prompt and
+    // the waiver-embedded block each add one more (docs/design-waiver-consent.md).
+    source: v.union(v.literal("member_self_serve"), v.literal("keyword")),
+    // Twilio's own record that this handset sent this message. Set only on
+    // source "keyword" — the web form has no carrier-side artifact to point at.
+    // This is the strongest single evidence field in the system: unlike
+    // submittedPhone (typed by a human, unverified) it is attested by the
+    // carrier, and it is independently checkable in Twilio's message logs
+    // years later without trusting anything in this database.
+    messageSid: v.optional(v.string()),
+    // WHICH RESOLVER PATH ATTACHED THIS ROW TO THIS GYM. Set only on source
+    // "keyword"; the web form resolves the gym from the URL and has no
+    // ambiguity to record.
+    //
+    // The three paths are not equally strong evidence and must not be
+    // indistinguishable on the record:
+    //   sms_code / slug — the member transmitted the gym identifier themselves.
+    //                     "They told us which gym."
+    //   roster_match    — we inferred the gym from their phone number matching
+    //                     exactly one roster. "We worked it out."
+    //
+    // If a keyword consent is ever disputed as attached to the wrong gym, that
+    // distinction is the whole answer, and it is unrecoverable after the fact —
+    // the row is append-only and the inbound message body is not stored.
+    gymResolvedBy: v.optional(
+      v.union(v.literal("sms_code"), v.literal("slug"), v.literal("roster_match"))
+    ),
+    // Deliberately unset on keyword rows. An inbound Twilio webhook carries no
+    // browser IP or user-agent, and docs/sms-campaign-constraints.md requires
+    // these be derived server-side rather than accepted from a caller — so the
+    // honest value is absent, not Twilio's own IP dressed up as the member's.
     ip: v.optional(v.string()),
     userAgent: v.optional(v.string()),
   })
@@ -292,6 +336,27 @@ export default defineSchema({
     // name yet and so have nothing to slugify — see convex/migrations.ts's
     // backfillGymSlugs for existing rows.
     slug: v.optional(v.string()),
+    // Short per-gym code carried in the body of an inbound SMS keyword opt-in
+    // ("ROLL 7K2Q"), resolving which gym the text is for. Stored uppercase and
+    // compared uppercase, because convex/twilioWebhookAction.ts uppercases the
+    // whole message body before matching — unlike slug, which is lowercase and
+    // must be lowercased back before a by_slug lookup.
+    //
+    // WHY NOT JUST THE SLUG. Slugs are the slugified gym name, up to 40 chars
+    // plus a random suffix on collision (convex/gyms.ts:generateGymSlug) —
+    // "colorado-springs-bjj". That is free to embed in a QR code or an sms:
+    // link, where nobody types it, and unusable on a poster, where they do.
+    //
+    // WHY NOT FALL BACK TO MATCHING THE SENDER AGAINST EVERY GYM'S ROSTER.
+    // That resolves correctly right up until two gyms share one member — a
+    // person who trains at both — and then it writes nothing, silently, on
+    // printed signage nobody can recall. It degrades exactly when selling
+    // works. The fallback still exists as the last resort in the resolver
+    // chain, but the code is what makes the printed path deterministic.
+    //
+    // Optional: existing gyms are backfilled by convex/migrations.ts rather
+    // than blocked on, same staging choice as slug above.
+    smsCode: v.optional(v.string()),
     // The owner's own wording for the AUTOMATIC winback text. Unset means the
     // built-in default in convex/sendRetentionTexts.ts is used, so existing
     // gyms need no backfill.
@@ -308,7 +373,11 @@ export default defineSchema({
   })
     .index("by_clerk_user", ["clerkUserId"])
     .index("by_stripe_customer", ["stripeCustomerId"])
-    .index("by_slug", ["slug"]),
+    .index("by_slug", ["slug"])
+    // Backs both the inbound-SMS gym resolver and the collision check in the
+    // code generator, for the same reason by_slug backs generateGymSlug —
+    // uniqueness enforced against an index, never assumed from randomness.
+    .index("by_sms_code", ["smsCode"]),
   // Every winback text this product has actually sent.
   //
   // There was no such record. Texts went out and the ONLY copy of what was
