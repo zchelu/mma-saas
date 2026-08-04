@@ -54,3 +54,40 @@ export const HELP_KEYWORDS = ["HELP"];
 export const STOP_KEYWORDS_HANDLED = [...STOP_KEYWORDS, "OPTOUT", "REVOKE"];
 export const START_KEYWORDS_HANDLED = [...START_KEYWORDS];
 export const HELP_KEYWORDS_HANDLED = [...HELP_KEYWORDS, "INFO"];
+
+// TEXT-TO-JOIN OPT-IN KEYWORD. A THIRD CATEGORY, NOT A FOURTH START KEYWORD.
+//
+// START/YES/UNSTOP clear smsOptedOut and deliberately do NOT grant consent.
+// This keyword grants consent and deliberately does NOT clear smsOptedOut.
+// The two are near-opposites and the separation is load-bearing — it is
+// documented in three places and restated in
+// docs/sms-campaign-constraints.md's keyword rules. Never merge these lists.
+//
+// Consequence worth stating plainly: a number suppressed by a prior STOP that
+// texts this keyword is recorded as having consented (it did) and stays
+// suppressed at the carrier (it must). Only a registered START keyword lifts
+// carrier suppression, and this is not one — Twilio would not honour it even
+// if we wanted it to.
+//
+// NOT ADVERTISED ANYWHERE. There is no *_KEYWORDS counterpart on purpose:
+// the advertised arrays render verbatim into lib/consentText.ts's checkbox
+// copy, which is frozen at CONSENT_VERSION 3 and quoted inside an APPROVED A2P
+// Call-to-Action field. This keyword is advertised on signage instead, which
+// is a separate surface with its own versioned text (KEYWORD_SIGNAGE_TEXT).
+//
+// ⚠️ THE VALUE BELOW IS A PLACEHOLDER AND MUST NOT BE PRINTED, RENDERED, OR
+// PUT ON A POSTER. Before it becomes real, the candidate keyword has to be
+// checked against Advanced Opt-Out on messaging service
+// MG3df4bb11fd47a0f0b562ba9605aacd9d — Twilio can intercept a configured
+// keyword at the carrier layer, in which case this webhook never sees the
+// message and every test here passes while nothing works. The console is the
+// authority, not this file. That check is a manual console task, not
+// automatable, and it has not been done.
+//
+// Changing this is a one-line edit once the check clears. Everything
+// downstream — the webhook branch, the mutation, the tests — reads the
+// constant, so nothing else moves. Shape rules (4-12 chars, no symbols,
+// autocorrect-tested on a real handset) are asserted in
+// convex/keywordConsent.test.ts so a bad final value fails the suite.
+export const OPT_IN_KEYWORD = "OPTINPENDING";
+export const OPT_IN_KEYWORDS_HANDLED = [OPT_IN_KEYWORD];

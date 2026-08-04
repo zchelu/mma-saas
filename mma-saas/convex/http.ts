@@ -94,7 +94,7 @@ http.route({
       //
       // Escaping here rather than sanitising the copy is deliberate: the HELP
       // sentence is part of the five-site disclosure set that carriers
-      // cross-check (see sendRetentionTexts.ts:39-51), so it must stay
+      // cross-check (see sendRetentionTexts.ts's getAtRiskMembers), so it must stay
       // byte-identical to lib/consentText.ts, terms.html §23 and
       // privacy-policy.html §9. Fix the encoder, never the disclosure.
       const escapeXml = (s: string) =>

@@ -38,15 +38,57 @@ export const getAtRiskMembers = internalQuery({
     //
     // Changing this number changes what the law requires us to have disclosed.
     // The sentence "Up to 5 automated msgs/month." appears byte-identically at
-    // FIVE sites — carriers cross-check the HELP reply against the opt-in
-    // disclosure and both linked legal documents, so all five must move in the
-    // same commit, and CONSENT_VERSION in lib/consentText.ts must be bumped
-    // with them:
-    //   - lib/consentText.ts             (opt-in checkbox text)
+    // EVERY SITE LISTED BELOW — carriers cross-check the HELP reply against the
+    // opt-in disclosure and both linked legal documents, so all of them must
+    // move in the same commit.
+    //
+    // AND THE RIGHT VERSION MUST BE BUMPED WITH THEM. lib/consentText.ts now
+    // carries TWO INDEPENDENT VERSION NAMESPACES, and they track different
+    // surfaces shown to different people:
+    //
+    //   getConsentText              -> bump CONSENT_VERSION ("3", "4", ...)
+    //   getKeywordSignageText       -> bump the keyword-N namespace
+    //   getKeywordConfirmationText  -> bump the keyword-N namespace
+    //
+    // Getting this backwards is not a cosmetic mistake in either direction.
+    // Bumping CONSENT_VERSION for a keyword-text change un-dedupes every
+    // existing web-form consenter — consent.ts:submitConsent keys idempotency
+    // on gymId+phone+version, so they all become eligible to submit again for
+    // wording that never changed. Bumping the keyword namespace for a
+    // getConsentText change leaves keyword evidence rows pointing at signage
+    // wording they no longer match, which is the one thing consentText exists
+    // to prevent.
+    //
+    // The legal documents and the Twilio console below are shared by both
+    // namespaces: a change there is a change to what everyone was told, so
+    // both versions move.
+    //
+    // THIS LIST IS THE COUNT. Deliberately no number in the prose above, and
+    // none in AGENTS.md §4 either, which points here instead: a number in prose
+    // silently goes stale the moment a site is added, and two of these were
+    // added in the same commit that would have had to remember to increment it.
+    //
+    //   - lib/consentText.ts             getConsentText (opt-in checkbox text)
+    //   - lib/consentText.ts             getKeywordSignageText (SMS keyword
+    //                                    opt-in signage — the poster text
+    //                                    snapshotted onto keyword-N evidence
+    //                                    rows; note that changing it does NOT
+    //                                    change posters already printed)
+    //   - lib/consentText.ts             getKeywordConfirmationText (the
+    //                                    keyword opt-in confirmation reply,
+    //                                    currently gated dark — see
+    //                                    convex/keywordConsent.ts)
     //   - convex/twilioWebhookAction.ts  (HELP auto-reply body)
     //   - content/terms.html §23         (Program Description)
     //   - content/terms.html §23         (Message Frequency subsection)
     //   - content/privacy-policy.html §9 (Frequency bullet)
+    //   - Twilio console                 Advanced Opt-Out HELP message on
+    //                                    messaging service
+    //                                    MG3df4bb11fd47a0f0b562ba9605aacd9d.
+    //                                    NOT IN THIS REPO — grepping the files
+    //                                    above proves nothing about what a
+    //                                    carrier reviewer actually sees, and
+    //                                    this is the copy a member receives.
     // privacy-policy.html §2 states the "one per member per 7-day period"
     // cadence rule without a monthly count — accurate as written, left alone.
     const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;

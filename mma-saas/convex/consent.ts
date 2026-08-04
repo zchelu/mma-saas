@@ -267,7 +267,13 @@ export const applyPendingConsent = mutation({
       await ctx.db.patch(member._id, {
         smsConsentConfirmed: true,
         smsConsentConfirmedAt: now,
-        smsConsentSource: "member_self_serve",
+        // From the submission, not hardcoded. This used to stamp
+        // "member_self_serve" unconditionally, which mislabelled every
+        // keyword-origin consent the moment a second source existed — on the
+        // exact field that exists so a carrier or lawyer question about how a
+        // specific member consented is answerable from the member row alone,
+        // without cross-referencing consentSubmissions.
+        smsConsentSource: submission.source,
       });
       applied++;
     }

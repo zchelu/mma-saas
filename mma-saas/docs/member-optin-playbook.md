@@ -162,7 +162,8 @@ worth naming:
 Then the legal checkbox beneath, unchanged and byte-identical.
 
 ⚠️ **The `getConsentText()` string itself must not be touched.** It's frozen onto every
-evidence row, byte-identical across five sites, and now quoted inside an **approved** CTA
+evidence row, byte-identical across every site listed in
+`convex/sendRetentionTexts.ts`'s `getAtRiskMembers`, and now quoted inside an **approved** CTA
 field. Edit the surrounding page copy only. Anything inside the checkbox label forces a
 `CONSENT_VERSION` bump and desyncs the campaign record.
 

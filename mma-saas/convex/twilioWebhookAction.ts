@@ -8,6 +8,7 @@ import {
   STOP_KEYWORDS_HANDLED,
   START_KEYWORDS_HANDLED,
   HELP_KEYWORDS_HANDLED,
+  OPT_IN_KEYWORDS_HANDLED,
 } from "../lib/smsKeywords";
 
 // THE HELP REPLY. NOT SENT FROM HERE — AND STILL LOAD-BEARING. READ BEFORE EDITING.
@@ -15,10 +16,10 @@ import {
 // This string is not returned by the HELP branch below (see the comment there:
 // Twilio's Advanced Opt-Out answers HELP at the carrier layer, and returning it
 // here too delivered the member two identical texts). It is kept in the repo
-// because it is one of the FIVE sites that must carry the frequency disclosure
+// because it is one of the sites that must carry the frequency disclosure
 // byte-identically — carriers cross-check the HELP reply against the opt-in
 // disclosure and both linked legal documents. The full list and the rules live
-// at convex/sendRetentionTexts.ts:39-51, and that list names THIS FILE as the
+// in convex/sendRetentionTexts.ts's getAtRiskMembers, and that list names THIS FILE as the
 // HELP auto-reply body.
 //
 // Deleting this constant would move the only copy of the live HELP text into a
@@ -203,6 +204,59 @@ export const verifyAndProcess = internalAction({
     // cannot make that guarantee about itself.
     if (from && HELP_KEYWORDS_HANDLED.includes(body)) {
       return { status: "ok" };
+    }
+
+    // TEXT-TO-JOIN OPT-IN. Matches on the FIRST WORD only, unlike every branch
+    // above — the body carries a gym identifier after the keyword ("KEYWORD
+    // 7K2Q"), so an exact-match check would never fire. Which gym it resolves
+    // to, and how, is decided in convex/keywordConsent.ts.
+    //
+    // POSITION IS LOAD-BEARING: this sits above the final return alongside its
+    // sibling branches, so it is downstream of the signature check, the rate
+    // limit, and the claimMessageSid replay claim. Moved below, it would still
+    // "work" — and would silently lose replay protection, letting a captured
+    // POST re-record consent indefinitely.
+    //
+    // Follows the same `if (!isReplay)` shape as STOP/START: a replayed text
+    // changes nothing but gets a byte-identical response, so the reply never
+    // reveals that a message was recognised as a duplicate.
+    const firstWord = body.split(/\s+/)[0] ?? "";
+    if (from && OPT_IN_KEYWORDS_HANDLED.includes(firstWord)) {
+      if (isReplay) return { status: "ok" };
+
+      // Read here rather than inside the mutation because only this file runs
+      // in the Node runtime. Default OFF — the confirmation reply is a message
+      // type the approved A2P campaign does not declare, so it stays dark
+      // until the batched CTA rewrite lands. The mutation applies a per-gym
+      // allowlist on top of this; both gates must pass.
+      const confirmationEnabled = process.env.KEYWORD_CONFIRMATION_REPLY_ENABLED === "true";
+
+      const result = await ctx.runMutation(internal.keywordConsent.recordKeywordConsent, {
+        fromPhone: from,
+        body,
+        messageSid,
+        confirmationEnabled,
+      });
+
+      if (result.status === "unresolved") {
+        // Nothing was written. Deliberately does not name a gym or hint at
+        // whether this number is on any roster — an unauthenticated sender
+        // must not be able to probe rosters by texting.
+        return {
+          status: "ok",
+          replyMessage:
+            "We couldn't tell which gym this is for. Please use the link or QR code your gym gave you.",
+        };
+      }
+
+      // confirmationText is non-null only when the feature flag, the gym
+      // allowlist, and "not suppressed at the carrier" all pass — decided in
+      // the mutation, because that is the same decision that determines which
+      // consent text the evidence row snapshotted. Anything else would record
+      // a disclosure the member never received.
+      return result.confirmationText
+        ? { status: "ok", replyMessage: result.confirmationText }
+        : { status: "ok" };
     }
 
     return { status: "ok" };

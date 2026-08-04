@@ -37,14 +37,15 @@ import { STOP_KEYWORDS, START_KEYWORDS } from "./smsKeywords";
 // write the same recordRetentionText — so there is deliberately no "plus
 // messages your gym sends" clause; that channel does not exist.
 //
-// This sentence must stay BYTE-IDENTICAL in five places, because carriers
-// cross-check the HELP reply against the opt-in disclosure and both linked
-// legal documents (/privacy is one click from the consent page footer):
-//   - lib/consentText.ts (here)
-//   - convex/twilioWebhookAction.ts (HELP auto-reply body)
-//   - content/terms.html §23 Program Description
-//   - content/terms.html §23 Message Frequency
-//   - content/privacy-policy.html §9 Frequency
+// This sentence must stay BYTE-IDENTICAL everywhere it appears, because
+// carriers cross-check the HELP reply against the opt-in disclosure and both
+// linked legal documents (/privacy is one click from the consent page footer).
+//
+// THE CANONICAL LIST LIVES IN convex/sendRetentionTexts.ts's getAtRiskMembers,
+// beside the 7-day constant that makes the number 5 true. It is not duplicated
+// here on purpose: this file used to carry its own copy of the list, which is
+// two lists to keep in sync instead of one, and the copy here went stale the
+// moment the SMS keyword opt-in added two more sites. One list, one place.
 //
 // A material TCPA disclosure term changed, so the bump was required for the
 // same reason v2's was: consentSubmissions snapshots consentText per row, and
@@ -69,6 +70,77 @@ export const CONSENT_VERSION = "3";
 function formatKeywordList(keywords: string[]): string {
   if (keywords.length === 1) return keywords[0];
   return `${keywords.slice(0, -1).join(", ")}, or ${keywords[keywords.length - 1]}`;
+}
+
+// ─── SMS KEYWORD OPT-IN (text-to-join) ──────────────────────────────────────
+//
+// A SEPARATE VERSION NAMESPACE FROM CONSENT_VERSION ABOVE, AND THAT IS THE
+// POINT. Nothing below touches CONSENT_VERSION or getConsentText: a poster and
+// a web form are different disclosures shown to different people through
+// different channels, and forcing them onto one counter means a wording change
+// on either invalidates the evidence for both.
+//
+// Both strings land in consentSubmissions.consentVersion, which is a plain
+// string. NOTHING MAY NUMERICALLY COMPARE OR SORT THAT FIELD once both
+// namespaces are live — parseInt("keyword-1") is NaN and every comparison
+// against it is silently false, which reads as "never consented". Restated
+// here because this file is where the second namespace is introduced.
+//
+// keyword-1: the member saw the SIGNAGE ONLY. No confirmation reply was sent.
+// keyword-2: the member saw the signage AND received the confirmation reply.
+//
+// Which one is stamped is decided per-row at write time by whether the reply
+// actually goes out (convex/keywordConsent.ts), never assumed — snapshotting
+// a confirmation the member never received would be exactly the kind of
+// plausible-but-false evidence this table exists to prevent.
+export const KEYWORD_CONSENT_VERSION_SIGNAGE_ONLY = "keyword-1";
+export const KEYWORD_CONSENT_VERSION_WITH_CONFIRMATION = "keyword-2";
+
+// WHAT THE POSTER SAYS. This is the disclosure a member actually reads before
+// texting in, so it is what gets snapshotted onto their evidence row.
+//
+// PRINTED SIGNAGE IS A CONSENT SURFACE YOU CANNOT VERSION-CONTROL. Every
+// poster in every gym is a physical object; changing this string does not
+// change them, it only means the repo and the wall disagree. So this text is
+// deliberately MINIMAL — the smallest set of terms that is complete — and the
+// confirmation reply below is where anything that may need to change remotely
+// belongs.
+//
+// ⚠️ CARRIES THE FREQUENCY SENTENCE. "Up to 5 automated msgs/month." must stay
+// BYTE-IDENTICAL to every site listed in convex/sendRetentionTexts.ts's
+// getAtRiskMembers
+// plus the Twilio console's Advanced Opt-Out HELP message. This is a NEW site
+// carrying it. When that sentence changes, this string changes with it, and
+// every poster in the field becomes stale until reprinted — which is a real
+// operational cost and an argument for never changing it casually.
+export function getKeywordSignageText(gymName: string): string {
+  return (
+    `Text-in opt-in for ${gymName}, sent by KombatDesk on the gym's behalf. ` +
+    `You'll get automated attendance reminders, including a nudge if you ` +
+    `haven't been in for a while. Consent is not a condition of membership or ` +
+    `of purchasing anything. Up to 5 automated msgs/month. Message and data ` +
+    `rates may apply. Reply STOP to opt out at any time. Reply HELP for help. ` +
+    `Terms: kombatdesk.com/terms`
+  );
+}
+
+// THE CONFIRMATION REPLY — the versioned artifact we actually control.
+//
+// ⚠️ NOT SENT BY DEFAULT. This is a NEW OUTBOUND MESSAGE TYPE the approved A2P
+// campaign does not declare, and Twilio's own 7/30 Message Flow draft had this
+// exact line cut because declaring a message you don't send is a false
+// statement to the carrier. Sending one never declared is that inverted. It is
+// gated behind an env flag AND a gym allowlist in convex/keywordConsent.ts and
+// must not be enabled for a real gym until the single batched CTA rewrite
+// lands — see docs/sms-campaign-constraints.md.
+//
+// Also carries the frequency sentence, same byte-identical rule as above.
+export function getKeywordConfirmationText(gymName: string): string {
+  return (
+    `${gymName}: you're opted in to automated attendance reminders from ` +
+    `KombatDesk. Up to 5 automated msgs/month. Message and data rates may ` +
+    `apply. Reply STOP to opt out. Help: kombatdesk@outlook.com`
+  );
 }
 
 export function getConsentText(gymName: string): string {

@@ -55,10 +55,19 @@ nothing.
 - Say "I haven't checked that" instead of filling the gap.
 - A verifier handed your *interpretation* cannot falsify it. Hand over the
   source and the question.
-- **A test that cannot fail is the testing form of guessing.** Pin fixtures as
-  literals, never as a list filtered through the code under test — a filter
-  drops every wrong fixture silently and reports green. See the comment on
-  `KNOWN_GOOD` in `convex/smsCode.test.ts` for the live example.
+- **A check that cannot fail is guessing with extra steps.** If a check's
+  all-clear output can print when the thing it looks for is present, it is not
+  a check — it is a ritual. Three instances in one session, which is why this
+  is written down broadly rather than as a testing rule:
+  - a fixture list filtered through the code under test (`.filter(isValid…)`)
+    silently drops every wrong fixture and reports green — pin literals; see
+    `KNOWN_GOOD` in `convex/smsCode.test.ts`;
+  - a suite that passes first try has not yet been shown to fail — break the
+    thing on purpose, confirm the *right* tests go red, revert;
+  - `grep … ; echo "(none = clean)"` prints the all-clear unconditionally,
+    including on the run where grep found three matches.
+  The fix is always the same: make the failure path produce different output
+  from the success path, then read the output rather than the summary.
 
 ## 3. Dates are local, never UTC
 
@@ -70,10 +79,9 @@ argument and never derives one. **This mistake has been made four times.**
 ## 4. SMS is compliance surface, not copy
 
 - The sentence *"Up to 5 automated msgs/month."* must stay byte-identical across
-  **five** sites — see `convex/sendRetentionTexts.ts:39-51` for the list and the
-  `CONSENT_VERSION` rules. Carriers cross-check them. A sixth copy now lives in
-  the Twilio console (Advanced Opt-Out HELP message on
-  `MG3df4bb11fd47a0f0b562ba9605aacd9d`) and must move with them.
+  **every site listed in `convex/sendRetentionTexts.ts:getAtRiskMembers`**, which includes
+  the Twilio console copy. Carriers cross-check them. No count here on purpose —
+  that list is the count, and a number in prose rots the moment a site is added.
 - Never widen `STOP_KEYWORDS` / `START_KEYWORDS`; add to the `_HANDLED` lists.
   The advertised arrays render verbatim into consent copy and are frozen at
   `CONSENT_VERSION 3`.

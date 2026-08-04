@@ -18,6 +18,7 @@ import type * as enrollments from "../enrollments.js";
 import type * as gyms from "../gyms.js";
 import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
+import type * as keywordConsent from "../keywordConsent.js";
 import type * as members from "../members.js";
 import type * as migrations from "../migrations.js";
 import type * as onboarding from "../onboarding.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   gyms: typeof gyms;
   http: typeof http;
   invoices: typeof invoices;
+  keywordConsent: typeof keywordConsent;
   members: typeof members;
   migrations: typeof migrations;
   onboarding: typeof onboarding;
