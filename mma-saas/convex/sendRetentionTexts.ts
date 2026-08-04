@@ -10,13 +10,19 @@ import { v } from "convex/values";
 import { requireGym, requireWriteAccess, hasWriteAccess } from "./gyms";
 import { assertMaxLength } from "./validate";
 import { planHasTexting } from "../lib/plans";
-import { isTextEligibleMember } from "../lib/memberEligibility";
+import { isTextEligibleMember, MAX_WINBACK_ATTEMPTS } from "../lib/memberEligibility";
 
 const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
 
 // Winback attempts a member gets per cold streak before going dormant. Paired
 // with the per-member 7-day gate below, that's ~three weeks of outreach.
-export const MAX_WINBACK_ATTEMPTS = 3;
+//
+// The constant itself now lives in lib/memberEligibility.ts, beside the
+// eligibility predicate, because app/components/text-state-pill.tsx renders a
+// "Dormant" badge off it and a "use client" component cannot import a Convex
+// module. Re-exported from here unchanged so existing importers
+// (convex/members.ts:getDormantMembers) keep working against the same name.
+export { MAX_WINBACK_ATTEMPTS };
 
 // How recent a winback text has to be for a subsequent check-in to count as
 // a recovery caused by it (see members.ts:checkIn). Two full texting cycles

@@ -44,6 +44,13 @@ export const getAll = query({
       // inbound START from the member's own handset does
       // (convex/twilioWebhookAction.ts -> members.setSmsOptOutByPhone).
       smsOptedOut: m.smsOptedOut,
+      // Feeds the Texts column's "Dormant" state — this member has used every
+      // winback attempt of the current cold streak, so the automatic sequence
+      // has stopped even though they're still perfectly reachable. Same field
+      // getDormantMembers below filters on, and the same one
+      // getAtRiskMembers returns, so the Members table and the dashboard's At
+      // Risk panel render that state from identical inputs.
+      winbackAttempts: m.winbackAttempts,
     }));
   },
 });
@@ -467,6 +474,21 @@ export const getCheckInHistory = query({
   },
 });
 
+// The dashboard's "who has gone quiet" panel (app/dashboard/at-risk.tsx).
+// Deliberately wider than sendRetentionTexts.ts:getAtRiskMembers (the send
+// gate) — this one lists people with no number and people who opted out too,
+// because a coach still needs to see them; it just can't text them.
+//
+// Narrowed to an explicit field map for the same reason getAll,
+// getActiveForGym and getUnconfirmedImportedMembers are: returning raw member
+// documents shipped checkInToken — the kiosk check-in credential — to the
+// browser for every at-risk member. The panel never needs it. Everything below
+// lastVisit is here only to feed app/components/text-state-pill.tsx.
+//
+// tryGetGym, not requireGym — at-risk.tsx is "use client" and reads this via
+// useQuery, so it fires before Clerk's session has hydrated. requireGym throws
+// there, production redacts that to a generic "Server Error", and with no
+// error boundary on the route it takes the whole dashboard down (518ad18).
 export const getAtRiskMembers = query({
   args: {},
   handler: async (ctx) => {
@@ -479,9 +501,25 @@ export const getAtRiskMembers = query({
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
       .collect();
-    return all.filter(
-      (m) => !m.archived && m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
-    );
+    return all
+      .filter(
+        (m) => !m.archived && m.status === "active" && (!m.lastVisit || m.lastVisit < threshold)
+      )
+      .map((m) => ({
+        _id: m._id,
+        name: m.name,
+        lastVisit: m.lastVisit,
+        // The pill's inputs. archived/status are constant across this list
+        // given the filter above, but they're what isTextEligibleMember takes,
+        // and passing them explicitly keeps the panel honest if that filter
+        // ever loosens.
+        phone: m.phone,
+        smsConsentConfirmed: m.smsConsentConfirmed,
+        smsOptedOut: m.smsOptedOut,
+        status: m.status,
+        archived: m.archived,
+        winbackAttempts: m.winbackAttempts,
+      }));
   },
 });
 

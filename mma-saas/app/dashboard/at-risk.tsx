@@ -1,6 +1,7 @@
 "use client";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { textState, TextStatePill } from "../components/text-state-pill";
 
 function daysAgo(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -42,13 +43,23 @@ export default function AtRiskPanel() {
             {atRisk.map((m) => (
               <li
                 key={m._id}
-                className="flex items-center justify-between py-3 px-4 rounded-lg"
+                className="flex items-center justify-between gap-3 py-3 px-4 rounded-lg"
                 style={{ backgroundColor: "#1A1A1A", borderLeft: "3px solid #E02020" }}
               >
-                <span className="text-sm font-medium" style={{ color: "#FFFFFF" }}>{m.name}</span>
-                <span className="text-xs" style={{ color: "#888888" }}>
-                  {m.lastVisit ? `${daysAgo(m.lastVisit)} days ago` : "Never checked in"}
-                </span>
+                <span className="text-sm font-medium truncate" style={{ color: "#FFFFFF" }}>{m.name}</span>
+                {/* Same pill as the Members table's Texts column, from the one
+                    shared implementation — this panel is where "Dormant"
+                    actually earns its place, since these are exactly the
+                    members whose automatic sequence has run out. Grouped on
+                    the right with the days-ago so the list still scans down
+                    the names; most rows render the quiet "—" rather than a
+                    badge, which keeps it a list and not a table. */}
+                <div className="flex items-center gap-3 shrink-0">
+                  <TextStatePill state={textState(m)} />
+                  <span className="text-xs whitespace-nowrap" style={{ color: "#888888" }}>
+                    {m.lastVisit ? `${daysAgo(m.lastVisit)} days ago` : "Never checked in"}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>
