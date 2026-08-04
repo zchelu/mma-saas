@@ -174,10 +174,21 @@ function randomSlugSuffix(): string {
 // slugifying to the same base) falls through to a suffixed retry, checked
 // against by_slug.
 //
-// (An earlier version of this comment referenced generateUniqueCheckInToken
-// and a by_check_in_token index as the precedent. Neither exists anywhere in
-// this codebase — the kiosk is reached at /checkin?gym=<raw gym id> with no
-// token at all. Removed 2026-08-02 after it nearly got designed around.)
+// Same shape as members.ts:112's generateUniqueCheckInToken: generate, check
+// the candidate against an index, retry a bounded number of times, throw
+// rather than loop forever. Both exist and both are the precedent for any
+// future generated identifier in this codebase — see also generateUniqueSmsCode
+// below.
+//
+// (A previous version of this comment asserted that generateUniqueCheckInToken
+// and the by_check_in_token index "do not exist anywhere in this codebase."
+// That was false when written. The function landed in 94bbf45 on 2026-07-22 at
+// members.ts:112, uses the index at members.ts:117, and the index is defined at
+// schema.ts:78; the comment denying them landed in 7efaccb on 2026-08-02,
+// eleven days later. It was added to stop someone designing around something
+// nonexistent and was itself the thing that did not exist — which is the
+// failure mode in AGENTS.md §2, committed inside a warning about it. Corrected
+// 2026-08-03 by grepping, not by remembering.)
 export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<string> {
   const base = slugifyGymName(name);
   for (let attempt = 0; attempt < 5; attempt++) {

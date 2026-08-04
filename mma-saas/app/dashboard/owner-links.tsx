@@ -14,11 +14,16 @@ import { api } from "../../convex/_generated/api";
 // it. A gym that can't collect member consent can never send a single retention
 // text, so "owner lost their consent link" and "gym is dead" are the same event.
 //
-// The kiosk URL is /checkin?gym=<raw Convex gym id> — there is no check-in
-// token despite what the stale comment at convex/gyms.ts:174 claims about
-// generateUniqueCheckInToken, which does not exist. Anyone with the link can
-// check anyone in; it is a front-desk tablet, same trust model as a paper
-// sign-in sheet. Worth knowing before it gets shared more widely than that.
+// The kiosk URL is /checkin?gym=<raw Convex gym id> and carries no token of
+// its own. Anyone with the link can check anyone in; it is a front-desk
+// tablet, same trust model as a paper sign-in sheet. Worth knowing before it
+// gets shared more widely than that.
+//
+// Not to be confused with per-member check-in tokens, which do exist
+// (members.ts:112 generateUniqueCheckInToken, schema.ts:78 by_check_in_token)
+// and are a separate mechanism embedded in an individual member's QR/card. The
+// two facts are independently true: member tokens exist AND the kiosk entry
+// URL is untokenized.
 
 const CARD = { backgroundColor: "#222222", border: "1px solid #333333" };
 

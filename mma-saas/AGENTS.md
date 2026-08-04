@@ -84,6 +84,13 @@ App code frequently reads Convex fields and queries that must exist first. Ship
 Convex, confirm, then push. Getting this backwards on 2026-08-02 would have
 routed every paying gym into the setup wizard, because `!undefined === true`.
 
+`npx convex codegen` is **not filesystem-only.** It contacts the configured
+deployment, uploads functions, and pushes the schema before it writes local
+types — its own output says `Downloading current deployment state… Uploading
+functions to Convex…`. Check `CONVEX_DEPLOYMENT` before running it. Harmless
+against dev with an additive change; not something to run casually while
+pointed at `limitless-raven-596`.
+
 ## 6. Money and consent
 
 - **Never complete a Stripe checkout to test.** Creating a Checkout Session is
