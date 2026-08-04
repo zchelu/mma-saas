@@ -8,6 +8,7 @@ import MemberModal from "./member-modal";
 import CheckInHistoryDrawer from "./check-in-history-drawer";
 import ConsentAttestationPanel from "./consent-attestation-panel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
+import { isTextEligibleMember } from "../../lib/memberEligibility";
 
 type Member = {
   _id: Id<"members">;
@@ -26,33 +27,39 @@ type Member = {
 type SortCol = "name" | "plan" | null;
 type SortDir = "asc" | "desc";
 
-// Mirrors the member-level conditions in
-// convex/sendRetentionTexts.ts:getAtRiskMembers — the query that decides who
-// actually receives a text. Deliberately NOT the dashboard's
-// members.ts:getAtRiskMembers, which is the wider "who has gone quiet" list and
-// includes people with no number and people who have opted out. Keeping this in
-// sync with the SEND gate is the whole value of the column: an owner looking at
-// it should be seeing the real send audience, not an optimistic one.
+// "on" is delegated entirely to lib/memberEligibility.ts's isTextEligibleMember
+// — the same predicate convex/sendRetentionTexts.ts:getAtRiskMembers (the real
+// send gate) and members.ts:getTextableCount (the dashboard tile) use, so this
+// column, the dashboard, and the actual send audience can't drift apart the way
+// they used to. Deliberately NOT the dashboard's members.ts:getAtRiskMembers,
+// which is a different, wider "who has gone quiet" list that includes people
+// with no number and people who have opted out.
 //
-// Order matters. smsOptedOut is checked before smsConsentConfirmed because an
-// opt-out is the member's own most recent instruction and outranks any consent
-// record we hold; showing "needs opt-in" for someone who texted STOP would
-// invite an owner to go chase them, which is exactly the behaviour TCPA
-// penalises. Absence of a phone number wins over both simply because there is
-// nothing to act on.
+// The sub-cases below are diagnostic labeling only, not a second copy of the
+// eligibility rule — every branch here is already excluded by
+// isTextEligibleMember; this just decides which single reason to surface when
+// more than one gate fails. Order matters. smsOptedOut is checked before
+// smsConsentConfirmed because an opt-out is the member's own most recent
+// instruction and outranks any consent record we hold; showing "needs opt-in"
+// for someone who texted STOP would invite an owner to go chase them, which is
+// exactly the behaviour TCPA penalises. Absence of a phone number wins over
+// both simply because there is nothing to act on. A non-"active" status is
+// checked last — it isn't something this column asks the owner to act on
+// (that's the adjacent Status column), it's just the least specific reason.
 //
 // The two gates that are NOT reflected here — the 7-day spacing rule and the
 // 3-attempt cap — are deliberately excluded. They are transient (a member is
 // "recently texted" for a week, then isn't) and rendering them as a roster
 // attribute would make the column flicker between page loads and read as a
 // permanent state when it is a temporary one.
-type TextState = "on" | "opted_out" | "needs_optin" | "no_number";
+type TextState = "on" | "opted_out" | "needs_optin" | "no_number" | "inactive";
 
 function textState(m: Member): TextState {
+  if (isTextEligibleMember(m)) return "on";
   if (!m.phone) return "no_number";
   if (m.smsOptedOut) return "opted_out";
   if (!m.smsConsentConfirmed) return "needs_optin";
-  return "on";
+  return "inactive";
 }
 
 const TEXT_STATE_STYLE: Record<Exclude<TextState, "no_number">, { label: string; bg: string; fg: string }> = {
@@ -62,6 +69,7 @@ const TEXT_STATE_STYLE: Record<Exclude<TextState, "no_number">, { label: string;
   on: { label: "On", bg: "#0A2A14", fg: "#4ADE80" },
   needs_optin: { label: "Needs opt-in", bg: "#1A1400", fg: "#FBBF24" },
   opted_out: { label: "Opted out", bg: "#1A1A1A", fg: "#888888" },
+  inactive: { label: "Inactive", bg: "#1A1A1A", fg: "#888888" },
 };
 
 function TextStatePill({ state }: { state: TextState }) {
@@ -78,6 +86,8 @@ function TextStatePill({ state }: { state: TextState }) {
           ? "This member replied STOP. Only they can undo it, by texting START from their own phone."
           : state === "needs_optin"
           ? "You have a number but no recorded consent, so they will not be texted. Send them your opt-in link."
+          : state === "inactive"
+          ? "Consent is on file, but this member's status isn't Active, so they won't be texted."
           : "Number on file, consent recorded, not opted out."
       }
     >
@@ -164,11 +174,10 @@ export default function MembersPage() {
   // "how far through getting my members opted in am I", which a filtered
   // count would silently misreport.
   //
-  // NOTE this is a different number from the dashboard's "Members Opted In"
-  // tile, which counts rows in consentSubmissions (people who filled in the
-  // public /consent/[gymSlug] form) and does NOT move when consent is recorded
-  // through the member modal or the bulk attestation panel. THIS is the count
-  // of members who would actually receive a text.
+  // Same number as the dashboard's "Can be texted" tile (members.ts:
+  // getTextableCount) — both are isTextEligibleMember over the same roster, so
+  // this screen and the dashboard can't disagree the way they used to when the
+  // dashboard tile counted consentSubmissions rows instead.
   const textableCount = memberList.filter((m) => textState(m) === "on").length;
 
   // Copy deliberately promises only what archiveMember actually does: the row

@@ -5,6 +5,7 @@ import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
 import { MAX_WINBACK_ATTEMPTS, WINBACK_ATTRIBUTION_WINDOW_DAYS } from "./sendRetentionTexts";
+import { isTextEligibleMember } from "../lib/memberEligibility";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -59,6 +60,37 @@ export const getActiveCount = query({
       .filter((q) => q.neq(q.field("archived"), true))
       .collect();
     return active.length;
+  },
+});
+
+// The dashboard's "Can be texted" tile — how many members would actually
+// receive a retention text right now, same predicate as
+// sendRetentionTexts.ts:getAtRiskMembers's send gate (minus its transient
+// 7-day/attempts gates) and app/members/page.tsx's Texts column, via
+// lib/memberEligibility.ts. This replaced a tile that read
+// consent.ts:getConsentStats — a count of public-form submissions that
+// stayed at 0 for consent recorded through the member modal or the bulk
+// attestation panel, and that still climbed for a submission that matched no
+// roster member and made nobody textable. See getConsentStats for why that
+// number still exists (it's a genuine audit-trail count) and why it
+// shouldn't be shown to an owner as "members opted in".
+//
+// tryGetGym, not requireGym — this renders in StatsGrid ("use client") via
+// useQuery, so it fires before Clerk's client-side session has hydrated.
+// requireGym throws a plain Error there, which production redacts to a
+// generic "Server Error" and — with no error boundary on the route — took
+// the whole dashboard down once already (518ad18). getConsentStats and its
+// three sibling stat cards all use tryGetGym for exactly this reason.
+export const getTextableCount = query({
+  args: {},
+  handler: async (ctx) => {
+    const gym = await tryGetGym(ctx);
+    if (!gym) return 0;
+    const members = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
+      .collect();
+    return members.filter(isTextEligibleMember).length;
   },
 });
 

@@ -6,28 +6,22 @@ export default function StatsGrid() {
   const activeMembers = useQuery(api.members.getActiveCount);
   const classCount = useQuery(api.classes.getCount);
   const openInvoices = useQuery(api.invoices.getUnpaidCount);
-  const consentStats = useQuery(api.consent.getConsentStats);
+  const textableCount = useQuery(api.members.getTextableCount);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
       <StatCard label="Active Members" value={activeMembers} />
       <StatCard label="Classes Scheduled" value={classCount} />
       <StatCard label="Open Invoices" value={openInvoices} />
-      {/* Deliberately the MATCHED count, not the total. The old card showed
-          every submission, including the ones that matched no roster member
-          and therefore made nobody textable — so the number an owner read as
-          "people I can now text" was inflated by exactly the failures they
-          most needed to see. The gap gets its own callout in owner-links.tsx;
-          this card now only counts opt-ins that actually took effect. */}
-      <StatCard
-        label="Members Opted In"
-        value={consentStats?.matchedSubmissions}
-        note={
-          consentStats && consentStats.unmatchedSubmissions > 0
-            ? `${consentStats.unmatchedSubmissions} didn't match a member`
-            : undefined
-        }
-      />
+      {/* Same label and same number as the "Can be texted" badge on /members
+          (both read members.ts:getTextableCount's isTextEligibleMember over
+          the caller's roster) — deliberately not consent.ts:getConsentStats,
+          which only counts public /consent/[gymSlug] form submissions and
+          doesn't move when consent is recorded through the member modal or
+          the bulk attestation panel, nor does it drop a submission that
+          matched no roster member. See getConsentStats for why that number
+          still exists as an audit trail. */}
+      <StatCard label="Can be texted" value={textableCount} />
     </div>
   );
 }

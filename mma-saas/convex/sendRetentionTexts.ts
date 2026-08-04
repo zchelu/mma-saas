@@ -10,6 +10,7 @@ import { v } from "convex/values";
 import { requireGym, requireWriteAccess, hasWriteAccess } from "./gyms";
 import { assertMaxLength } from "./validate";
 import { planHasTexting } from "../lib/plans";
+import { isTextEligibleMember } from "../lib/memberEligibility";
 
 const MAX_MESSAGE_LENGTH = 480; // ~3 SMS segments once the STOP footer is appended
 
@@ -56,23 +57,14 @@ export const getAtRiskMembers = internalQuery({
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     return all.filter((m) => {
-      // Removal gate (members.ts:archiveMember). An archived member must NEVER
-      // receive a retention text — being removed from the roster is the gym
-      // owner saying to stop contacting them, and this is the only audience
-      // query the sender reads, so this check is what makes the dashboard's
-      // "they will stop receiving texts" copy true. Kept as its own statement
-      // rather than folded into the condition below so it can't be weakened by
-      // an edit to any of those unrelated clauses. Covered by
-      // convex/archiveMember.test.ts, which fails if this line is removed.
-      if (m.archived) return false;
-      // smsConsentConfirmed gate: the public `add`/`update` mutations only
-      // ever let a phone number in alongside confirmed consent, so this was
-      // previously implied rather than checked here. That invariant breaks
-      // for members created by scripts/import-members.js's bulk import path
-      // (migrated CSV data has no proof consent was obtained) — check it
-      // explicitly so an imported phone number can't get texted until a gym
-      // owner confirms consent by editing + re-saving that member.
-      if (!m.phone || !m.smsConsentConfirmed || m.status !== "active" || m.smsOptedOut) return false;
+      // Removal gate (members.ts:archiveMember) + the consent/status/opt-out
+      // gates: shared with app/members/page.tsx's Texts column and
+      // members.ts:getTextableCount via lib/memberEligibility.ts, so the send
+      // gate and every roster-level display of it can't drift apart. See that
+      // module for why the 7-day/attempts gates below stay local instead of
+      // joining it. Covered by convex/archiveMember.test.ts, which fails if
+      // archived members stop being excluded here.
+      if (!isTextEligibleMember(m)) return false;
       const inactiveEnough = !m.lastVisit || m.lastVisit < sevenDaysAgoISO;
       const notRecentlyTexted = !m.lastRetentionTextAt || m.lastRetentionTextAt < sevenDaysAgoMs;
       // Termination cap, layered on top of (not replacing) the 7-day cadence
