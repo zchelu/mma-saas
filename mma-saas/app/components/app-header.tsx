@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
+import { Logo } from "./logo";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
@@ -17,7 +18,7 @@ export default function AppHeader() {
   return (
     <header className="flex items-center justify-between px-8 py-4" style={{ backgroundColor: "#1A1A1A", borderBottom: "1px solid #333333" }}>
       <div className="flex items-center gap-8">
-        <span className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>KombatDesk</span>
+        <Logo href="/dashboard" height={24} />
         <nav className="flex gap-1">
           {links.map(({ href, label }) => (
             <Link

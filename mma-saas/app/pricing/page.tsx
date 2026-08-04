@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "../components/footer";
+import { Logo } from "../components/logo";
 import { getFoundingOffer } from "@/lib/foundingOffer";
 import { TRIAL_DAYS } from "@/lib/plans";
 
@@ -129,9 +130,7 @@ export default async function PricingPage() {
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
-        <Link href="/" className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>
-          KombatDesk
-        </Link>
+        <Logo href="/" height={26} />
         {/* Plain <a>, not Link - see app/page.tsx for why: diagnosed a
             client-router bug landing on the wrong route with zero failed
             fetches, so this bypasses the client router entirely. */}

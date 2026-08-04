@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { Footer } from "./components/footer";
+import { Logo } from "./components/logo";
 import { TRIAL_DAYS } from "@/lib/plans";
 
 export default async function Home() {
@@ -9,7 +10,7 @@ export default async function Home() {
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ backgroundColor: "#0D0D0D" }}>
       <header className="flex items-center justify-between px-8 py-5" style={{ borderBottom: "1px solid #333333" }}>
-        <span className="text-xl font-bold tracking-tight" style={{ color: "#E02020" }}>KombatDesk</span>
+        <Logo href="/" height={26} />
         {/* Deliberately down to a single header action. Pricing and "Get
             started" both used to live here; /pricing is now a link sent
             directly to a prospect rather than something a visitor browses to
@@ -59,7 +60,7 @@ export default async function Home() {
             <span style={{ color: "#888888" }}>They just stop showing up.</span>
           </h1>
           <p className="text-lg mb-10 max-w-lg mx-auto" style={{ color: "#888888" }}>
-            KombatDesk spots members going cold and texts them back through your door — automatically.
+            KombatDesk spots members going cold and texts them back through your door.
           </p>
           {/* Both CTAs on this page say the same thing and point to the same
               place on purpose — /signup is the lead form (app/actions/sendLead.ts),
