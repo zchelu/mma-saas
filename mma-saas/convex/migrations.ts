@@ -3,7 +3,7 @@ import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { validateRank, type Discipline } from "./beltTaxonomy";
 import { generateUniqueCheckInToken } from "./members";
-import { generateGymSlug } from "./gyms";
+import { generateGymSlug, generateUniqueSmsCode } from "./gyms";
 
 // Shared by every table that has an optional gymId field awaiting backfill.
 async function backfillGymId(
@@ -351,5 +351,48 @@ export const backfillGymSlugs = internalMutation({
     }
 
     return { totalGyms: gyms.length, updated, skippedAlreadySet, skippedNoName };
+  },
+});
+
+// One-time backfill: assigns an smsCode (convex/gyms.ts:generateUniqueSmsCode)
+// to every gym row created before onboarding.ts:completeOnboarding started
+// doing this. Safe to re-run, like the two backfills above — only touches gyms
+// with no smsCode yet, and NEVER regenerates an existing one, because a code
+// may already be printed on signage that cannot be recalled.
+//
+// Deliberately has no skippedNoName arm, unlike backfillGymSlugs directly
+// above: a slug is derived from the gym's name and a nameless gym has nothing
+// to slugify, but an smsCode is random and every gym can have one.
+//
+// WHY THIS STILL MATTERS AFTER THE ONBOARDING CALL SITE EXISTS. There are six
+// places that insert a gyms row (onboarding.ts and four in subscriptions.ts,
+// plus migrations.ts itself) and only onboarding.ts generates identifiers. A
+// gym created by a Stripe purchase before onboarding completes therefore has
+// no smsCode until it finishes onboarding or this runs. That gap is inherited
+// from slug, not introduced here — see a934383, the guest-checkout dead-gym
+// trap, which was the same gap on the same table.
+//
+// Run manually via the CLI:
+//   npx convex run migrations:backfillGymSmsCodes '{}'
+export const backfillGymSmsCodes = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const gyms = await ctx.db.query("gyms").collect();
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+
+    for (const gym of gyms) {
+      if (gym.smsCode !== undefined) {
+        skippedAlreadySet++;
+        continue;
+      }
+
+      const smsCode = await generateUniqueSmsCode(ctx);
+      await ctx.db.patch(gym._id, { smsCode });
+      updated++;
+    }
+
+    return { totalGyms: gyms.length, updated, skippedAlreadySet };
   },
 });

@@ -202,6 +202,144 @@ export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<s
   throw new Error("Failed to generate a unique gym slug after 5 attempts");
 }
 
+// Alphabet for gyms.smsCode. 30 characters: 2-9 and A-Z with 0, O, 1, I, L and
+// U removed.
+//
+// 0/O, 1/I/L are dropped because this code is READ OFF A PRINTED POSTER AND
+// TYPED INTO A PHONE by someone who will never see it again — the one context
+// where a glyph collision costs a real opt-in. U is dropped separately: it is
+// not confusable, it is the letter that makes most four-letter profanity
+// constructible, and removing it does more than the blocklist below does.
+//
+// STILL CONFUSABLE AND DELIBERATELY KEPT: S/5, Z/2, B/8, G/6. Dropping those
+// too would cost a third of the alphabet, and a mistyped code degrades
+// gracefully rather than failing — it matches no gym and falls through to the
+// roster-match arm of the resolver. See the note on collision risk there.
+const SMS_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+// 4 characters total: 3 random plus 1 COMPUTED CHECK CHARACTER (Luhn mod 30).
+//
+// WHY A CHECK CHARACTER, GIVEN A TYPO ALREADY FALLS THROUGH TO THE ROSTER
+// MATCH. Because a typo that lands on ANOTHER GYM'S LIVE CODE does not fall
+// through — it resolves, confidently, to the wrong gym. That is the failure
+// this whole design exists to prevent: consent recorded for a gym the person
+// never contacted.
+//
+// And it is not self-limiting. A wrong-gym row with no roster match is not
+// inert: it lands in that gym's consent-gap panel, whose copy tells the owner
+// "Add them as members with this exact phone number, then come back and apply
+// their consent" (app/dashboard/owner-links.tsx:274), and
+// consent.ts:applyPendingConsent then stamps smsConsentConfirmed. The
+// conversion from unmatched row to live consent is a designed feature the UI
+// actively prompts. The fuse is just days long instead of instant.
+//
+// WHAT LUHN MOD 30 CATCHES: every single-character substitution, provably.
+// The doubling map d -> floor(2d/30) + (2d mod 30) sends d < 15 to the even
+// residues and d >= 15 to the odd ones, all distinct, so it is injective mod
+// 30 and any one wrong character changes the sum.
+//
+// WHAT IT DOES NOT CATCH: some adjacent transpositions — the same residual
+// classic Luhn mod 10 has, where 09 and 90 check identically. That gap is
+// covered separately in the resolver, which refuses a code-resolved gym when
+// the sender's phone is on a different gym's roster and not on that one's.
+//
+// COST: 30^3 = 27,000 codes instead of 810,000. At any gym count this product
+// will plausibly reach, ample.
+const SMS_CODE_RANDOM_LENGTH = 3;
+const SMS_CODE_LENGTH = SMS_CODE_RANDOM_LENGTH + 1;
+
+// Codes that must never be printed on a wall in someone's gym. Only strings
+// constructible from the alphabet above are listed — most English profanity
+// already needs a dropped letter (FUCK/CUNT need U, SHIT/PISS/DICK need I,
+// COCK/HOMO need O, HELL/SLUT need L), so this list is short by construction
+// rather than by optimism. Checked case-insensitively; codes are uppercase.
+//
+// APPLIED TO THE FINAL 4-CHARACTER STRING, NOT THE 3 RANDOM ONES, and a hit
+// retries the whole generation rather than just recomputing the check
+// character. The check character is derived from the other three, so it can
+// complete a word the random part didn't — screening before it is appended
+// would miss exactly the codes that end up printed.
+//
+// A hit costs one retry out of the attempt budget below. At 30^3 = 27,000
+// reachable codes the odds of drawing one are ~0.07%, so this is a guard,
+// not a hot path.
+const SMS_CODE_BLOCKLIST = new Set([
+  "TWAT", "WANK", "ARSE", "CRAP", "FART", "DAMN", "SPAZ", "PAKI", "CHNK",
+  "FAGS", "DYKE", "RAPE", "SEXY", "KKKK", "JEWS", "NAZ2", "KYS2", "TARD",
+]);
+
+// Luhn mod N, weighting from the right with the check character in the
+// rightmost position. Shared by the generator (which appends the result) and
+// the validator (which recomputes and compares), so the two can never drift —
+// a validator that disagreed with its generator would reject every real code.
+function luhnSum(chars: string, startFactor: 1 | 2): number | null {
+  const n = SMS_CODE_ALPHABET.length;
+  let factor = startFactor;
+  let sum = 0;
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const codePoint = SMS_CODE_ALPHABET.indexOf(chars[i]);
+    if (codePoint < 0) return null; // character outside the alphabet
+    const addend = factor * codePoint;
+    factor = factor === 2 ? 1 : 2;
+    sum += Math.floor(addend / n) + (addend % n);
+  }
+  return sum;
+}
+
+function smsCodeCheckChar(randomPart: string): string {
+  const n = SMS_CODE_ALPHABET.length;
+  const sum = luhnSum(randomPart, 2);
+  if (sum === null) throw new Error("smsCodeCheckChar received a character outside the alphabet");
+  return SMS_CODE_ALPHABET[(n - (sum % n)) % n];
+}
+
+// Exported for the inbound-SMS resolver (convex/twilioWebhookAction.ts), which
+// must validate BEFORE the by_sms_code lookup. A malformed or mistyped code
+// should never reach the index — resolving it is what produces a wrong-gym
+// consent row, and an index hit is exactly the thing that looks authoritative.
+export function isValidSmsCode(code: string): boolean {
+  if (code.length !== SMS_CODE_LENGTH) return false;
+  const sum = luhnSum(code, 1);
+  return sum !== null && sum % SMS_CODE_ALPHABET.length === 0;
+}
+
+function generateSmsCode(): string {
+  const bytes = new Uint8Array(SMS_CODE_RANDOM_LENGTH);
+  crypto.getRandomValues(bytes);
+  // Modulo bias is real here (256 % 30 = 16, so the first 16 characters are
+  // drawn ~12% more often) and deliberately ignored: this is a public
+  // identifier printed on a poster, not a credential. Nothing about the
+  // product's security depends on it being uniformly distributed, and
+  // rejection sampling would add a loop to guard a property nobody relies on.
+  // If this ever becomes a secret, that reasoning stops holding.
+  const randomPart = Array.from(
+    bytes,
+    (b) => SMS_CODE_ALPHABET[b % SMS_CODE_ALPHABET.length]
+  ).join("");
+  return randomPart + smsCodeCheckChar(randomPart);
+}
+
+// Same shape as members.ts:112's generateUniqueCheckInToken and
+// generateGymSlug above: generate, reject the unusable, check the candidate
+// against an index rather than trusting randomness, cap the retries, throw
+// instead of looping forever so a broken index write fails loudly.
+//
+// Uniqueness is GLOBAL, not per-gym, and must stay that way — the whole point
+// is that an inbound SMS carrying only this code identifies exactly one gym,
+// and there is no other scoping signal in a Twilio webhook.
+export async function generateUniqueSmsCode(ctx: MutationCtx): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = generateSmsCode();
+    if (SMS_CODE_BLOCKLIST.has(candidate)) continue;
+    const collision = await ctx.db
+      .query("gyms")
+      .withIndex("by_sms_code", (q) => q.eq("smsCode", candidate))
+      .unique();
+    if (!collision) return candidate;
+  }
+  throw new Error("Failed to generate a unique SMS code after 5 attempts");
+}
+
 // Public, unauthenticated — resolves the human-readable slug in a consent
 // link to just the gym's name for display. Deliberately returns nothing but
 // the name: the public consent page needs it to render "Welcome to X" and

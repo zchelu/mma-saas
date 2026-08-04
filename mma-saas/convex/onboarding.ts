@@ -1,7 +1,7 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
-import { generateGymSlug } from "./gyms";
+import { generateGymSlug, generateUniqueSmsCode } from "./gyms";
 
 // Auth-first signup's setup wizard (app/onboarding). Deliberately does NOT go
 // through requireGym/requireWriteAccess — those block any gym whose
@@ -54,6 +54,17 @@ export const completeOnboarding = mutation({
     // must keep resolving to the same gym.
     const slug = existing?.slug ? undefined : await generateGymSlug(ctx, gymName);
 
+    // Same never-reassign rule as slug, and for a harder version of the same
+    // reason: a slug already handed out in a link must keep resolving, and an
+    // smsCode may be PRINTED ON A POSTER ON A WALL. A reassigned code cannot be
+    // recalled — every sign, QR and card carrying the old one silently stops
+    // resolving to this gym.
+    //
+    // Unlike slug this needs no gym name, so gyms that never finish onboarding
+    // can still be backfilled (migrations.ts:backfillGymSmsCodes does not skip
+    // nameless rows the way backfillGymSlugs must).
+    const smsCode = existing?.smsCode ? undefined : await generateUniqueSmsCode(ctx);
+
     // onboardingCompleted is deliberately NOT set here — it's only ever set
     // true by upsertSubscription (convex/subscriptions.ts), once Stripe
     // actually confirms a paid subscription via webhook. Setting it here,
@@ -67,6 +78,7 @@ export const completeOnboarding = mutation({
       city,
       state,
       ...(slug ? { slug } : {}),
+      ...(smsCode ? { smsCode } : {}),
       ...(ownerEmail ? { email: ownerEmail } : {}),
       ...(smsConsentConfirmed ? { smsConsentConfirmed: true, smsConsentConfirmedAt: now } : {}),
     };
