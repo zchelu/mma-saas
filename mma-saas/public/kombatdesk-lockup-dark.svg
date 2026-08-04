@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1735 300" width="1735" height="300">
+  <g transform="translate(-52.41,-75.90) scale(0.903614)">
+    <defs>
+    <linearGradient id="kd-hood" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#2a1e21"/>
+      <stop offset="0.5" stop-color="#141216"/>
+      <stop offset="1" stop-color="#07070a"/>
+    </linearGradient>
+    <linearGradient id="kd-bandGrad" x1="0" y1="0" x2="1" y2="0.25">
+      <stop offset="0" stop-color="#ff4d4d"/>
+      <stop offset="0.55" stop-color="#e02020"/>
+      <stop offset="1" stop-color="#8f1414"/>
+    </linearGradient>
+    <linearGradient id="kd-tailA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e02020"/>
+      <stop offset="1" stop-color="#ff4d4d"/>
+    </linearGradient>
+    <linearGradient id="kd-tailB" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8f1414"/>
+      <stop offset="1" stop-color="#c01a1a"/>
+    </linearGradient>
+    <linearGradient id="kd-eyeGrad" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#e2faff"/>
+      <stop offset="1" stop-color="#4fd2ff"/>
+    </linearGradient>
+    <filter id="kd-eyeGlow" x="-200%" y="-320%" width="500%" height="740%">
+      <feGaussianBlur stdDeviation="18" result="b1"/>
+      <feFlood flood-color="#39c6ff" flood-opacity="1"/>
+      <feComposite in2="b1" operator="in" result="g1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b2"/>
+      <feFlood flood-color="#f0fdff" flood-opacity="1"/>
+      <feComposite in2="b2" operator="in" result="g2"/>
+      <feMerge>
+        <feMergeNode in="g1"/>
+        <feMergeNode in="g1"/>
+        <feMergeNode in="g2"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="kd-hoodClip">
+      <path d="M226 84 L344 150 L356 258 L334 344 L274 416 L178 416 L118 344 L96 258 L108 150 Z"/>
+    </clipPath>
+  </defs>
+
+  <g transform="translate(-38,0)">
+
+    <!-- headband tails, behind the hood -->
+    <path d="M330 188 L508 142 L482 168 L506 176 L336 228 Z" fill="url(#kd-tailA)"/>
+    <path d="M334 220 L474 240 L452 250 L470 270 L330 250 Z" fill="url(#kd-tailB)"/>
+
+    <!-- hood silhouette -->
+    <path d="M226 84 L344 150 L356 258 L334 344 L274 416 L178 416 L118 344 L96 258 L108 150 Z"
+          fill="url(#kd-hood)" stroke="#e02020" stroke-width="14" stroke-linejoin="miter"/>
+
+    <g clip-path="url(#kd-hoodClip)">
+      <!-- crown facet -->
+      <path d="M226 84 L344 150 L226 190 L108 150 Z" fill="#ffffff" opacity="0.055"/>
+      <!-- lower wrap fold -->
+      <path d="M96 330 L356 330 L274 416 L178 416 Z" fill="#000000" opacity="0.35"/>
+      <path d="M226 336 L306 372 L274 416 L178 416 L146 372 Z" fill="#ffffff" opacity="0.03"/>
+      <!-- cloth wrap seam across the lower face -->
+      <path d="M96 352 L356 336 L356 346 L96 362 Z" fill="#e02020" opacity="0.30"/>
+      <path d="M226 362 L240 416 L212 416 Z" fill="#e02020" opacity="0.18"/>
+
+      <!-- headband -->
+      <path d="M86 188 L364 188 L364 240 L86 240 Z" fill="url(#kd-bandGrad)"/>
+      <path d="M86 188 L364 188 L364 199 L86 199 Z" fill="#ffffff" opacity="0.18"/>
+      <path d="M86 232 L364 232 L364 240 L86 240 Z" fill="#000000" opacity="0.25"/>
+      <!-- knot -->
+      <path d="M316 188 L364 188 L364 240 L316 240 L336 214 Z" fill="#8f1414"/>
+
+      <!-- eye slot -->
+      <path d="M86 240 L364 240 L356 320 L96 320 Z" fill="#050507"/>
+    </g>
+
+    <!-- eyes -->
+    <g filter="url(#kd-eyeGlow)">
+      <path d="M116 258 L210 282 L210 302 L116 272 Z" fill="url(#kd-eyeGrad)"/>
+      <path d="M336 258 L242 282 L242 302 L336 272 Z" fill="url(#kd-eyeGrad)"/>
+    </g>
+  </g>
+  </g>
+  <g transform="translate(423.29,262.58)">
+    <path fill="#F7F7F9" transform="translate(0.00,0) scale(0.127930,-0.127930)" d="M78 0V1760H426V1055L590 1760H944L747 954L985 0H620L428 852V0Z"/>
+    <path fill="#F7F7F9" transform="translate(126.71,0) scale(0.127930,-0.127930)" d="M498 -16Q287 -16 175.5 111.5Q64 239 64 480V1316Q64 1542 174.5 1659.0Q285 1776 498 1776Q711 1776 821.5 1659.0Q932 1542 932 1316V480Q932 239 820.5 111.5Q709 -16 498 -16ZM501 308Q581 308 581 463V1322Q581 1452 503 1452Q415 1452 415 1319V461Q415 379 435.0 343.5Q455 308 501 308Z"/>
+    <path fill="#F7F7F9" transform="translate(257.13,0) scale(0.127930,-0.127930)" d="M78 0V1760H614L762 687L909 1760H1450V0H1128V1268L926 0H610L396 1268V0Z"/>
+    <path fill="#F7F7F9" transform="translate(455.60,0) scale(0.127930,-0.127930)" d="M78 0V1760H555Q747 1760 834.5 1666.5Q922 1573 922 1358V1281Q922 1157 877.5 1080.0Q833 1003 742 979Q861 949 901.5 838.5Q942 728 942 569Q942 398 910.0 270.0Q878 142 794.0 71.0Q710 0 555 0ZM422 1097H494Q543 1097 557.0 1135.0Q571 1173 571 1226V1403Q571 1488 496 1488H422ZM457 310Q594 310 594 440V660Q594 735 571.5 778.5Q549 822 487 822H422V312Q444 310 457 310Z"/>
+    <path fill="#F7F7F9" transform="translate(583.97,0) scale(0.127930,-0.127930)" d="M30 0 200 1760H797L964 0H631L606 284H394L372 0ZM419 565H579L502 1460H486Z"/>
+    <path fill="#F7F7F9" transform="translate(714.14,0) scale(0.127930,-0.127930)" d="M229 0V1422H20V1760H790V1422H581V0Z"/>
+    <path fill="#E02020" transform="translate(820.76,0) scale(0.127930,-0.127930)" d="M78 0V1760H562Q752 1760 848.0 1654.5Q944 1549 944 1346V522Q944 272 856.5 136.0Q769 0 550 0ZM432 311H493Q590 311 590 405V1313Q590 1401 566.5 1426.5Q543 1452 471 1452H432Z"/>
+    <path fill="#E02020" transform="translate(952.97,0) scale(0.127930,-0.127930)" d="M78 0V1760H782V1420H436V1077H768V746H436V343H805V0Z"/>
+    <path fill="#E02020" transform="translate(1063.81,0) scale(0.127930,-0.127930)" d="M496 -16Q255 -16 148.5 104.0Q42 224 42 486V658H390V438Q390 377 408.5 342.5Q427 308 473 308Q521 308 539.5 336.0Q558 364 558 428Q558 509 542.0 563.5Q526 618 486.5 667.5Q447 717 377 783L219 933Q42 1100 42 1315Q42 1540 146.5 1658.0Q251 1776 449 1776Q691 1776 792.5 1647.0Q894 1518 894 1255H536V1376Q536 1412 515.5 1432.0Q495 1452 460 1452Q418 1452 398.5 1428.5Q379 1405 379 1368Q379 1331 399.0 1288.0Q419 1245 478 1189L681 994Q742 936 793.0 871.5Q844 807 875.0 721.5Q906 636 906 513Q906 265 814.5 124.5Q723 -16 496 -16Z"/>
+    <path fill="#E02020" transform="translate(1187.71,0) scale(0.127930,-0.127930)" d="M78 0V1760H426V1055L590 1760H944L747 954L985 0H620L428 852V0Z"/>
+  </g>
+</svg>
