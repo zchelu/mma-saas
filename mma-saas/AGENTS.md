@@ -27,6 +27,12 @@ How it works:
   Zain approves that specific step.
 - **Never `git add -A` or `git commit -a`.** Explicit paths only. That is how
   `app/globals.css` ended up inside an unrelated commit on 8/2.
+- On a shared working tree, `git add <file>` followed by a bare `git commit`
+  **IS** `git add -A` — the commit takes the whole index, including anything
+  another session staged. Always commit with an explicit pathspec
+  (`git commit --only <path>`). Verified the hard way on 2026-08-04, when a
+  doc commit captured two files mid-refactor and produced a commit that could
+  not build from a fresh clone.
 - **Never `git commit` without `-m`.** It opens an editor an agent can't drive.
 - `npx convex deploy` is interactive. Propose it; let Zain run it.
 - If the plan changed while you were mid-flight, **stop and re-read it**. On
@@ -68,6 +74,11 @@ nothing.
     including on the run where grep found three matches.
   The fix is always the same: make the failure path produce different output
   from the success path, then read the output rather than the summary.
+- **A check chained ahead of the action it guards is not a gate.** `git status
+  && git commit` prints the answer and commits anyway — the output arrives
+  where nothing can act on it. Run the check as its own command, read it, then
+  act. This is how the `git add -A` mechanism in §1 got past a verification
+  step that was looking straight at it.
 
 ## 3. Dates are local, never UTC
 
