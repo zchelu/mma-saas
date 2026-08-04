@@ -35,6 +35,14 @@ export const getAll = query({
       lastVisit: m.lastVisit,
       smsConsentConfirmed: m.smsConsentConfirmed,
       smsConsentConfirmedAt: m.smsConsentConfirmedAt,
+      // Needed by the Members table's "Texts" column to tell "this member told
+      // us to stop" apart from "we never asked them". Without it both render as
+      // simply not-textable, and the owner can't see which ones are worth
+      // sending the opt-in link to — which is the entire point of that column.
+      // Display-only and read-only: nothing in the app can clear this. Only an
+      // inbound START from the member's own handset does
+      // (convex/twilioWebhookAction.ts -> members.setSmsOptOutByPhone).
+      smsOptedOut: m.smsOptedOut,
     }));
   },
 });

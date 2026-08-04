@@ -20,10 +20,71 @@ type Member = {
   lastVisit?: string;
   smsConsentConfirmed?: boolean;
   smsConsentConfirmedAt?: number;
+  smsOptedOut?: boolean;
 };
 
 type SortCol = "name" | "plan" | null;
 type SortDir = "asc" | "desc";
+
+// Mirrors the member-level conditions in
+// convex/sendRetentionTexts.ts:getAtRiskMembers — the query that decides who
+// actually receives a text. Deliberately NOT the dashboard's
+// members.ts:getAtRiskMembers, which is the wider "who has gone quiet" list and
+// includes people with no number and people who have opted out. Keeping this in
+// sync with the SEND gate is the whole value of the column: an owner looking at
+// it should be seeing the real send audience, not an optimistic one.
+//
+// Order matters. smsOptedOut is checked before smsConsentConfirmed because an
+// opt-out is the member's own most recent instruction and outranks any consent
+// record we hold; showing "needs opt-in" for someone who texted STOP would
+// invite an owner to go chase them, which is exactly the behaviour TCPA
+// penalises. Absence of a phone number wins over both simply because there is
+// nothing to act on.
+//
+// The two gates that are NOT reflected here — the 7-day spacing rule and the
+// 3-attempt cap — are deliberately excluded. They are transient (a member is
+// "recently texted" for a week, then isn't) and rendering them as a roster
+// attribute would make the column flicker between page loads and read as a
+// permanent state when it is a temporary one.
+type TextState = "on" | "opted_out" | "needs_optin" | "no_number";
+
+function textState(m: Member): TextState {
+  if (!m.phone) return "no_number";
+  if (m.smsOptedOut) return "opted_out";
+  if (!m.smsConsentConfirmed) return "needs_optin";
+  return "on";
+}
+
+const TEXT_STATE_STYLE: Record<Exclude<TextState, "no_number">, { label: string; bg: string; fg: string }> = {
+  // Same green/amber pairs already used by the status pill and
+  // ConsentAttestationPanel, so "amber = there is something for you to do here"
+  // means the same thing everywhere on this page.
+  on: { label: "On", bg: "#0A2A14", fg: "#4ADE80" },
+  needs_optin: { label: "Needs opt-in", bg: "#1A1400", fg: "#FBBF24" },
+  opted_out: { label: "Opted out", bg: "#1A1A1A", fg: "#888888" },
+};
+
+function TextStatePill({ state }: { state: TextState }) {
+  // No pill for "no number" — a roster where most members have no phone yet
+  // would otherwise be a wall of badges saying nothing actionable.
+  if (state === "no_number") return <span style={{ color: "#555555" }}>—</span>;
+  const s = TEXT_STATE_STYLE[state];
+  return (
+    <span
+      className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
+      style={{ backgroundColor: s.bg, color: s.fg }}
+      title={
+        state === "opted_out"
+          ? "This member replied STOP. Only they can undo it, by texting START from their own phone."
+          : state === "needs_optin"
+          ? "You have a number but no recorded consent, so they will not be texted. Send them your opt-in link."
+          : "Number on file, consent recorded, not opted out."
+      }
+    >
+      {s.label}
+    </span>
+  );
+}
 
 import { getInitials, getAvatarColor } from "../lib/avatar";
 
@@ -56,6 +117,10 @@ export default function MembersPage() {
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  // "not_on" is everything except a fully textable member — the actionable
+  // bucket. Deliberately one filter rather than four: the job an owner is
+  // doing here is "who still needs the opt-in link", not browsing by state.
+  const [textsFilter, setTextsFilter] = useState<"all" | "on" | "not_on">("all");
   const [sortCol, setSortCol] = useState<SortCol>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -79,7 +144,10 @@ export default function MembersPage() {
           m.name.toLowerCase().includes(q) ||
           (m.email ?? "").toLowerCase().includes(q);
         const matchStatus = statusFilter === "all" || m.status === statusFilter;
-        return matchSearch && matchStatus;
+        const isTextable = textState(m) === "on";
+        const matchTexts =
+          textsFilter === "all" || (textsFilter === "on" ? isTextable : !isTextable);
+        return matchSearch && matchStatus && matchTexts;
       })
       .sort((a, b) => {
         if (!sortCol) return 0;
@@ -87,11 +155,21 @@ export default function MembersPage() {
         const bVal = (b[sortCol] ?? "").toLowerCase();
         return aVal.localeCompare(bVal) * (sortDir === "asc" ? 1 : -1);
       });
-  }, [memberList, search, statusFilter, sortCol, sortDir]);
+  }, [memberList, search, statusFilter, textsFilter, sortCol, sortDir]);
 
   const total = memberList.length;
   const activeCount = memberList.filter((m) => m.status === "active").length;
   const inactiveCount = total - activeCount;
+  // Counted over the whole roster, not the filtered view — this badge answers
+  // "how far through getting my members opted in am I", which a filtered
+  // count would silently misreport.
+  //
+  // NOTE this is a different number from the dashboard's "Members Opted In"
+  // tile, which counts rows in consentSubmissions (people who filled in the
+  // public /consent/[gymSlug] form) and does NOT move when consent is recorded
+  // through the member modal or the bulk attestation panel. THIS is the count
+  // of members who would actually receive a text.
+  const textableCount = memberList.filter((m) => textState(m) === "on").length;
 
   // Copy deliberately promises only what archiveMember actually does: the row
   // is archived, not erased, so this must not claim the record is deleted.
@@ -137,6 +215,7 @@ export default function MembersPage() {
             <SummaryBadge value={total} label="Total" color="#FFFFFF" />
             <SummaryBadge value={activeCount} label="Active" color="#4ADE80" />
             <SummaryBadge value={inactiveCount} label="Inactive" color="#F87171" />
+            <SummaryBadge value={textableCount} label="Can be texted" color="#4ADE80" />
           </div>
         )}
 
@@ -156,6 +235,15 @@ export default function MembersPage() {
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+          </select>
+          <select
+            value={textsFilter}
+            onChange={(e) => setTextsFilter(e.target.value as typeof textsFilter)}
+            className="input w-44"
+          >
+            <option value="all">All texts</option>
+            <option value="on">Texts on</option>
+            <option value="not_on">Texts not on</option>
           </select>
         </div>
 
@@ -178,6 +266,7 @@ export default function MembersPage() {
                 </th>
                 <th className="text-left px-6 py-3">Belt</th>
                 <th className="text-left px-6 py-3">Status</th>
+                <th className="text-left px-6 py-3">Texts</th>
                 <th className="text-left px-6 py-3">Last Visit</th>
                 <th className="px-6 py-3" />
               </tr>
@@ -185,19 +274,19 @@ export default function MembersPage() {
             <tbody>
               {members === undefined ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center" style={{ color: "#555555" }}>
+                  <td colSpan={8} className="px-6 py-10 text-center" style={{ color: "#555555" }}>
                     Loading…
                   </td>
                 </tr>
               ) : memberList.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <EmptyState onAdd={() => setModal("add")} />
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center" style={{ color: "#555555" }}>
+                  <td colSpan={8} className="px-6 py-10 text-center" style={{ color: "#555555" }}>
                     No members match your search.
                   </td>
                 </tr>
@@ -232,6 +321,9 @@ export default function MembersPage() {
                       >
                         {m.status}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <TextStatePill state={textState(m)} />
                     </td>
                     <td className="px-6 py-4 text-xs" style={{ color: "#888888" }}>
                       {m.lastVisit ? formatVisit(m.lastVisit) : "—"}
