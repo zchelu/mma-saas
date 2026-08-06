@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Cut recipe for the KombatDesk demo video. This file is the tracked thing;",
+    "the video files it points at are gitignored.",
+    "",
+    "TWO SOURCES. You shoot yourself on the iPhone (portrait). Product footage",
+    "is screen-captured from the live site into footage/. A block names its own",
+    "'source' file; its start/end index THAT file's timeline.",
+    "",
+    "Block 1 is already shot, in two segments. Everything with a null source is",
+    "still to record -- fill in the filename and timestamps as you go.",
+    "",
+    "Assembly is happening in Clipchamp. This file exists so the three cuts can",
+    "be regenerated identically after a re-shoot (block 8 especially, if you use",
+    "the 'zero of five taken' line). Run: python kd-cut.py --master <any file>",
+    "--blocks blocks.json --out ./out"
+  ],
+
+  "blocks": [
+    { "id": 1,  "name": "The problem (part 1)",  "source": "raw/IMG_8264.mov", "start": "0:00", "end": "0:26" },
+    { "id": 11, "name": "The problem (part 2)",  "source": "raw/IMG_8265.mov", "start": "0:00", "end": "0:11" },
+
+    { "id": 9,  "name": "Background",            "source": null, "start": "0:00", "end": "0:25" },
+    { "id": 2,  "name": "The one idea",          "source": null, "start": "0:00", "end": "0:20" },
+
+    { "id": 3,  "name": "The list",              "source": "footage/block3_landscape.mp4",       "start": "0:00", "end": "0:08" },
+    { "id": 31, "name": "The list (vertical)",   "source": "footage/block3_vertical.mp4",        "start": "0:00", "end": "0:08" },
+    { "id": 4,  "name": "The kiosk",             "source": "footage/block4_kiosk_landscape.mp4", "start": "0:00", "end": "0:05" },
+    { "id": 41, "name": "The kiosk (vertical)",  "source": "footage/block4_kiosk_vertical.mp4",  "start": "0:00", "end": "0:05" },
+
+    { "id": 5,  "name": "The text",              "source": null, "start": "0:00", "end": "1:00" },
+    { "id": 6,  "name": "The brakes",            "source": null, "start": "0:00", "end": "0:35" },
+    { "id": 7,  "name": "The honest limit",      "source": null, "start": "0:00", "end": "0:25" },
+    { "id": 8,  "name": "The ask",               "source": null, "start": "0:00", "end": "0:25" },
+
+    { "id": 99, "name": "Sparring",              "source": null, "start": "0:00", "end": "0:02", "mute": true }
+  ],
+
+  "cuts": {
+    "prospect": [1, 11, 9, 2, 3, 4, 5, 6, 7, 8],
+
+    "landing": [1, 11, 9, 2, 3, 5],
+
+    "social": {
+      "size": "1080x1920",
+      "segments": [99, 1, 31, 5]
+    }
+  }
+}

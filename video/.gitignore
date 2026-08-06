@@ -1,0 +1,17 @@
+# Video files never go in git. A single block of 1080p phone footage is
+# 20-50 MB and git stores every version of it forever -- a handful of
+# re-shoots would permanently bloat the repo for every future clone.
+# Keep the recipe (blocks.json, kd-cut.py) in version control; keep the
+# media on disk and backed up wherever you already back things up.
+*.mp4
+*.mov
+*.MOV
+*.MP4
+*.wav
+*.srt
+raw/
+out/
+footage/*.mp4
+
+# The README files ARE tracked -- they're the instructions, not the media.
+!footage/README.txt
