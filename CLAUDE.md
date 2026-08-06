@@ -132,9 +132,10 @@ DONE — verified, not hypothetical
    helpers/migration loops/token-extraction snippets consolidated per
    multiple independent review angles converging on the same finding.
 
-6. SMS OPT-OUT RETENTION ACROSS PHONE EDITS — commit 082b296
-   (2026-08-06, pushed to origin/master, deployed to Convex prod
-   limitless-raven-596 by Zain). members.update compared the incoming
+6. SMS OPT-OUT RETENTION ACROSS PHONE EDITS AND RE-ADDS — commits
+   082b296 + 5ca85e8 (2026-08-06, both pushed to origin/master; prod
+   deploy covers 082b296 ONLY — see the warning at the end of this
+   item). members.update compared the incoming
    phone against the stored one as RAW STRINGS
    (`fields.phone !== existing.phone`) and cleared smsOptedOut on any
    difference. Member phones are free-typed in member-modal.tsx, so
@@ -161,15 +162,48 @@ DONE — verified, not hypothetical
    undoing it, so the UI was actively asserting the opposite of the
    behavior. New copy is number-scoped and doesn't overpromise.
 
-   VERIFICATION — read this before claiming it's proven. `npx tsc
-   --noEmit` clean and convex/optOutRetention.test.ts passes 5/5
-   locally. Prod deploy succeeded and members.js:update is present in
-   the prod function spec. But this change added NO new Convex function
-   and changed no signature, so function-spec CANNOT prove the new
-   logic is the code actually running — it only proves the deployment
-   is healthy. The deployed source has not been eyeball-checked in the
-   Convex dashboard, and no live before/after test has been run against
-   prod data. Treat as "shipped, not yet proven live."
+   FOLLOW-UP, commit 5ca85e8 (same day, pushed) — 082b296 above fixed
+   only `update` and left the SAME HOLE OPEN IN `add`. An owner blocked
+   from clearing an opt-out by editing a member could still clear it by
+   removing that member and re-adding them: the new row got smsOptedOut
+   undefined, which isTextEligibleMember reads as textable. Typing an
+   opted-out number onto any new member did it too. 5ca85e8 extracts
+   numberHasOptOutOnRecord() and calls it from BOTH paths, so a number
+   with an opt-out on record inherits it however it arrives.
+
+   Two details worth not re-litigating: the helper only ever writes
+   `true` — a clean number leaves the field unset rather than being
+   stamped false, because "never heard from this number" and "opted
+   back in" are different facts the schema distinguishes. And it scans
+   archived rows on purpose, matching setSmsOptOutByPhone; a removed
+   member is exactly the row a re-add would otherwise sail past.
+
+   LESSON, worth generalizing: the first fix was reviewed, tested, typed
+   and deployed while leaving the same vulnerability reachable by an
+   easier route than the one it closed. When a fix guards a WRITE to a
+   field, enumerate every path that writes it before calling it done —
+   `add` was not in scope simply because the bug was reported against
+   `update`.
+
+   VERIFICATION — read this before claiming it's proven. Local checks
+   pass on the current tree: `npx tsc --noEmit` clean,
+   convex/optOutRetention.test.ts 8/8. Note vitest does NOT typecheck —
+   this tree briefly had 8/8 green while `tsc` failed on a missing `Id`
+   import, so a passing test run is not evidence the code compiles. Run
+   both.
+
+   ⚠️ PROD IS BEHIND. The `npx convex deploy` to limitless-raven-596 ran
+   BEFORE 5ca85e8 existed, so production has the `update` fix and NOT
+   the `add` fix — the re-add loophole is still open in prod as of this
+   writing. Redeploy Convex before treating this as closed.
+
+   Even for the part that is deployed: this work added no new Convex
+   function and changed no signature, so `npx convex function-spec
+   --prod` CANNOT prove the new logic is what's running — it only proves
+   the deployment is healthy. The deployed source has not been
+   eyeball-checked in the Convex dashboard, and no live before/after
+   test has been run against prod data. Treat as "shipped, not yet
+   proven live."
 
 ====================================================================
 INFRASTRUCTURE STATUS
