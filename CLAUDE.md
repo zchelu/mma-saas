@@ -78,12 +78,34 @@ DONE — verified, not hypothetical
    client-supplied clerkUserId arg; now derives identity from
    ctx.auth, with Clerk "convex"-template JWT tokens forwarded through
    the three Next.js server call sites via a new lib/convex-auth.ts
-   helper). Retention texting now matches the final plan decision:
-   Starter gets no texting at all, Pro gets automatic weekly only,
-   Elite gets automatic + a manual send button — enforced both in the
-   UI and as a hard reject in the triggerRetentionTexts mutation
-   itself (isElitePlan/isProPlan helpers in subscriptions.ts), plus a
-   MAX_TEXTS_PER_RUN=200 cap.
+   helper). Also added a MAX_TEXTS_PER_RUN=200 cap, still present at
+   convex/sendRetentionTexts.ts:141.
+
+   ⚠️ THE TIER-GATING CLAIM THAT USED TO BE HERE IS OBSOLETE — corrected
+   2026-08-06. This paragraph read: "Retention texting now matches the
+   final plan decision: Starter gets no texting at all, Pro gets
+   automatic weekly only, Elite gets automatic + a manual send button —
+   enforced both in the UI and as a hard reject in the
+   triggerRetentionTexts mutation itself (isElitePlan/isProPlan helpers
+   in subscriptions.ts)." None of that is true anymore:
+
+   - Commit cd0c734 (2026-07-25) removed the tier gate outright. All
+     tiers get identical retention-text access, manual AND automatic.
+   - isProPlan/isElitePlan no longer exist anywhere in convex/ — do not
+     go looking for them or try to "restore" the reject they performed.
+   - What gates texting now is hasWriteAccess(gym) && planHasTexting
+     (gym.plan) — i.e. "is this gym's billing live", not "which tier".
+     planHasTexting exists only to exclude LEGACY "starter" rows, which
+     predate the rename and never had texting. See
+     convex/sendRetentionTexts.ts:284/318/359.
+   - The tiers themselves were renamed starter/pro/elite →
+     academy/fightteam/blackbelt (lib/plans.ts:68). The Stripe price-ID
+     env vars were deliberately NOT renamed and still read
+     STRIPE_STARTER/PRO/ELITE_PRICE_ID — that mismatch is intentional,
+     see the comment at lib/plans.ts:70.
+
+   Any sentence anywhere in this briefing using "Starter/Pro/Elite" as
+   live tier names is describing the pre-rename world.
 
    Went through a full 8-angle automated code review before commit.
    Real bugs it caught and got fixed: (a) classes.getById gracefully
@@ -239,11 +261,14 @@ KNOWN ISSUES, NOT YET FIXED (decisions needed, not urgent)
   nowhere near nexus thresholds. Revisit later, not urgent.
 - Custom Stripe Checkout domain (checkout.kombatdesk.com, $10/mo)
   deliberately skipped as unnecessary polish pre-revenue.
-- Pricing page copy for the Starter tier still needs the manual-
-  texting promise removed (Starter now gets no texting at all, code
-  side is fixed — copy edit proposed but not yet applied pending
-  wording approval), and Elite's copy still doesn't mention its
-  manual-send capability at all. Both proposed, waiting on Zain.
+- ✅ RESOLVED, no longer an open issue (corrected 2026-08-06). This
+  bullet used to say the Starter tier's pricing copy still needed its
+  manual-texting promise removed and that Elite's copy didn't mention
+  manual send, "both proposed, waiting on Zain." Superseded twice
+  over: commit e7f7cba applied the copy edits, and commit cd0c734 then
+  removed tier-split texting entirely, so there is no longer a
+  per-tier texting promise to get right. The tiers were also renamed
+  to academy/fightteam/blackbelt. Nothing here is waiting on Zain.
 - gymId is still v.optional on members/classes/invoices (staged
   migration choice, not tightened to required yet) — nothing at the
   type level stops a future insert from skipping it. The
