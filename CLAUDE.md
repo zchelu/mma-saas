@@ -68,7 +68,9 @@ DONE — verified, not hypothetical
    live Customer Portal configured.
 
 5. GYM-SCOPING EXPANDED TO EVERY TABLE + IDOR FIX + RETENTION-TIER
-   REWORK — uncommitted as of this update, ready to push. Extends the
+   REWORK — committed and pushed long ago (this line used to read
+   "uncommitted as of this update, ready to push" — stale, corrected
+   2026-08-06). Extends the
    #1 fix to classes.ts/invoices.ts/attendance.ts/enrollments.ts (the
    "dormant" gap #1 originally flagged) via a shared requireOwnClass/
    requireOwnMember helper in convex/gyms.ts. Fixed
@@ -107,6 +109,45 @@ DONE — verified, not hypothetical
    parallelized via Promise.all, and the duplicated ownership-check
    helpers/migration loops/token-extraction snippets consolidated per
    multiple independent review angles converging on the same finding.
+
+6. SMS OPT-OUT RETENTION ACROSS PHONE EDITS — commit 082b296
+   (2026-08-06, pushed to origin/master, deployed to Convex prod
+   limitless-raven-596 by Zain). members.update compared the incoming
+   phone against the stored one as RAW STRINGS
+   (`fields.phone !== existing.phone`) and cleared smsOptedOut on any
+   difference. Member phones are free-typed in member-modal.tsx, so
+   re-saving a member after retyping "(720) 555-0100" as
+   "720-555-0100" counted as a new number and silently wiped a real
+   STOP — the dashboard could undo a member's opt-out by reformatting
+   a phone number. Three fixes in one commit:
+
+   (a) Comparison now runs on normalizePhoneDigits(), the same
+       function setSmsOptOutByPhone and consent.ts:submitConsent match
+       on, so "the same number" means one thing everywhere.
+   (b) Moving a member TO a number that already carries an opt-out now
+       INHERITS it, rather than granting a clean slate. Same full-table,
+       cross-gym scan as setSmsOptOutByPhone deliberately — an
+       inheritance rule narrower than the write rule it mirrors would
+       reopen the hole from the other side.
+   (c) Clearing a phone number no longer clears the opt-out. Without
+       this guard, "delete the number, save, retype it, save" launders
+       a STOP through the UI in two clicks. Keeping it also matches the
+       privacy policy's post-removal retention commitment.
+
+   The text-state-pill.tsx tooltip was corrected in the same commit: it
+   claimed "Only they can undo it" while the mutation was in fact
+   undoing it, so the UI was actively asserting the opposite of the
+   behavior. New copy is number-scoped and doesn't overpromise.
+
+   VERIFICATION — read this before claiming it's proven. `npx tsc
+   --noEmit` clean and convex/optOutRetention.test.ts passes 5/5
+   locally. Prod deploy succeeded and members.js:update is present in
+   the prod function spec. But this change added NO new Convex function
+   and changed no signature, so function-spec CANNOT prove the new
+   logic is the code actually running — it only proves the deployment
+   is healthy. The deployed source has not been eyeball-checked in the
+   Convex dashboard, and no live before/after test has been run against
+   prod data. Treat as "shipped, not yet proven live."
 
 ====================================================================
 INFRASTRUCTURE STATUS
@@ -218,9 +259,13 @@ KNOWN ISSUES, NOT YET FIXED (decisions needed, not urgent)
 REMAINING GO-LIVE STEPS, IN ORDER
 ====================================================================
 
-1. Add kombatdesk.com as a custom domain in the Vercel project → get
-   the DNS record Vercel wants → add it in Namecheap Advanced DNS.
-   (Vercel/domain lane — business Claude / extension, not terminal.)
+1. ✅ DONE — kombatdesk.com is live on Vercel. This step used to read
+   "Add kombatdesk.com as a custom domain in the Vercel project → get
+   the DNS record Vercel wants → add it in Namecheap Advanced DNS",
+   which contradicted the INFRASTRUCTURE STATUS section above that had
+   already verified the domain serving traffic. Corrected 2026-08-06.
+   See the DNS/domain bullet for the apex→www 308 gotcha, which still
+   matters for webhook URLs.
 2. Once domain resolves and SSL issues, register a live webhook
    endpoint in Stripe Dashboard (live mode) pointing at
    https://kombatdesk.com/api/stripe/webhook, covering
