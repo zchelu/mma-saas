@@ -40,9 +40,18 @@ export const getAll = query({
       // us to stop" apart from "we never asked them". Without it both render as
       // simply not-textable, and the owner can't see which ones are worth
       // sending the opt-in link to — which is the entire point of that column.
-      // Display-only and read-only: nothing in the app can clear this. Only an
-      // inbound START from the member's own handset does
+      // Read-only in the sense that matters: no field in the UI sets it, and an
+      // inbound START from the member's own handset is the only thing that
+      // clears it for a number we still hold
       // (convex/twilioWebhookAction.ts -> members.setSmsOptOutByPhone).
+      //
+      // The one other path that writes it is members.update, and only when the
+      // member's number is REPLACED with a different one that carries no
+      // opt-out of its own — because at that point the flag is describing a
+      // number this member no longer has. It used to fire on any raw-string
+      // difference, so reformatting a number cleared a live STOP; see the long
+      // comment on that mutation. Do not restate this as "nothing in the app
+      // can clear it" — that was wrong for weeks and shipped into a tooltip.
       smsOptedOut: m.smsOptedOut,
       // Feeds the Texts column's "Dormant" state — this member has used every
       // winback attempt of the current cold streak, so the automatic sequence
@@ -198,7 +207,45 @@ export const update = mutation({
     // a member who opted out on an old number would stay silently excluded
     // from texts on a new number they never opted out on, with no UI to
     // notice or fix it.
-    const phoneChanged = fields.phone !== existing.phone;
+    //
+    // COMPARED ON NORMALIZED DIGITS, NOT RAW STRINGS. This was
+    // `fields.phone !== existing.phone`, and member phone numbers are
+    // free-typed (member-modal.tsx) — so re-saving a member after retyping
+    // "(720) 555-0100" as "720-555-0100" registered as a NEW NUMBER and
+    // silently cleared a real STOP. That made the dashboard capable of
+    // undoing a member's opt-out by reformatting a phone number, which
+    // contradicts the tooltip in app/components/text-state-pill.tsx ("Only
+    // they can undo it") and the privacy policy's opt-out retention
+    // commitment. normalizePhoneDigits is the same function
+    // setSmsOptOutByPhone and consent.ts:submitConsent match on (hoisted —
+    // declared below), so "the same number" means one thing everywhere.
+    const newPhoneDigits = normalizePhoneDigits(fields.phone ?? "");
+    const oldPhoneDigits = normalizePhoneDigits(existing.phone ?? "");
+    const phoneChanged = newPhoneDigits !== oldPhoneDigits;
+
+    // A genuinely new number is not automatically a clean one. Opt-out state
+    // is number-scoped and stored redundantly on every member row carrying
+    // that number (see setSmsOptOutByPhone, which patches all of them and
+    // deliberately does not skip archived rows) — so if the number being
+    // moved TO already told us to stop, on any row in any gym, that instruction
+    // must survive being typed into a different member. Same full-table scan
+    // and same cross-gym scope as setSmsOptOutByPhone, deliberately: an
+    // inheritance rule narrower than the write rule it mirrors would reopen
+    // this hole from the other side.
+    //
+    // Self is excluded: this row's smsOptedOut refers to the OLD number, which
+    // by definition isn't the one being adopted.
+    let inheritedOptOut = false;
+    if (phoneChanged && newPhoneDigits) {
+      const all = await ctx.db.query("members").collect();
+      inheritedOptOut = all.some(
+        (m) =>
+          m._id !== id &&
+          m.smsOptedOut === true &&
+          m.phone &&
+          normalizePhoneDigits(m.phone) === newPhoneDigits
+      );
+    }
     // member-modal.tsx only advances smsConsentConfirmedAt to Date.now() when
     // it computes needsConsent (a genuinely new phone/consent event); it
     // resends the existing timestamp unchanged when just re-saving an
@@ -211,7 +258,14 @@ export const update = mutation({
       fields.smsConsentConfirmedAt !== existing.smsConsentConfirmedAt;
     await ctx.db.patch(id, {
       ...fields,
-      ...(phoneChanged ? { smsOptedOut: false } : {}),
+      // Guarded on newPhoneDigits as well as phoneChanged: CLEARING a member's
+      // phone number is a change, but it hands the opt-out to nobody. Writing
+      // smsOptedOut: false there would let "delete the number, save, retype the
+      // same number, save" launder a STOP through the UI in two clicks. With
+      // the guard, a row whose number is removed keeps its opt-out on file,
+      // which is also what the privacy policy's post-removal retention
+      // commitment requires.
+      ...(phoneChanged && newPhoneDigits ? { smsOptedOut: inheritedOptOut } : {}),
       ...(isFreshModalConsent ? { smsConsentSource: "member_modal" as const } : {}),
     });
   },

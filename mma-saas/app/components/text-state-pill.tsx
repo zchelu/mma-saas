@@ -70,8 +70,18 @@ const TEXT_STATE_TITLE: Record<Exclude<TextState, "no_number">, string> = {
     "All three winback texts have been sent. They're still opted in, but the automatic sequence has stopped until they come back — this one's a phone call.",
   needs_optin:
     "You have a number but no recorded consent, so they will not be texted. Send them your opt-in link.",
+  // Says "this number", not "this member", and does not claim the owner is
+  // powerless. Both are deliberate. The opt-out is number-scoped
+  // (convex/members.ts:setSmsOptOutByPhone patches every row carrying the
+  // number, archived ones included), and there IS one owner-reachable path
+  // that clears it: replacing the member's number with a genuinely different
+  // one that carries no opt-out of its own. This tooltip previously read "Only
+  // they can undo it" while convex/members.ts:update cleared the flag on any
+  // raw-string phone difference — so reformatting a number silently undid a
+  // STOP and the UI told the owner that was impossible. The mutation is fixed;
+  // this wording no longer overpromises either.
   opted_out:
-    "This member replied STOP. Only they can undo it, by texting START from their own phone.",
+    "This number replied STOP, so they won't be texted. It clears when they text START from their own phone — not from anything you change here.",
   inactive: "Consent is on file, but this member's status isn't Active, so they won't be texted.",
 };
 
