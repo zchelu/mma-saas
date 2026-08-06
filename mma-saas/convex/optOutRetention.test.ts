@@ -147,6 +147,59 @@ test("adopting a number that already opted out inherits the opt-out", async () =
   expect(member!.smsOptedOut).toBe(true);
 });
 
+test("adding a NEW member on an opted-out number inherits the opt-out", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner } = await seedGymWithOptedOutMember(t, "(720) 555-0100");
+
+  // The other half of the same hole. `update` refusing to clear an opt-out is
+  // worth nothing if `add` hands out a fresh row with the field unset — which
+  // isTextEligibleMember reads as textable. "Remove the member, add them back"
+  // is two clicks in the dashboard.
+  const newId = await asOwner.mutation(api.members.add, {
+    ...BASE,
+    name: "Re-added Under A New Row",
+    phone: "720-555-0100",
+  });
+
+  const member = await t.run(async (ctx) => ctx.db.get(newId));
+  expect(member!.smsOptedOut).toBe(true);
+});
+
+test("adding a member on a number with no opt-out history leaves the field unset", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner } = await seedGymWithOptedOutMember(t, "(720) 555-0100");
+
+  const newId = await asOwner.mutation(api.members.add, {
+    ...BASE,
+    name: "Unrelated Member",
+    phone: "(719) 555-0123",
+  });
+
+  // Unset, not false. "We have never heard from this number" and "this number
+  // opted back in" are different facts; stamping false would erase that.
+  const member = await t.run(async (ctx) => ctx.db.get(newId));
+  expect(member!.smsOptedOut).toBeUndefined();
+});
+
+test("an archived member's opt-out still blocks a re-add on that number", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, memberId } = await seedGymWithOptedOutMember(t, "(720) 555-0100");
+
+  await asOwner.mutation(api.members.archiveMember, { memberId });
+
+  // The removed row is exactly the one a re-add would sail past, and the
+  // privacy policy commits to honoring an opt-out after roster removal. This
+  // is why numberHasOptOutOnRecord does not filter archived rows.
+  const newId = await asOwner.mutation(api.members.add, {
+    ...BASE,
+    name: "Same Number, New Row",
+    phone: "+1 720 555 0100",
+  });
+
+  const member = await t.run(async (ctx) => ctx.db.get(newId));
+  expect(member!.smsOptedOut).toBe(true);
+});
+
 test("clearing the phone number retains the opt-out on the row", async () => {
   const t = convexTest(schema, modules);
   const { asOwner, memberId } = await seedGymWithOptedOutMember(t, "(720) 555-0100");

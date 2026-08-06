@@ -1,4 +1,9 @@
 import { query, mutation, internalMutation, MutationCtx } from "./_generated/server";
+// Id is used only as a type, by numberHasOptOutOnRecord's excludeId parameter.
+// Its absence did not fail a single test: vitest transpiles without
+// typechecking, so 8/8 green said nothing about whether this file compiles.
+// `npx tsc --noEmit` is the check that catches this class of error.
+import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireGym, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
@@ -169,6 +174,38 @@ export async function generateUniqueCheckInToken(ctx: MutationCtx): Promise<stri
   throw new Error("Failed to generate a unique check-in token after 5 attempts");
 }
 
+// Does any member row OTHER than excludeId already carry an opt-out for this
+// number? Shared by add and update, which both need it for the same reason and
+// would otherwise drift.
+//
+// Opt-out state is number-scoped but stored redundantly on member rows —
+// setSmsOptOutByPhone patches every row holding the number, archived ones
+// included. So "has this number told us to stop" is a question about the whole
+// members table, not about one row, and every path that puts a number ONTO a
+// row has to ask it. Same full-table scan and same cross-gym scope as
+// setSmsOptOutByPhone, deliberately: an inheritance rule narrower than the
+// write rule it mirrors leaves a way back in.
+//
+// Archived rows are included for the same reason setSmsOptOutByPhone doesn't
+// skip them — the privacy policy commits to honoring an opt-out after removal
+// from the roster, and a removed member is exactly the row a re-add would
+// otherwise sail past.
+async function numberHasOptOutOnRecord(
+  ctx: MutationCtx,
+  digits: string,
+  excludeId?: Id<"members">
+): Promise<boolean> {
+  if (!digits) return false;
+  const all = await ctx.db.query("members").collect();
+  return all.some(
+    (m) =>
+      m._id !== excludeId &&
+      m.smsOptedOut === true &&
+      m.phone &&
+      normalizePhoneDigits(m.phone) === digits
+  );
+}
+
 export const add = mutation({
   args: memberFields,
   handler: async (ctx, args) => {
@@ -176,9 +213,24 @@ export const add = mutation({
     requireWriteAccess(gym);
     validateMemberFields(args);
     assertSmsConsent(args);
+    // A NEW row is not a clean slate for a number that already opted out.
+    // Without this, "remove the member, add them again" — or simply typing an
+    // opted-out number onto a new member — produced a row with smsOptedOut
+    // undefined, which isTextEligibleMember reads as textable. That is the same
+    // hole this file just closed in `update`, reached from the other side, and
+    // it defeats that fix entirely: an owner who cannot clear an opt-out by
+    // editing can still clear it by re-adding. assertSmsConsent above forces
+    // the owner to tick consent to save a number at all, so nothing else would
+    // have stopped the send.
+    const optedOut = await numberHasOptOutOnRecord(ctx, normalizePhoneDigits(args.phone ?? ""));
     return await ctx.db.insert("members", {
       ...args,
       gymId: gym._id,
+      // Only ever written as `true`. A number with no opt-out on record leaves
+      // the field unset, exactly as before, rather than being stamped false —
+      // "we have never heard from this number" and "this number opted back in"
+      // are different facts and the schema distinguishes them.
+      ...(optedOut ? { smsOptedOut: true } : {}),
       ...(args.smsConsentConfirmed ? { smsConsentSource: "member_modal" as const } : {}),
     });
   },
@@ -223,29 +275,19 @@ export const update = mutation({
     const oldPhoneDigits = normalizePhoneDigits(existing.phone ?? "");
     const phoneChanged = newPhoneDigits !== oldPhoneDigits;
 
-    // A genuinely new number is not automatically a clean one. Opt-out state
-    // is number-scoped and stored redundantly on every member row carrying
-    // that number (see setSmsOptOutByPhone, which patches all of them and
-    // deliberately does not skip archived rows) — so if the number being
-    // moved TO already told us to stop, on any row in any gym, that instruction
-    // must survive being typed into a different member. Same full-table scan
-    // and same cross-gym scope as setSmsOptOutByPhone, deliberately: an
-    // inheritance rule narrower than the write rule it mirrors would reopen
-    // this hole from the other side.
+    // A genuinely new number is not automatically a clean one — if the number
+    // being moved TO already told us to stop, that instruction must survive
+    // being typed into a different member. Shares numberHasOptOutOnRecord with
+    // `add`, which needs the identical rule for the identical reason; two
+    // copies is how the two paths drift and one of them quietly stops
+    // inheriting.
     //
     // Self is excluded: this row's smsOptedOut refers to the OLD number, which
     // by definition isn't the one being adopted.
-    let inheritedOptOut = false;
-    if (phoneChanged && newPhoneDigits) {
-      const all = await ctx.db.query("members").collect();
-      inheritedOptOut = all.some(
-        (m) =>
-          m._id !== id &&
-          m.smsOptedOut === true &&
-          m.phone &&
-          normalizePhoneDigits(m.phone) === newPhoneDigits
-      );
-    }
+    const inheritedOptOut =
+      phoneChanged && newPhoneDigits
+        ? await numberHasOptOutOnRecord(ctx, newPhoneDigits, id)
+        : false;
     // member-modal.tsx only advances smsConsentConfirmedAt to Date.now() when
     // it computes needsConsent (a genuinely new phone/consent event); it
     // resends the existing timestamp unchanged when just re-saving an
