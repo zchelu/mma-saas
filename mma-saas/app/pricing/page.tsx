@@ -5,6 +5,7 @@ import { Footer } from "../components/footer";
 import { Logo } from "../components/logo";
 import { getFoundingOffer } from "@/lib/foundingOffer";
 import { TRIAL_DAYS } from "@/lib/plans";
+import { PRICING_TIERS } from "./tiers";
 
 // The founding coupon's redemption count can change between requests (someone
 // else closes a founding gym), so this page must never be served from a
@@ -24,42 +25,6 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
-
-// Single place to change tier names, prices, and slugs for this page. As of
-// the starter/pro/elite -> academy/fightteam/blackbelt rename, these slugs are
-// what the onboarding wizard and Stripe webhook use too.
-export const PRICING_TIERS = [
-  {
-    slug: "academy",
-    name: "Academy",
-    size: "Up to 100 members",
-    price: 99,
-    perks: [] as string[],
-    roiLine: "Save one member a year and it's paid for itself.",
-  },
-  {
-    slug: "fightteam",
-    name: "Fight Team",
-    size: "101–250 members",
-    price: 179,
-    perks: [] as string[],
-    badge: "MOST GYMS START HERE",
-    highlighted: true,
-    roiLine:
-      "Save two members a year and it's paid for itself. Built for the range where silent quitters stop being names you'd notice.",
-  },
-  {
-    slug: "blackbelt",
-    name: "Black Belt",
-    size: "251+ members",
-    price: 299,
-    perks: [
-      "Done-for-you roster import",
-      "Monthly revenue review call with me",
-      "Direct line to me",
-    ] as string[],
-  },
-];
 
 // Every tier shows the same CTA on purpose — the plans differ by gym size,
 // not by feature, so there is nothing to upsell between them.

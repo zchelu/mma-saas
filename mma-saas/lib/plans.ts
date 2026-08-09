@@ -56,7 +56,7 @@ export const PLAN_LABEL: Record<string, string> = {
 
 // Every current tier (academy/fightteam/blackbelt) includes winback texting —
 // there's no pro-vs-elite automated-vs-manual split anymore, see PRICING_TIERS
-// in app/pricing/page.tsx. "starter" is the one exclusion: gym rows written
+// in app/pricing/tiers.ts. "starter" is the one exclusion: gym rows written
 // before the academy/fightteam/blackbelt rename (see stripeWebhookAction.ts's
 // history) can still carry the legacy "starter" slug, which never included
 // texting under the old pricing and shouldn't gain it retroactively just

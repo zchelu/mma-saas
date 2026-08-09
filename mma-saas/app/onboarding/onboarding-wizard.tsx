@@ -11,9 +11,17 @@ const GENERIC_ERROR = "Something went wrong — please try again or contact us."
 // Colorado Automatic Renewal Law (C.R.S. 6-1-732) requires the auto-renewal
 // terms be clear and conspicuous immediately adjacent to the enrollment
 // button — not just earlier on /pricing. Price and trial length both come from
-// lib/plans.ts — the same source app/pricing/page.tsx uses for price — so
-// this can't drift from what the customer saw there or from what Stripe
-// actually grants.
+// lib/plans.ts (PLAN_PRICE_USD and TRIAL_DAYS), so this can't drift from the
+// trial Stripe actually grants.
+//
+// It CAN drift from /pricing, and this comment used to deny that. /pricing
+// renders its prices from app/pricing/tiers.ts:PRICING_TIERS, not from
+// PLAN_PRICE_USD — two separate price tables that agree today (99/179/299)
+// and are kept in step by nothing but attention. They were never one source;
+// the claim was wrong before PRICING_TIERS moved out of the page file, and
+// only looks wrong now. If they ever diverge the customer reads one price on
+// /pricing and is disclosed another immediately above the enrollment button,
+// which is precisely the mismatch C.R.S. 6-1-732 makes legally material.
 function RenewalDisclosure({ plan }: { plan: string }) {
   const price = PLAN_PRICE_USD[plan];
   return (
