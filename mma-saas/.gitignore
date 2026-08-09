@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local mirrors of claude.ai project docs — canonical copy lives there, never commit
+.claude-docs/
