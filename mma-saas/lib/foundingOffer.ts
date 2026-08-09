@@ -38,6 +38,21 @@ export type { FoundingOffer, FoundingOfferResult };
 // next.config.ts, which isn't enabled here and is a much bigger change than
 // this task — unstable_cache needs no config change and is still shipped
 // (deprecated, not removed) in this Next version.
+//
+// The `new Stripe(process.env.STRIPE_SECRET_KEY!)` below LOOKS like an
+// AGENTS.md §7 violation and has been re-opened as one across three separate
+// handoffs. It is not one. Verified 2026-08-09 — leave it:
+//
+//   - Its only caller is resolveFoundingOffer, which awaits it INSIDE a
+//     try/catch (see below). A synchronous throw in an async function is a
+//     rejected promise, so a missing key is caught, classified by
+//     classifyCouponError as `unknown`, and checkout refuses the sale and
+//     alerts — the correct outcome, not a silent 500.
+//   - app/api/stripe/checkout/route.ts never calls this without a key
+//     anyway; it short-circuits to missingApiKeyResult, which carries better
+//     remediation copy. That route's comment at :70-75 already says so.
+//
+// If you ever move this call out of that try/catch, apply §7 properly first.
 const getCachedCoupon = unstable_cache(
   async (couponId: string): Promise<Stripe.Coupon | Stripe.DeletedCoupon> => {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);

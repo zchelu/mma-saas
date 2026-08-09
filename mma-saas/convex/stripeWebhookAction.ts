@@ -379,11 +379,54 @@ async function processEvent(ctx: ActionCtx, stripe: Stripe, event: Stripe.Event)
 export const verifyAndProcess = action({
   args: { signature: v.string(), payload: v.string() },
   handler: async (ctx, { signature, payload }): Promise<WebhookResult> => {
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+    // Read, don't construct — AGENTS.md §7. `new Stripe(undefined!)` throws
+    // SYNCHRONOUSLY and this was the first line of the handler, above every
+    // try/catch in it.
+    //
+    // THESE ARE CONVEX ENVIRONMENT VARIABLES, set in the Convex dashboard —
+    // a different store from the Vercel env scoping done on 2026-08-01.
+    // Vercel having STRIPE_SECRET_KEY says nothing about whether Convex does.
+    // That is why this instance survived three handoffs that listed the other
+    // four: every one of them was looking at Vercel-side code.
+    //
+    // The failure this prevents is worse than the checkout-route version that
+    // got all the attention. There, a missing key means no sale and the buyer
+    // sees an error. Here: the action rejects -> fetchAction in
+    // app/api/stripe/webhook/route.ts throws -> raw 500 -> Stripe retries,
+    // fails identically, and drops the event when its retry window closes.
+    // checkout.session.completed is never processed, so a gym owner who HAS
+    // ALREADY PAID is never provisioned and never receives the trial
+    // confirmation email that is their C.R.S. 6-1-732 record. Silently.
+    //
+    // STRIPE_WEBHOOK_SECRET is checked here too. It used to be a `!` inside
+    // the try below, so a missing one surfaced as "signature verification
+    // failed" — which reads as a bad endpoint or a hostile caller, and sends
+    // whoever is debugging it to rotate a secret that was never set.
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!stripeSecretKey || !webhookSecret) {
+      const missing = [
+        !stripeSecretKey && "STRIPE_SECRET_KEY",
+        !webhookSecret && "STRIPE_WEBHOOK_SECRET",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      console.error(
+        `Stripe webhook: ${missing} missing from the CONVEX environment (set in the Convex dashboard — NOT Vercel). ` +
+          `Returning retry so Stripe redelivers instead of dropping the event. ` +
+          `While this persists, paid signups are NOT being provisioned.`
+      );
+      // Deliberate 500 via the route, rather than an unhandled throw: Stripe
+      // keeps redelivering, so events survive until the key is set. Nothing
+      // is claimed in stripeEvents yet, so there is no claim to release.
+      return { status: "retry" };
+    }
+
+    const stripe = new Stripe(stripeSecretKey);
 
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(payload, signature, process.env.STRIPE_WEBHOOK_SECRET!);
+      event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
     } catch (err) {
       console.error("Stripe webhook signature verification failed:", err);
       return { status: "invalid_signature" };
