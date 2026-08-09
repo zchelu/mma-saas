@@ -67,6 +67,53 @@ export default defineSchema({
     // sendRetentionTexts.ts:getAtRiskMembers, so archiving stops texts.
     archived: v.optional(v.boolean()),
     archivedAt: v.optional(v.number()),
+    // --- Stripe Connect member billing (dues). See the Connect member-billing
+    // spec in the claude.ai project, §2.
+    //
+    // These bill the MEMBER, for the GYM's dues, on the gym's connected
+    // account. That is a different Stripe account and a different money system
+    // from gyms.stripeCustomerId/stripeSubscriptionId, which bill the GYM for
+    // KombatDesk's own SaaS fee. Keeping the two apart is the whole point.
+    //
+    // THE NAMING RULE: any id belonging to a connected account carries
+    // `Connect`, in locals and variable names too, not just here.
+    // gyms.by_stripe_customer backs subscriptions.updatePlanStatusByCustomer —
+    // a bare `stripeCustomerId` on this table would sit one table away from a
+    // lookup that could flip a gym's SaaS plan status from a member's dues
+    // event. The prefix is what keeps the two systems distinguishable by
+    // reading, at every call site, without checking which table you're on.
+    //
+    // members.plan (free-text, above) is left ALONE as display copy — it
+    // cannot carry a price, and nothing should try to parse one out of it.
+    // planId is the source of truth for money.
+    planId: v.optional(v.id("gymPlans")),
+    stripeConnectCustomerId: v.optional(v.string()),
+    stripeConnectSubscriptionId: v.optional(v.string()),
+    duesStatus: v.optional(
+      v.union(
+        v.literal("active"),
+        v.literal("past_due"),
+        v.literal("canceled"),
+        v.literal("unpaid")
+      )
+    ),
+    // When the most recent dues payment failed, and how many have failed in a
+    // row.
+    //
+    // RANKING INPUT ONLY. Read by getAtRiskMembers to order and explain the
+    // at-risk list — a member who missed class AND bounced a payment ranks
+    // above either alone. Deliberately NOT part of
+    // lib/memberEligibility.ts:isTextEligibleMember, which answers "may we
+    // lawfully text this person" (consent, opt-out, archived) and feeds
+    // getTextableCount, the "Can be texted" tile and the /members Texts
+    // column — the numbers quoted against the "Up to 5 automated msgs/month"
+    // disclosure. Eligibility and priority must not be the same predicate.
+    //
+    // Durable until resolved, which is what qualifies it for the at-risk list
+    // at all: the durable-states-only rule in getAtRiskMembers' header comment
+    // exists so a roster badge can't flicker between page loads.
+    duesFailedAt: v.optional(v.number()),
+    duesFailureCount: v.optional(v.number()),
   })
     .index("by_gym", ["gymId"])
     .index("by_check_in_token", ["checkInToken"]),
@@ -78,14 +125,75 @@ export default defineSchema({
     // Optional until backfilled — see convex/migrations.ts.
     gymId: v.optional(v.id("gyms")),
   }).index("by_gym", ["gymId"]),
+  // The MANUAL ledger — an owner types an amount and a due date and toggles
+  // status by hand. No processor, no payment link, no reconciliation. Stripe-
+  // backed dues live in `duesInvoices` below and must never be mixed in here:
+  // different lifecycle, different write path, different source of truth.
   invoices: defineTable({
     memberId: v.id("members"),
+    // DOLLARS, AS A FLOAT — not cents. app/invoices/invoice-modal.tsx writes
+    // this from a `type="number" step="0.01"` input through Number(), so 150.00
+    // means $150.00. Left exactly as it is on purpose.
+    //
+    // Every money field added to this codebase from 2026-08-09 on carries a
+    // `Cents` suffix and is an integer (see duesInvoices/gymPlans). This field
+    // predates that rule and is the reason for it: an integer-cents field
+    // sitting next to a dollars float with a near-identical name is a silent
+    // 100x billing error. Do not add money fields to this table.
     amount: v.number(),
     status: v.union(v.literal("paid"), v.literal("unpaid")),
     dueDate: v.string(),
     // Optional until backfilled — see convex/migrations.ts.
     gymId: v.optional(v.id("gyms")),
   }).index("by_gym", ["gymId"]),
+  // Gym-defined membership plans — what a gym charges its own members, priced
+  // on that gym's CONNECTED Stripe account. Distinct from lib/plans.ts, which
+  // is KombatDesk's own SaaS tiers (academy/fightteam/blackbelt).
+  //
+  // New table, so fields are required: the optional-until-backfilled pattern
+  // on members.gymId et al. exists to avoid invalidating rows that already
+  // exist, and there are none here.
+  gymPlans: defineTable({
+    gymId: v.id("gyms"),
+    name: v.string(), // "Adult Unlimited", "Kids 2x/week"
+    // INTEGER cents. Never a float. See the invoices.amount comment above.
+    amountCents: v.number(),
+    interval: v.union(v.literal("month"), v.literal("year")),
+    // Stripe Price id on the CONNECTED account, not the platform account.
+    // Optional because the row is written before the Price is created, and a
+    // plan whose Stripe Price creation failed must still be visible and
+    // fixable rather than lost.
+    stripeConnectPriceId: v.optional(v.string()),
+    active: v.boolean(),
+  }).index("by_gym", ["gymId"]),
+  // Stripe-mirrored dues invoices. Deliberately NOT the `invoices` table above.
+  //
+  // Written only from the Connect webhook — this table mirrors Stripe, it is
+  // never the origin of a fact. `status` uses Stripe's own vocabulary rather
+  // than the paid/unpaid pair `invoices` uses, so a value never has to be
+  // translated on the way in and silently lose a state (uncollectible and void
+  // are not "unpaid").
+  duesInvoices: defineTable({
+    gymId: v.id("gyms"),
+    memberId: v.id("members"),
+    stripeConnectInvoiceId: v.string(),
+    amountDueCents: v.number(), // INTEGER cents
+    amountPaidCents: v.number(), // INTEGER cents
+    status: v.union(
+      v.literal("draft"),
+      v.literal("open"),
+      v.literal("paid"),
+      v.literal("uncollectible"),
+      v.literal("void")
+    ),
+    hostedInvoiceUrl: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+  })
+    .index("by_gym", ["gymId"])
+    .index("by_member", ["memberId"])
+    // The upsert key — the webhook looks a row up by Stripe's id before
+    // deciding to insert or patch, so redelivery can't create a second row.
+    .index("by_stripe_connect_invoice", ["stripeConnectInvoiceId"]),
   enrollments: defineTable({
     memberId: v.id("members"),
     classId: v.id("classes"),
@@ -244,6 +352,21 @@ export default defineSchema({
   })
     .index("by_message_sid", ["messageSid"])
     .index("by_processed_at", ["processedAt"]),
+  // Duplicate-delivery guard for the CONNECT webhook, exactly mirroring
+  // stripeWebhookEvents above — same 30-day retention, same claim/release
+  // discipline, same reasoning.
+  //
+  // A separate table, and NOT because ids could collide: Stripe's `evt_` ids
+  // are globally unique, so one table would work. It is for operational
+  // isolation. The platform stream is load-bearing for provisioning a gym that
+  // has already paid; the dues stream must be purgeable, replayable and
+  // debuggable without any chance of disturbing it.
+  stripeConnectWebhookEvents: defineTable({
+    eventId: v.string(),
+    processedAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_processed_at", ["processedAt"]),
   recoveryTokens: defineTable({
     token: v.string(),
     stripeCustomerId: v.string(),
@@ -305,8 +428,42 @@ export default defineSchema({
     // appended server-side and is NOT part of this string — an owner must not
     // be able to ship a message with no opt-out instructions.
     retentionMessageTemplate: v.optional(v.string()),
+    // --- Stripe Connect member billing. NOTE the two fields above,
+    // stripeCustomerId and stripeSubscriptionId: those are the PLATFORM
+    // account — this gym's own KombatDesk SaaS subscription. Everything below
+    // is the gym's CONNECTED account, where it bills its own members. Unset
+    // for every gym that hasn't onboarded to Connect, which today is all of
+    // them.
+    stripeConnectAccountId: v.optional(v.string()),
+    // Mirrored from Stripe by the account.updated webhook — never written
+    // optimistically at onboarding time. Express onboarding is routinely
+    // abandoned partway, leaving a real account that cannot charge, so
+    // "we created an account" and "this gym can take money" are different
+    // facts. Nothing may create a charge until connectChargesEnabled is true.
+    connectChargesEnabled: v.optional(v.boolean()),
+    connectPayoutsEnabled: v.optional(v.boolean()),
+    connectOnboardedAt: v.optional(v.number()),
+    // IANA zone, e.g. "America/Denver". Collected during Connect onboarding,
+    // defaulted from the browser and confirmable by the owner.
+    //
+    // lib/localDate.ts says there is deliberately no timezone on gyms because
+    // "the device is physically in the gym, so its clock is the gym's clock."
+    // That is correct for attendance and the kiosk and does NOT extend here: a
+    // member-facing renewal date is server-rendered into an email, for a gym
+    // that may not be in Colorado, with no device in the loop whose clock we
+    // could borrow. stripeWebhookAction.ts hardcodes America/Denver, which is
+    // right for our own SaaS billing (the seller is in Colorado) and wrong the
+    // moment the seller is a gym in Tampa.
+    //
+    // Do not "unify" this with localDate.ts. They answer different questions:
+    // what day is it where the device is, versus what day will this specific
+    // human be charged. The second one shipped wrong once already, inside a
+    // statutory disclosure.
+    timezone: v.optional(v.string()),
   })
     .index("by_clerk_user", ["clerkUserId"])
+    // PLATFORM customer ids only. A connected-account customer id must never
+    // reach this index — see the naming rule on members.stripeConnectCustomerId.
     .index("by_stripe_customer", ["stripeCustomerId"])
     .index("by_slug", ["slug"]),
   // Every winback text this product has actually sent.
