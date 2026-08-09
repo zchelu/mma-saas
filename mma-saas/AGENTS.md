@@ -13,6 +13,11 @@ Vercel · Tailwind v4 · TypeScript.
 Durable context lives in the **claude.ai project**, not in this repo. Start with
 the newest `claude/handoff-*.md` there.
 
+Some of those docs are mirrored to `.claude-docs/` for tooling that can't reach the
+project. That directory is **gitignored deliberately** — the project copy is canonical
+and a committed mirror drifts. It will be **absent on a fresh clone**: if a doc you
+need isn't there, ask Zain to export it. Do not reconstruct it, and do not commit it.
+
 ## 1. Who runs git and deploys
 
 **RESOLVED 2026-08-03. Agents may run git and deploys, under per-step
