@@ -5,14 +5,21 @@ import { api } from "../../convex/_generated/api";
 export default function StatsGrid() {
   const activeMembers = useQuery(api.members.getActiveCount);
   const classCount = useQuery(api.classes.getCount);
-  const openInvoices = useQuery(api.invoices.getUnpaidCount);
   const textableCount = useQuery(api.members.getTextableCount);
 
+  // "Open Invoices" was removed here alongside the /invoices nav entry — see
+  // the comment in app/components/app-header.tsx. It read
+  // api.invoices.getUnpaidCount, a count of hand-entered rows nobody
+  // maintains, and it linked the dashboard to a surface that cannot take a
+  // payment. api.invoices.getUnpaidCount is left in place, uncalled, for the
+  // Stripe Connect work that revives it.
+  //
+  // Grid is sm:grid-cols-3 to match the three remaining cards. Restore it to
+  // 4 when a real billing stat returns.
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
       <StatCard label="Active Members" value={activeMembers} />
       <StatCard label="Classes Scheduled" value={classCount} />
-      <StatCard label="Open Invoices" value={openInvoices} />
       {/* Same label and same number as the "Can be texted" badge on /members
           (both read members.ts:getTextableCount's isTextEligibleMember over
           the caller's roster) — deliberately not consent.ts:getConsentStats,

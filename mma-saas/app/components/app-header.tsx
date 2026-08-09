@@ -4,11 +4,24 @@ import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { Logo } from "./logo";
 
+// "/invoices" is deliberately ABSENT from this nav — do not restore it.
+//
+// convex/invoices.ts is a manual ledger: an owner types an amount and a due
+// date, then toggles status paid/unpaid by hand. No processor, no payment
+// link, no reconciliation. Shipping it in the nav puts an "Invoices" tab in
+// front of a gym owner on a demo call who clicks it expecting billing and
+// finds a spreadsheet he has to maintain himself — a promise the product
+// makes and does not keep, on the screen a skeptical buyer pokes at first.
+//
+// The route, the schema table and the data are all intentionally left intact
+// and untouched. This is a one-line hide, not a teardown, because Stripe
+// Connect member billing revives this exact surface — see the project doc
+// claude/spec-connect-member-billing-v1.md. Restore this entry in the same
+// change that makes the tab able to take a payment, and not before.
 const links = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/members", label: "Members" },
   { href: "/classes", label: "Classes" },
-  { href: "/invoices", label: "Invoices" },
   { href: "/billing", label: "Billing" },
 ];
 
