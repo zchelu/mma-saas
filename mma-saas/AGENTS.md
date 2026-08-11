@@ -46,6 +46,34 @@ them was not permitted to commit them. **Code reaching production without
 passing through version control is the worse failure**, and Convex deploys from
 the working directory, so the two cannot be separated in practice.
 
+### Two sessions must not both hold uncommitted Convex functions
+
+`convex/_generated/api.d.ts` is generated from **whatever is in `convex/` right
+now**, not from what is committed. So when two sessions each hold an uncommitted
+Convex module, codegen produces one file declaring both, and there is no way to
+commit it correctly:
+
+- Commit it as-is and it imports a module that is not in the repo, so `tsc`
+  fails on a fresh clone — and Vercel typechecks during `next build`.
+- Leave it out and the app code calling the newly added functions typechecks
+  against a generated file that does not know them. Same failure, opposite
+  cause.
+
+This is the two-writer problem one level up, and being careful with `git add`
+does not fix it. It is a property of the generator.
+
+**The rule: whoever's functions are ready lands first, and the other session
+gets its modules OUT of `convex/` until they do.** Move them aside, let the
+landing session regenerate and commit an `api.d.ts` referencing only committed
+modules, then restore and regenerate on the clean base. Never hand-edit
+`api.d.ts` to resolve this — it is generated, and the next codegen silently
+reverts the edit.
+
+Observed 2026-08-09: a Connect stage-C session and a Documents & Waivers session
+both held uncommitted Convex modules, and 29 green, tested, building files sat
+untracked because neither could commit the generated file. Related history in
+`claude/typecheck-blind-spot-api-d-ts.md`.
+
 ## 2. Never guess when you can look
 
 This project has a documented record: **whoever went and looked was right;
