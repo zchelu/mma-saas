@@ -9,6 +9,11 @@ const isPublicRoute = createRouteMatcher([
   '/sign-up(.*)',
   '/signup(.*)',
   '/checkin(.*)',
+  // The front-desk tablet's other half — new-member signup and waiver
+  // signing. Unauthenticated for the same reason /checkin is: the device at
+  // the door has no Clerk session. Every function behind it takes an explicit
+  // gymId and re-derives the rest server-side (convex/documents.ts).
+  '/kiosk(.*)',
   '/consent(.*)',
   '/recover(.*)',
   '/terms(.*)',

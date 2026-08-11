@@ -40,6 +40,23 @@ const BUCKETS: Record<string, { limit: number; windowMs: number }> = {
   recoverEmail: { limit: 3, windowMs: 15 * 60 * 1000 },
   recoverGlobal: { limit: 40, windowMs: 60 * 60 * 1000 },
   recoverIp: { limit: 5, windowMs: 15 * 60 * 1000 },
+  // documentSign/kioskSignup back the unauthenticated waiver rail
+  // (convex/documents.ts), keyed on gymId the way "checkin" is — the tablet
+  // has no session and no stable identifier of its own, so the gym is the
+  // only honest actor to throttle.
+  //
+  // SIZED SO A REAL NIGHT CANNOT TRIP THEM. That is the binding constraint,
+  // not the abuse ceiling: a gym locked out of its own front desk mid-class
+  // turns the feature off, whereas the damage either bucket bounds is already
+  // bounded elsewhere (signDocument allows one signature per member per
+  // document, and createMemberFromKiosk requires an active subscription).
+  // documentSign matches the existing "checkin" bucket exactly — the two run
+  // on the same tablet at the same door, and a signing rush IS a check-in
+  // rush. kioskSignup is a wider window because signups arrive in clumps: a
+  // free-trial week or a kids' intake night can put 30+ new people through
+  // one tablet in an evening, which a ten-minute window would cut off.
+  documentSign: { limit: 60, windowMs: 5 * 60 * 1000 },
+  kioskSignup: { limit: 40, windowMs: 60 * 60 * 1000 },
 };
 
 // Buckets checkRateLimitAction (below) is allowed to touch — exactly the three

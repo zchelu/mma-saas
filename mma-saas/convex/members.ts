@@ -11,6 +11,7 @@ import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
 import { MAX_WINBACK_ATTEMPTS, WINBACK_ATTRIBUTION_WINDOW_DAYS } from "./sendRetentionTexts";
 import { isTextEligibleMember } from "../lib/memberEligibility";
+import { parseCalendarDate } from "../lib/documents";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -39,6 +40,13 @@ export const getAll = query({
       phone: m.phone,
       beltRank: m.beltRank,
       lastVisit: m.lastVisit,
+      // Needed by the member modal so an owner can fill in or correct either
+      // one, and by nothing else on the /members screen. Both are already the
+      // owner's own data — this is the authenticated, gym-scoped query, not
+      // the kiosk's narrowed getActiveForGym, which deliberately still ships
+      // neither.
+      dob: m.dob,
+      address: m.address,
       smsConsentConfirmed: m.smsConsentConfirmed,
       smsConsentConfirmedAt: m.smsConsentConfirmedAt,
       // Needed by the Members table's "Texts" column to tell "this member told
@@ -124,7 +132,40 @@ const memberFields = {
   beltRank: v.optional(v.string()),
   smsConsentConfirmed: v.optional(v.boolean()),
   smsConsentConfirmedAt: v.optional(v.number()),
+  // Calendar date, "YYYY-MM-DD" — see the schema comment on members.dob. Owner
+  // -editable here so a gym can fill it in from their paper records ahead of a
+  // kids' class; the kiosk signing step also collects it when it's missing,
+  // because convex/documents.ts:signDocument refuses to sign a guardian-
+  // requiring document for a member whose age it can't determine.
+  dob: v.optional(v.string()),
+  address: v.optional(v.string()),
 };
+
+// Normalizes the two calendar/text fields the documents feature added, and
+// returns ONLY the keys the caller actually sent.
+//
+// Two separate hazards, both about the difference between "not mentioned" and
+// "cleared":
+//
+//   - `patch({ dob: "" })` would store an empty string, which
+//     lib/documents.ts:parseCalendarDate reads as "no date of birth" — the
+//     same meaning as an absent field, in a second representation. One of
+//     them is enough.
+//   - `patch({ dob: undefined })` DELETES the field. So a helper that always
+//     emits a `dob` key turns any partial update that didn't mention a date of
+//     birth into an erasure of the one value the guardian rule depends on.
+//     Emitting the key only when a string actually arrived keeps "omitted"
+//     and "cleared" apart: omitted leaves the stored value alone, and an
+//     explicit "" clears it.
+function normalizedDocumentFields(fields: { dob?: string; address?: string }): {
+  dob?: string;
+  address?: string;
+} {
+  const out: { dob?: string; address?: string } = {};
+  if (typeof fields.dob === "string") out.dob = fields.dob.trim() || undefined;
+  if (typeof fields.address === "string") out.address = fields.address.trim() || undefined;
+  return out;
+}
 
 function assertSmsConsent(fields: { phone?: string; smsConsentConfirmed?: boolean }) {
   if (fields.phone && !fields.smsConsentConfirmed) {
@@ -138,6 +179,8 @@ function validateMemberFields(fields: {
   email?: string;
   phone?: string;
   beltRank?: string;
+  dob?: string;
+  address?: string;
 }) {
   assertMaxLength(fields.name, 200, "Name");
   assertMaxLength(fields.plan, 100, "Plan");
@@ -145,6 +188,16 @@ function validateMemberFields(fields: {
   assertEmailFormat(fields.email, "Email");
   assertMaxLength(fields.phone, 30, "Phone");
   assertMaxLength(fields.beltRank, 100, "Belt rank");
+  assertMaxLength(fields.address, 500, "Address");
+  // Reached only AFTER normalizedDocumentFields has run at both call sites, so
+  // a cleared field is already `undefined` here and never "" — checking for
+  // the empty string again would be dead code. What's left has to be a real
+  // calendar date: an unparseable one would make documents.ts:signDocument
+  // treat the member's age as unknown, and the gym would find that out at the
+  // door rather than here.
+  if (fields.dob !== undefined && !parseCalendarDate(fields.dob)) {
+    throw new Error("Date of birth must be a valid date.");
+  }
 }
 
 // CSPRNG, not Math.random — Web Crypto's getRandomValues (Node's
@@ -190,7 +243,12 @@ export async function generateUniqueCheckInToken(ctx: MutationCtx): Promise<stri
 // skip them — the privacy policy commits to honoring an opt-out after removal
 // from the roster, and a removed member is exactly the row a re-add would
 // otherwise sail past.
-async function numberHasOptOutOnRecord(
+// Exported for convex/documents.ts:createMemberFromKiosk, which creates member
+// rows from the unauthenticated front-desk tablet and needs the identical rule
+// for the identical reason. Sharing the function rather than copying it is the
+// point: a second implementation is how one of the two paths quietly stops
+// inheriting an opt-out.
+export async function numberHasOptOutOnRecord(
   ctx: MutationCtx,
   digits: string,
   excludeId?: Id<"members">
@@ -208,9 +266,10 @@ async function numberHasOptOutOnRecord(
 
 export const add = mutation({
   args: memberFields,
-  handler: async (ctx, args) => {
+  handler: async (ctx, rawArgs) => {
     const gym = await requireGym(ctx);
     requireWriteAccess(gym);
+    const args = { ...rawArgs, ...normalizedDocumentFields(rawArgs) };
     validateMemberFields(args);
     assertSmsConsent(args);
     // A NEW row is not a clean slate for a number that already opted out.
@@ -238,9 +297,10 @@ export const add = mutation({
 
 export const update = mutation({
   args: { id: v.id("members"), ...memberFields },
-  handler: async (ctx, { id, ...fields }) => {
+  handler: async (ctx, { id, ...rawFields }) => {
     const gym = await requireGym(ctx);
     requireWriteAccess(gym);
+    const fields = { ...rawFields, ...normalizedDocumentFields(rawFields) };
     const existing = await ctx.db.get(id);
     if (!existing || existing.gymId !== gym._id) throw new Error("Member not found");
     // An archived member is not editable. No UI can reach one (every list query

@@ -40,14 +40,20 @@ const CLASS_DEFS = [
 // stops ~12 days ago (active status + stale lastVisit = the real At-Risk
 // query's condition, convex/members.ts:getAtRiskMembers). "promotable" ->
 // Tyler Brandt, maxed white belt (4 stripes), the live promotion demo moment.
+// `dob` is deliberately on only four of these. Two reasons: an owner
+// mid-rollout genuinely has dates of birth for part of their roster and not
+// the rest, and the kiosk's "we need a date of birth before this can be
+// signed" step needs to be reachable on a demo gym. Casey Whitfield's date
+// puts them under 18, which is what makes the seeded guardian signature — and
+// the guardian pad in a live demo — mean something.
 const MEMBER_DEFS = [
-  { name: "Tyler Brandt", belt: "white", stripes: 4, role: "promotable", checkInsPerWeek: 3 },
-  { name: "Jordan Reyes", belt: "white", stripes: 2, checkInsPerWeek: 2 },
-  { name: "Casey Whitfield", belt: "white", stripes: 1, checkInsPerWeek: 3 },
+  { name: "Tyler Brandt", belt: "white", stripes: 4, role: "promotable", checkInsPerWeek: 3, dob: "1994-03-22" },
+  { name: "Jordan Reyes", belt: "white", stripes: 2, checkInsPerWeek: 2, dob: "1989-11-08" },
+  { name: "Casey Whitfield", belt: "white", stripes: 1, checkInsPerWeek: 3, dob: "2011-06-14" },
   { name: "Morgan Ellis", belt: "white", stripes: 0, checkInsPerWeek: 2 },
   { name: "Avery Simmons", belt: "white", stripes: 3, role: "at_risk", checkInsPerWeek: 3 },
   { name: "Riley Dawson", belt: "white", stripes: 1, role: "past_due", checkInsPerWeek: 2 },
-  { name: "Hannah Cortez", belt: "blue", stripes: 2, checkInsPerWeek: 4 },
+  { name: "Hannah Cortez", belt: "blue", stripes: 2, checkInsPerWeek: 4, dob: "1996-01-30" },
   { name: "Diego Marsh", belt: "blue", stripes: 3, checkInsPerWeek: 3 },
   { name: "Sam Whitaker", belt: "blue", stripes: 0, role: "past_due", checkInsPerWeek: 2 },
   { name: "Nate Fischer", belt: "blue", stripes: 1, checkInsPerWeek: 3 },
@@ -107,6 +113,18 @@ function generateCheckIns(now, checkInsPerWeek, stopDaysAgo) {
   return timestamps;
 }
 
+// MUST MATCH the SIGNERS list in convex/seedDemoGym.ts. Duplicated rather than
+// imported because that file is TypeScript compiled for the Convex runtime and
+// this is a plain Node script — but the dry run cross-checks these names
+// against MEMBER_DEFS and says which ones won't seed, so a drift shows up
+// before anything is written rather than as a silently missing row.
+const WAIVER_SIGNERS = [
+  { name: "Tyler Brandt" },
+  { name: "Hannah Cortez" },
+  { name: "Jordan Reyes" },
+  { name: "Casey Whitfield", guardian: true },
+];
+
 function buildPayload(gymId) {
   const now = Date.now();
   const members = MEMBER_DEFS.map((def, i) => {
@@ -119,6 +137,7 @@ function buildPayload(gymId) {
 
     return {
       name: def.name,
+      ...(def.dob ? { dob: def.dob } : {}),
       email: slugEmail(def.name),
       plan: "Adult BJJ Unlimited",
       discipline: "bjj_adult",
@@ -133,7 +152,16 @@ function buildPayload(gymId) {
     };
   });
 
-  return { gymId, classes: CLASS_DEFS, members };
+  // THE CALLING MACHINE'S calendar date, not the deployment's. Seeded waivers
+  // freeze {{today}} into their stored text, and the Convex deployment runs in
+  // UTC — deriving the date server-side would stamp a demo signature with
+  // tomorrow's date any time this is run after 6pm Mountain. Same rule, and
+  // the same reason, as lib/localDate.ts. Local getters, never toISOString().
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayLocalDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  return { gymId, classes: CLASS_DEFS, members, todayLocalDate };
 }
 
 function parseArgs() {
@@ -169,6 +197,18 @@ function printSummary(payload, prod) {
   console.log(`  ${pastDue} past-due invoice(s)`);
   console.log(`  ${atRisk} at-risk member(s) (check-ins stop ~12 days ago)`);
   console.log(`  Promotion-ready: Tyler Brandt, White (4 stripes)`);
+  // Derived, never hardcoded. The dry run is this script's stated safety
+  // mechanism, so a summary that PROMISES four signed copies while the
+  // mutation silently seeds three (a renamed member in MEMBER_DEFS) would make
+  // the safety mechanism the thing that misleads you.
+  const withDob = payload.members.filter((m) => m.dob).length;
+  const names = new Set(payload.members.map((m) => m.name));
+  const seeded = WAIVER_SIGNERS.filter((s) => names.has(s.name));
+  const missing = WAIVER_SIGNERS.filter((s) => !names.has(s.name)).map((s) => s.name);
+  const minors = seeded.filter((s) => s.guardian).length;
+  console.log(`  1 DEMO waiver template + ${seeded.length} signed copies (${minors} minor w/ guardian)`);
+  if (missing.length) console.log(`  ⚠ no such member for: ${missing.join(", ")} — those copies will be skipped`);
+  console.log(`  ${withDob} member(s) with a date of birth — the rest exercise the kiosk's "we need a DOB" step`);
 }
 
 function main() {

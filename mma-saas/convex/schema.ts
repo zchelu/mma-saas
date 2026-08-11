@@ -114,6 +114,30 @@ export default defineSchema({
     // exists so a roster badge can't flicker between page loads.
     duesFailedAt: v.optional(v.number()),
     duesFailureCount: v.optional(v.number()),
+    // --- Documents & Waivers (convex/documents.ts).
+    //
+    // Calendar date, "YYYY-MM-DD" — NOT a timestamp. A date of birth has no
+    // time and no timezone, and storing it as a number would reintroduce the
+    // UTC off-by-one that lib/localDate.ts documents four times, on the one
+    // field where being a day out can flip whether a child is allowed to sign
+    // their own liability waiver. Parsed only through
+    // lib/documents.ts:parseCalendarDate, never `new Date(dob)`.
+    //
+    // This is what makes minor detection possible at all: signDocument
+    // computes age from this against gyms.minorAgeThreshold and refuses to
+    // sign a guardian-requiring document when it's absent, rather than
+    // assuming the signer is an adult.
+    //
+    // Optional, following the same optional-until-backfilled convention as
+    // gymId above — every existing member row predates this field. There is
+    // deliberately no backfill: a date of birth cannot be inferred, only
+    // asked for, which is what the signing step does.
+    dob: v.optional(v.string()),
+    // Free-text, single field, on purpose. It exists to fill the
+    // {{member_address}} placeholder in a waiver the gym wrote — it is not
+    // structured for shipping, tax, or Stripe, and nothing should try to
+    // parse a city or postcode out of it.
+    address: v.optional(v.string()),
   })
     .index("by_gym", ["gymId"])
     .index("by_check_in_token", ["checkInToken"]),
@@ -311,7 +335,27 @@ export default defineSchema({
     consentedAt: v.number(),
     consentText: v.string(),
     consentVersion: v.string(),
-    source: v.literal("member_self_serve"),
+    // "keyword" is the SMS text-in opt-in path from the env-boundary-verify
+    // branch (commit 6dc4209). ITS CODE IS NOT ON THIS BRANCH — only the
+    // shape, so the schema can describe rows that already exist.
+    //
+    // Why that's necessary rather than tidy: Convex validates the ENTIRE
+    // schema against existing data before accepting any push, and the dev
+    // deployment already holds a keyword row written on 2026-08-04. Without
+    // this literal every push from master fails, for every lane, which is
+    // exactly what happened — the deployment went un-deployed for six days
+    // and both the documents and Connect lanes were silently blocked.
+    //
+    // When that branch merges, this is already correct and needs no change.
+    // If it is ever abandoned instead, delete the literal AND the rows
+    // together, not the literal alone.
+    source: v.union(v.literal("member_self_serve"), v.literal("keyword")),
+    // Same origin, same reasoning. Both optional and written only by the
+    // keyword path: messageSid is Twilio's id for the inbound text that
+    // carried the opt-in, and gymResolvedBy records how that text was
+    // attributed to a gym ("sms_code" — see gyms.smsCode below).
+    messageSid: v.optional(v.string()),
+    gymResolvedBy: v.optional(v.string()),
     ip: v.optional(v.string()),
     userAgent: v.optional(v.string()),
   })
@@ -460,6 +504,30 @@ export default defineSchema({
     // human be charged. The second one shipped wrong once already, inside a
     // statutory disclosure.
     timezone: v.optional(v.string()),
+    // Age below which a signer needs a parent/guardian signature on any
+    // document whose template sets requiresGuardianForMinors. Per gym because
+    // it isn't a fact about the world — it's whatever the gym's own waiver
+    // and its state's rule on parental consent say, and a gym that runs a
+    // separate teen program may set it lower than 18.
+    //
+    // Optional with no backfill; every read goes through
+    // documents.ts:minorAgeThresholdFor, which applies
+    // lib/documents.ts:DEFAULT_MINOR_AGE_THRESHOLD (18). Deliberately NOT
+    // defaulted by a migration: `18` written onto a row and `18` implied by
+    // an absent field mean the same thing here, and a backfill would only
+    // create a second place for the default to disagree with itself.
+    minorAgeThreshold: v.optional(v.number()),
+    // The gym's short SMS opt-in code, from the env-boundary-verify branch
+    // (commit 6dc4209). Present on all 14 rows of the dev deployment, so the
+    // schema has to describe it — see the note on consentSubmissions.source
+    // above for why a missing field here blocks every push, not just its own
+    // lane. No code on this branch reads or writes it.
+    //
+    // The branch also adds a by_sms_code index. That is deliberately NOT
+    // copied here: an index is only needed by the lookup code, which isn't on
+    // this branch either, and adding one changes what the deployment builds.
+    // The field alone is what unblocks validation.
+    smsCode: v.optional(v.string()),
   })
     .index("by_clerk_user", ["clerkUserId"])
     // PLATFORM customer ids only. A connected-account customer id must never
@@ -498,6 +566,98 @@ export default defineSchema({
     .index("by_gym", ["gymId"])
     .index("by_member", ["memberId"])
     .index("by_gym_sentAt", ["gymId", "sentAt"]),
+  // Documents & Waivers — the gym's own document text. See convex/documents.ts.
+  //
+  // THE GYM OWNER SUPPLIES `content`. This product does not generate legal
+  // language and must not start: we build the signing rail, not the document.
+  //
+  // New table, so fields are required — the optional-until-backfilled pattern
+  // on members.gymId exists to avoid invalidating rows that already exist, and
+  // there are none here.
+  documentTemplates: defineTable({
+    gymId: v.id("gyms"),
+    title: v.string(),
+    // Supports the {{placeholder}} tokens listed in
+    // lib/documents.ts:PLACEHOLDER_KEYS. Stored UNRESOLVED — resolution
+    // happens once, at signing time, into signedDocuments.renderedContent.
+    content: v.string(),
+    // The gym's liability waiver: the one document that gates check-in, and
+    // the one that cannot be deleted (documents.ts:deleteTemplate). Exactly
+    // one row per gym may carry this, enforced in createTemplate, and it is
+    // deliberately not editable afterwards — flipping it would change what
+    // gates the door for every member at once, and demoting the waiver would
+    // be a back door around the delete block.
+    isWaiver: v.boolean(),
+    // When true, a signer under gyms.minorAgeThreshold must also capture a
+    // parent/guardian name and signature. Per template, because a gym's photo
+    // release and its liability waiver do not necessarily have the same rule.
+    requiresGuardianForMinors: v.boolean(),
+    // Must this be signed before the member is let onto the mats? This — not
+    // isWaiver — is what gates check-in (documents.ts:isRequired). The two
+    // were conflated at first, which meant a gym could not add a second
+    // mandatory document, and could not add an optional one at all without it
+    // becoming "the waiver".
+    //
+    // OPTIONAL, against the letter of the spec, and deliberately: this table
+    // already holds rows on the dev deployment, and Convex validates the whole
+    // schema against existing data before accepting any push — a required
+    // boolean here rejects the push outright, which is exactly the class of
+    // failure that blocked every lane for six days on 2026-08-05. Same
+    // optional-until-backfilled convention as members.gymId, classes.gymId and
+    // invoices.gymId above. Absent reads as `isWaiver`, which is precisely the
+    // behaviour those rows were created under, so no backfill is needed and
+    // nothing changes for them.
+    requiredAtSignup: v.optional(v.boolean()),
+    createdAt: v.number(),
+  }).index("by_gym", ["gymId"]),
+  // One row per signature event. THE EVIDENCE.
+  //
+  // renderedContent is the whole point of this table's shape: it is the
+  // document text with placeholders already resolved, frozen at the instant
+  // of signing. Nothing re-renders a signed record from its template. An
+  // owner correcting a typo in the waiver next month must not retroactively
+  // alter what a member put their name to — that would make every signed
+  // record in the gym worthless as evidence at the same moment, silently.
+  // documents.ts:updateTemplate therefore touches no row here, and
+  // deleteTemplate does not cascade: these rows outlive their template and
+  // stay fully readable without it.
+  //
+  // Rows are never deleted, for the same reason members are archived rather
+  // than hard-deleted (see members.archived): a waiver signed by someone who
+  // has since left the gym is exactly the record a liability claim asks for.
+  signedDocuments: defineTable({
+    gymId: v.id("gyms"),
+    memberId: v.id("members"),
+    templateId: v.id("documentTemplates"),
+    renderedContent: v.string(),
+    // base64 PNG data URL from the canvas pad
+    // (app/components/signature-pad.tsx). Validated for shape and size by
+    // lib/documents.ts:isValidSignatureData before it reaches this table —
+    // PNG only, so no script-bearing SVG data URL can end up as an <img src>
+    // on the screen an owner would show a lawyer.
+    signatureData: v.string(),
+    // What the signer typed, which is not necessarily members.name — the
+    // roster may say "Maya" and the signature block should carry the legal
+    // name she printed.
+    signerName: v.string(),
+    // Both set together or neither. Present when the signer was under the
+    // gym's minorAgeThreshold at signing time and the template required a
+    // guardian. Optional rather than a nested object so the absence of a
+    // guardian on an adult's waiver is simply an absent field.
+    guardianName: v.optional(v.string()),
+    guardianSignatureData: v.optional(v.string()),
+    signedAt: v.number(),
+    // Deliberately UNSET by the current signing path, not merely unused.
+    // Convex mutations cannot see the caller's address, and the kiosk is
+    // unauthenticated — accepting an IP as a client argument would put a
+    // self-asserted string into the one field whose entire value is being
+    // trustworthy. The field stays so a future server-side signing route can
+    // populate it from an edge-verified header, the way
+    // convex/consent.ts:submitConsent already receives `ip`.
+    ipAddress: v.optional(v.string()),
+  })
+    .index("by_gym_member", ["gymId", "memberId"])
+    .index("by_gym_template", ["gymId", "templateId"]),
   // Generic fixed-window rate limiter backing convex/rateLimit.ts. `key` is
   // "<bucket>:<identifier>" (e.g. "checkout:203.0.113.4") so unrelated
   // buckets never collide even if an identifier repeats across them.

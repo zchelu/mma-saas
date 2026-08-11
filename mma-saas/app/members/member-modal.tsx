@@ -13,6 +13,8 @@ type Member = {
   email?: string;
   phone?: string;
   beltRank?: string;
+  dob?: string;
+  address?: string;
   smsConsentConfirmed?: boolean;
   smsConsentConfirmedAt?: number;
 };
@@ -32,6 +34,11 @@ export default function MemberModal({ member, onClose }: Props) {
   const [email, setEmail] = useState(member?.email ?? "");
   const [phone, setPhone] = useState(member?.phone ?? "");
   const [beltRank, setBeltRank] = useState(member?.beltRank ?? "");
+  // "YYYY-MM-DD", which is exactly what <input type="date"> reads and writes —
+  // no parsing, no formatting, no Date object anywhere near it. See the schema
+  // comment on members.dob for why that matters.
+  const [dob, setDob] = useState(member?.dob ?? "");
+  const [address, setAddress] = useState(member?.address ?? "");
   const [smsConsent, setSmsConsent] = useState(false);
   const [consentError, setConsentError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -69,6 +76,14 @@ export default function MemberModal({ member, onClose }: Props) {
         email: email || undefined,
         phone: trimmedPhone || undefined,
         beltRank: beltRank || undefined,
+        // Sent as "" rather than undefined when empty, ON PURPOSE. Convex
+        // strips undefined properties at the client boundary, so `undefined`
+        // means "I didn't mention this field" and leaves the stored value
+        // alone — an owner clearing a wrong date of birth and saving would
+        // watch it come straight back. "" is what convex/members.ts's
+        // normalizedDocumentFields reads as an explicit clear.
+        dob,
+        address,
         smsConsentConfirmed,
         smsConsentConfirmedAt,
       };
@@ -156,6 +171,35 @@ export default function MemberModal({ member, onClose }: Props) {
               <input value={beltRank} onChange={(e) => setBeltRank(e.target.value)} className="input" placeholder="Blue Belt" />
             </Field>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date of Birth">
+              <input
+                type="date"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+                className="input"
+              />
+            </Field>
+            <Field label="Address">
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="input"
+                placeholder="1200 N Nevada Ave"
+              />
+            </Field>
+          </div>
+          {/* Not decoration on a signup form: convex/documents.ts:signDocument
+              refuses to sign a guardian-requiring waiver for a member whose
+              age it can't determine, so a blank date of birth becomes a member
+              stuck at the kiosk. Worth an owner filling in from paper records
+              before a kids' class. */}
+          {!dob && (
+            <p className="text-xs -mt-2" style={{ color: "#555555" }}>
+              Without a date of birth we can&apos;t tell whether a guardian has to sign this
+              member&apos;s waiver — they&apos;ll be asked for it at the kiosk.
+            </p>
+          )}
           <Field label="Status">
             <select value={status} onChange={(e) => setStatus(e.target.value as "active" | "inactive")} className="input">
               <option value="active">Active</option>

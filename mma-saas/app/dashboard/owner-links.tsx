@@ -30,6 +30,11 @@ export default function OwnerLinks({ slug, gymId }: { slug: string | null; gymId
 
   const consentUrl = slug ? `${origin}/consent/${slug}` : null;
   const kioskUrl = gymId ? `${origin}/checkin?gym=${gymId}` : null;
+  // The kiosk's other half — new-member signup and waiver signing. Same raw
+  // gym id, same reason there's no separate token: see the check-in kiosk URL
+  // above and convex/documents.ts's note on what that endpoint does and
+  // doesn't protect.
+  const signupUrl = gymId ? `${origin}/kiosk/signup?gym=${gymId}` : null;
 
   return (
     <div className="mt-12">
@@ -52,6 +57,12 @@ export default function OwnerLinks({ slug, gymId }: { slug: string | null; gymId
           title="Front-desk check-in kiosk"
           blurb="Open this on the tablet at your door. Members tap their name on the way in."
           url={kioskUrl}
+          missing="Available once your gym finishes setting up."
+        />
+        <LinkCard
+          title="New-member signup kiosk"
+          blurb="Hand the tablet to someone walking in off the street. They sign your waiver before they step on the mat."
+          url={signupUrl}
           missing="Available once your gym finishes setting up."
         />
       </div>

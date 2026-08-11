@@ -6,6 +6,7 @@ import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../components/app-header";
 import MemberModal from "./member-modal";
 import CheckInHistoryDrawer from "./check-in-history-drawer";
+import DocumentsDrawer from "./documents-drawer";
 import ConsentAttestationPanel from "./consent-attestation-panel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
 import { isTextEligibleMember } from "../../lib/memberEligibility";
@@ -20,6 +21,8 @@ type Member = {
   phone?: string;
   beltRank?: string;
   lastVisit?: string;
+  dob?: string;
+  address?: string;
   smsConsentConfirmed?: boolean;
   smsConsentConfirmedAt?: number;
   smsOptedOut?: boolean;
@@ -54,10 +57,14 @@ export default function MembersPage() {
   // legally. It's the only member-removal mutation; the hard-deleting one this
   // button used to call has been deleted.
   const archiveMember = useMutation(api.members.archiveMember);
+  // null means this gym has no required documents at all — a different state
+  // from "everybody has signed", and it must not render as a reassuring 0.
+  const unsignedWaivers = useQuery(api.documents.getUnsignedWaiverCount);
 
   const [modal, setModal] = useState<null | "add" | Member>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
+  const [docsMember, setDocsMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   // "not_on" is everything except a fully textable member — the actionable
@@ -169,6 +176,13 @@ export default function MembersPage() {
             <SummaryBadge value={activeCount} label="Active" color="#4ADE80" />
             <SummaryBadge value={inactiveCount} label="Inactive" color="#F87171" />
             <SummaryBadge value={textableCount} label="Can be texted" color="#4ADE80" />
+            {typeof unsignedWaivers === "number" && (
+              <SummaryBadge
+                value={unsignedWaivers}
+                label="Docs unsigned"
+                color={unsignedWaivers > 0 ? "#FBBF24" : "#4ADE80"}
+              />
+            )}
           </div>
         )}
 
@@ -291,6 +305,13 @@ export default function MembersPage() {
                           History
                         </button>
                         <button
+                          onClick={() => setDocsMember(m)}
+                          className="text-xs transition-colors hover:text-white"
+                          style={{ color: "#888888" }}
+                        >
+                          Documents
+                        </button>
+                        <button
                           onClick={() => setModal(m)}
                           className="text-xs transition-colors hover:text-white"
                           style={{ color: "#888888" }}
@@ -328,6 +349,14 @@ export default function MembersPage() {
           memberId={historyMember._id}
           memberName={historyMember.name}
           onClose={() => setHistoryMember(null)}
+        />
+      )}
+
+      {docsMember !== null && (
+        <DocumentsDrawer
+          memberId={docsMember._id}
+          memberName={docsMember.name}
+          onClose={() => setDocsMember(null)}
         />
       )}
     </div>
