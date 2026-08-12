@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/check-convex-api.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:once": "vitest run"
+    "test:once": "vitest run",
+    "check:convex": "node scripts/check-convex-api.mjs",
+    "verify:deploy": "node scripts/verify-deploy.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.7",
