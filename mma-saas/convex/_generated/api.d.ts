@@ -11,9 +11,13 @@
 import type * as attendance from "../attendance.js";
 import type * as beltTaxonomy from "../beltTaxonomy.js";
 import type * as classes from "../classes.js";
+import type * as connect from "../connect.js";
+import type * as connectOnboarding from "../connectOnboarding.js";
 import type * as consent from "../consent.js";
 import type * as crons from "../crons.js";
 import type * as demoSmsMember from "../demoSmsMember.js";
+import type * as demoWaiverText from "../demoWaiverText.js";
+import type * as documents from "../documents.js";
 import type * as enrollments from "../enrollments.js";
 import type * as gyms from "../gyms.js";
 import type * as http from "../http.js";
@@ -47,9 +51,13 @@ declare const fullApi: ApiFromModules<{
   attendance: typeof attendance;
   beltTaxonomy: typeof beltTaxonomy;
   classes: typeof classes;
+  connect: typeof connect;
+  connectOnboarding: typeof connectOnboarding;
   consent: typeof consent;
   crons: typeof crons;
   demoSmsMember: typeof demoSmsMember;
+  demoWaiverText: typeof demoWaiverText;
+  documents: typeof documents;
   enrollments: typeof enrollments;
   gyms: typeof gyms;
   http: typeof http;
