@@ -47,7 +47,14 @@ async function seedTextableGymWithLapsedMember(t: ReturnType<typeof convexTest>)
     });
     return { gymId, memberId };
   });
-  return { asOwner: t.withIdentity({ subject: clerkUserId }), gymId, memberId };
+  const asOwner = t.withIdentity({ subject: clerkUserId });
+  // The kiosk endpoints take the front desk's own credential now, never a
+  // gymId — see convex/gyms.ts:tryGetKioskGym. Issued through the same
+  // mutation the dashboard's "Generate kiosk code" button calls, rather than
+  // written into the row by hand, so these tests break if that path ever
+  // stops producing a token the kiosk queries can resolve.
+  const kioskToken = await asOwner.mutation(api.gyms.rotateKioskToken, {});
+  return { asOwner, gymId, memberId, kioskToken };
 }
 
 test("archiveMember sets archived + archivedAt without deleting the document", async () => {
@@ -137,24 +144,24 @@ test("getAtRiskMembers excludes archived members (no retention text after remova
 
 test("archived members disappear from list and count queries", async () => {
   const t = convexTest(schema, modules);
-  const { asOwner, gymId, memberId } = await seedTextableGymWithLapsedMember(t);
+  const { asOwner, memberId, kioskToken } = await seedTextableGymWithLapsedMember(t);
 
   expect((await asOwner.query(api.members.getAll, {})).map((m) => m._id)).toContain(memberId);
   expect(await asOwner.query(api.members.getActiveCount, {})).toBe(1);
   expect((await asOwner.query(api.members.getAtRiskMembers, {})).map((m) => m._id)).toContain(memberId);
-  expect((await asOwner.query(api.members.getActiveForGym, { gymId })).map((m) => m._id)).toContain(memberId);
+  expect((await asOwner.query(api.members.getActiveForGym, { kioskToken })).map((m) => m._id)).toContain(memberId);
 
   await asOwner.mutation(api.members.archiveMember, { memberId });
 
   expect(await asOwner.query(api.members.getAll, {})).toHaveLength(0);
   expect(await asOwner.query(api.members.getActiveCount, {})).toBe(0);
   expect(await asOwner.query(api.members.getAtRiskMembers, {})).toHaveLength(0);
-  expect(await asOwner.query(api.members.getActiveForGym, { gymId })).toHaveLength(0);
+  expect(await asOwner.query(api.members.getActiveForGym, { kioskToken })).toHaveLength(0);
 });
 
 test("an archived member's check-in token stops resolving and check-in is rejected", async () => {
   const t = convexTest(schema, modules);
-  const { asOwner, gymId, memberId } = await seedTextableGymWithLapsedMember(t);
+  const { asOwner, memberId, kioskToken } = await seedTextableGymWithLapsedMember(t);
   const token = await asOwner.mutation(api.members.regenerateCheckInToken, { memberId });
 
   expect(await t.query(api.members.resolveCheckInToken, { token })).not.toBeNull();
@@ -162,8 +169,12 @@ test("an archived member's check-in token stops resolving and check-in is reject
   await asOwner.mutation(api.members.archiveMember, { memberId });
 
   expect(await t.query(api.members.resolveCheckInToken, { token })).toBeNull();
+  // Note the two different credentials in play: `token` identifies the MEMBER
+  // (a scanned card), `kioskToken` identifies the DEVICE. Archival has to
+  // close both doors, and the second one is a direct call with a remembered
+  // member id — the case getActiveForGym's filter can't cover.
   await expect(
-    t.mutation(api.members.checkIn, { id: memberId, gymId })
+    t.mutation(api.members.checkIn, { id: memberId, kioskToken })
   ).rejects.toThrow(/Member not found/);
 });
 

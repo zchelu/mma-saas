@@ -14,6 +14,15 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
+// members.checkIn takes the front desk's kiosk token now, not a gymId — see
+// convex/gyms.ts:tryGetKioskGym. 24 hex characters, and it has to be UNIQUE
+// per gym: the lookup is a .unique() on by_kiosk_token, so two gyms sharing a
+// token would throw rather than resolve. Written straight onto the row here
+// because these tests are about the winback counter, not about how a gym comes
+// by its credential — convex/kioskToken.test.ts covers that.
+const KIOSK_TOKEN_RETURNING = "1111111111111111111111aa";
+const KIOSK_TOKEN_SAME_DAY = "2222222222222222222222bb";
+
 test("getAtRiskMembers excludes members with a phone but unconfirmed SMS consent", async () => {
   const t = convexTest(schema, modules);
 
@@ -131,7 +140,9 @@ test("recordRetentionText refuses to write across gyms", async () => {
 
 test("checking in resets a dormant member's winback sequence", async () => {
   const t = convexTest(schema, modules);
-  const gymId = await t.run(async (ctx) => ctx.db.insert("gyms", {}));
+  const gymId = await t.run(async (ctx) =>
+    ctx.db.insert("gyms", { kioskToken: KIOSK_TOKEN_RETURNING })
+  );
   const memberId = await t.run(async (ctx) =>
     ctx.db.insert("members", {
       ...textable,
@@ -143,7 +154,7 @@ test("checking in resets a dormant member's winback sequence", async () => {
     })
   );
 
-  await t.mutation(api.members.checkIn, { id: memberId, gymId });
+  await t.mutation(api.members.checkIn, { id: memberId, kioskToken: KIOSK_TOKEN_RETURNING });
 
   const after = await t.run(async (ctx) => ctx.db.get(memberId));
   expect(after?.winbackAttempts).toBe(0);
@@ -157,7 +168,9 @@ test("checking in resets a dormant member's winback sequence", async () => {
 
 test("a same-day second check-in still clears the winback sequence", async () => {
   const t = convexTest(schema, modules);
-  const gymId = await t.run(async (ctx) => ctx.db.insert("gyms", {}));
+  const gymId = await t.run(async (ctx) =>
+    ctx.db.insert("gyms", { kioskToken: KIOSK_TOKEN_SAME_DAY })
+  );
   // lastVisit already set to today, so checkIn's once-per-day branch is
   // skipped — the reset must not be trapped inside it.
   const memberId = await t.run(async (ctx) =>
@@ -171,7 +184,7 @@ test("a same-day second check-in still clears the winback sequence", async () =>
     })
   );
 
-  await t.mutation(api.members.checkIn, { id: memberId, gymId });
+  await t.mutation(api.members.checkIn, { id: memberId, kioskToken: KIOSK_TOKEN_SAME_DAY });
 
   const after = await t.run(async (ctx) => ctx.db.get(memberId));
   expect(after?.winbackAttempts).toBe(0);
