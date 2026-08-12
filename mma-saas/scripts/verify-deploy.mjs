@@ -29,13 +29,23 @@
 //
 // 2. PROTECTED ROUTES CANNOT BE EXISTENCE-CHECKED ANONYMOUSLY. Clerk's
 //    middleware runs BEFORE Next resolves the route, so /settings/documents
-//    and /settings/total-nonsense both redirect to sign-in for a signed-out
-//    caller. Reporting those as "ok" would be a lie. They are now listed as
-//    UNVERIFIABLE and excluded from the verdict.
+//    and /settings/total-nonsense are indistinguishable to a signed-out
+//    caller. Reporting those as "ok" would be a lie.
 //
-// The load-bearing checks are therefore the PUBLIC routes — which is enough:
-// /kiosk/signup is public, and it is exactly the route whose 404 proved the
-// build was stale.
+// 3. AND A PROTECTED ROUTE CAN ANSWER 404 WHEN IT IS PERFECTLY HEALTHY.
+//    Caught on the second run: /dashboard returned 404 to this script while
+//    rendering fine in a signed-in browser — Clerk's protect() answers some
+//    unauthenticated requests with a 404 rather than a redirect. Version two
+//    checked "is it 404?" before "is it protected?", so it raised a false
+//    alarm about the one page the owner uses most.
+//
+//    A checker that cries wolf gets ignored, which is worse than no checker.
+//    So: A PROTECTED ROUTE NEVER PRODUCES A VERDICT. Whatever it answers is
+//    printed for information and cannot pass or fail the run.
+//
+// The load-bearing checks are therefore the PUBLIC routes only — which is
+// enough: /kiosk/signup is public, and it is exactly the route whose 404
+// proved the build was stale.
 // ---------------------------------------------------------------------------
 
 const DEFAULT_BASE = "https://kombatdesk.com";
@@ -85,25 +95,32 @@ for (const route of ROUTES) {
     const missing = res.status === 404 || res.status >= 500;
 
     let verdict;
-    if (missing) {
+    if (!route.public) {
+      // ORDER MATTERS, AND THIS BRANCH MUST COME FIRST. A protected route is
+      // unverifiable signed out no matter WHAT it answers — 404, a redirect to
+      // sign-in, or a 200 shell that redirects client-side are all consistent
+      // with a perfectly healthy page. Checking `missing` before this is what
+      // made version two report a false failure on /dashboard.
+      verdict = "prot";
+      unverifiable++;
+    } else if (missing) {
       verdict = "FAIL";
       failures.push(route);
     } else if (landedOnAuth) {
-      // Expected for a protected route, and a real problem for a public one:
-      // it means middleware.ts no longer treats it as public.
-      if (route.public) {
-        verdict = "FAIL";
-        failures.push({ ...route, note: `${route.note} — PUBLIC route now behind auth; check middleware.ts` });
-      } else {
-        verdict = "prot";
-        unverifiable++;
-      }
+      // A PUBLIC route sitting behind an auth wall is its own emergency:
+      // /checkin and /kiosk/* run on a tablet with no login, so this would take
+      // every kiosk in the field dark without a single error anywhere.
+      verdict = "FAIL";
+      failures.push({
+        ...route,
+        note: `${route.note} — PUBLIC route is behind auth; check middleware.ts`,
+      });
     } else {
       verdict = " ok ";
     }
 
     let line = `${verdict}  ${String(res.status).padEnd(3)}  ${route.path}`;
-    if (verdict === "prot") line += "   (auth wall — existence not verifiable signed out)";
+    if (verdict === "prot") line += "   (signed out — cannot be verified either way)";
     else if (redirected) line += `   -> ${res.url}`;
     if (verdict === "FAIL") line += `\n          ${route.note}`;
     console.log(`  ${line}`);
@@ -136,8 +153,8 @@ const checked = ROUTES.length - unverifiable;
 console.log(`  ${checked} public route${checked === 1 ? "" : "s"} live.`);
 if (unverifiable) {
   console.log(
-    `  ${unverifiable} protected route${unverifiable === 1 ? "" : "s"} sat behind the auth wall and were NOT verified —`
+    `  ${unverifiable} protected route${unverifiable === 1 ? "" : "s"} NOT checked — signed out, a healthy one and a`
   );
-  console.log("  open those in a signed-in browser if the deploy touched them.");
+  console.log("  missing one look the same. Open those in a signed-in browser.");
 }
 console.log("");
