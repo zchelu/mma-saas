@@ -22,6 +22,16 @@
 /** A calendar date with no time and no timezone, "YYYY-MM-DD". */
 export type CalendarDate = string;
 
+// Every function here takes `string | null | undefined` rather than just
+// `string | undefined`, and returns null for anything it can't parse. That is
+// deliberate: these compose — shiftCalendarDate's output feeds
+// daysBetweenCalendarDates, formatCalendarDate's feeds a placeholder — and
+// half of them return null while the other half refused to accept it, so every
+// composition needed a `?? undefined` that existed only to satisfy the
+// compiler. `vitest` doesn't typecheck, so the first place that showed up was
+// a red `tsc --noEmit` after a green suite. Null in, null out, all the way
+// through.
+
 const CALENDAR_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 const MONTH_NAMES = [
@@ -40,7 +50,7 @@ type DateParts = { year: number; month: number; day: number };
  * birth silently moves a child's birthday and, on exactly the wrong day,
  * flips whether a guardian signature is required. Parsed by hand instead.
  */
-export function parseCalendarDate(value: string | undefined): DateParts | null {
+export function parseCalendarDate(value: string | null | undefined): DateParts | null {
   if (!value) return null;
   const m = CALENDAR_DATE_RE.exec(value.trim());
   if (!m) return null;
@@ -67,7 +77,7 @@ function daysInMonth(year: number, month: number): number {
  * decide what a blank looks like rather than getting "Invalid Date" printed
  * into a legal document.
  */
-export function formatCalendarDate(value: string | undefined): string | null {
+export function formatCalendarDate(value: string | null | undefined): string | null {
   const parts = parseCalendarDate(value);
   if (!parts) return null;
   return `${MONTH_NAMES[parts.month - 1]} ${parts.day}, ${parts.year}`;
@@ -82,8 +92,8 @@ export function formatCalendarDate(value: string | undefined): string | null {
  * wrong across a DST boundary by an hour that rounds a birthday the wrong way.
  */
 export function ageOnDate(
-  dob: string | undefined,
-  onDate: string | undefined
+  dob: string | null | undefined,
+  onDate: string | null | undefined
 ): number | null {
   const b = parseCalendarDate(dob);
   const t = parseCalendarDate(onDate);
@@ -105,8 +115,8 @@ export function ageOnDate(
  * guessing; the UI asks for the date of birth instead.
  */
 export function isMinorOnDate(
-  dob: string | undefined,
-  onDate: string | undefined,
+  dob: string | null | undefined,
+  onDate: string | null | undefined,
   minorAgeThreshold: number
 ): boolean | null {
   const age = ageOnDate(dob, onDate);
@@ -131,8 +141,8 @@ export const DEFAULT_MINOR_AGE_THRESHOLD = 18;
  * subtracted.
  */
 export function daysBetweenCalendarDates(
-  from: string | undefined,
-  to: string | undefined
+  from: string | null | undefined,
+  to: string | null | undefined
 ): number | null {
   const a = parseCalendarDate(from);
   const b = parseCalendarDate(to);
@@ -153,7 +163,7 @@ export function daysBetweenCalendarDates(
  * waiver frozen with today's date but stamped signedAt six weeks ago shows an
  * owner two contradictory dates on the same screen.
  */
-export function shiftCalendarDate(date: string | undefined, days: number): string | null {
+export function shiftCalendarDate(date: string | null | undefined, days: number): string | null {
   const parts = parseCalendarDate(date);
   if (!parts || !Number.isInteger(days)) return null;
   return dateFromDayNumber(dayNumber(parts) + days);
