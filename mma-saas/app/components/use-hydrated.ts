@@ -8,11 +8,12 @@ import { useSyncExternalStore } from "react";
 // submission instead of running React's onSubmit, so `e.preventDefault()`
 // never happens. None of the kiosk's inputs carry a `name`, so the browser
 // rebuilt the URL with an EMPTY query string — turning
-// `/kiosk/signup?gym=<id>` into `/kiosk/signup?` and dropping the gym id, at
-// which point the page correctly but uselessly reported "Kiosk not
+// `/kiosk/signup?k=<token>` into `/kiosk/signup?` and dropping the kiosk
+// token, at which point the page correctly but uselessly reported "Kiosk not
 // configured". Observed on an iPad over wifi, where the hydration window is
 // long enough to tap into; unreproducible on desktop localhost, where it
-// isn't.
+// isn't. (The URL carried `?gym=<id>` when this was first hit; the parameter
+// changed, the failure mode did not.)
 //
 // Gate a submit control on this and a pre-hydration tap can't fire the native
 // path at all. Pair it with a hidden input carrying the parameter, so that if

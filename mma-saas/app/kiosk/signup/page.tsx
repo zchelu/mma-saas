@@ -11,11 +11,13 @@ import { getConsentText } from "@/lib/consentText";
 
 // New-member signup on the front-desk tablet — the other half of the kiosk,
 // alongside /checkin. Public and unauthenticated by design: it runs on a
-// device at the door with no Clerk session, exactly like /checkin, and takes
-// the gym id from the URL the same way.
+// device at the door with no Clerk session, exactly like /checkin, and
+// authenticates itself with the gym's kiosk token from the URL the same way.
 //
-// Bookmark this device to /kiosk/signup?gym=<gym id>. The dashboard's owner
-// links panel is where an owner gets that URL.
+// Bookmark this device to /kiosk/signup?k=<kioskToken>. The dashboard's owner
+// links panel is where an owner gets that URL, and where they regenerate the
+// token if the tablet goes missing. The token — never a gym id — is what the
+// server resolves; see convex/gyms.ts:tryGetKioskGym.
 //
 // The flow is deliberately three screens, not one long form: details, then
 // the waiver, then a confirmation that resets the tablet for the next person.
@@ -31,10 +33,10 @@ export default function KioskSignupPage() {
   );
 }
 
-// Same shape gate /checkin uses: a sanity check on the id in the URL so a
-// malformed bookmark fails soft instead of throwing a server-side
-// ArgumentValidationError that crashes the kiosk.
-const CONVEX_ID_SHAPE = /^[a-z0-9]{20,40}$/;
+// Shape gate on the kiosk token in the URL, so a malformed bookmark fails soft
+// here instead of as a server-side ArgumentValidationError that crashes the
+// tablet. 24 hex characters — see convex/gyms.ts:generateKioskToken.
+const KIOSK_TOKEN_SHAPE = /^[a-f0-9]{24}$/;
 
 type Stage =
   | { type: "form" }
@@ -43,14 +45,17 @@ type Stage =
 
 function KioskSignupInner() {
   const searchParams = useSearchParams();
-  const rawGymId = searchParams.get("gym");
-  const gymId =
-    rawGymId && CONVEX_ID_SHAPE.test(rawGymId) ? (rawGymId as Id<"gyms">) : null;
+  const rawToken = searchParams.get("k");
+  const kioskToken = rawToken && KIOSK_TOKEN_SHAPE.test(rawToken) ? rawToken : null;
 
-  const gym = useQuery(api.documents.getKioskGym, gymId ? { gymId } : "skip");
+  const gym = useQuery(
+    api.documents.getKioskGym,
+    kioskToken ? { kioskToken } : "skip"
+  );
   const createMember = useMutation(api.documents.createMemberFromKiosk);
   // See use-hydrated.ts. Until React is live this form is plain HTML and its
-  // button performs a native GET submit that strips the gym id out of the URL.
+  // button performs a native GET submit that strips the kiosk token out of
+  // the URL.
   const hydrated = useIsHydrated();
 
   const [stage, setStage] = useState<Stage>({ type: "form" });
@@ -90,12 +95,12 @@ function KioskSignupInner() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!gymId) return;
+    if (!kioskToken) return;
     setSaving(true);
     setError(null);
     try {
       const memberId = await createMember({
-        gymId,
+        kioskToken,
         name,
         dob,
         address: address.trim() || undefined,
@@ -119,18 +124,16 @@ function KioskSignupInner() {
   // gym name, and convex/documents.ts stores that exact sentence as evidence —
   // showing a placeholder name would put different text on the tablet than on
   // the record. `undefined` is just the query loading.
-  if (!gymId || gym === null) {
+  if (!kioskToken || gym === null) {
     return (
       <Shell>
         <h1 className="text-3xl font-bold mb-3" style={{ color: "#FFFFFF" }}>
           Kiosk not configured
         </h1>
         <p className="text-lg max-w-md" style={{ color: "#888888" }}>
-          This signup page is missing a gym ID. Bookmark this device to
-          <code className="mx-1" style={{ color: "#E02020" }}>
-            /kiosk/signup?gym=&lt;your gym ID&gt;
-          </code>
-          from your dashboard.
+          This signup page has no valid kiosk link. Get the current one from your
+          dashboard under &ldquo;Your gym&apos;s links&rdquo; and bookmark this device to it —
+          an old link stops working once the kiosk code is regenerated.
         </p>
       </Shell>
     );
@@ -139,7 +142,7 @@ function KioskSignupInner() {
   if (stage.type === "waiver") {
     return (
       <WaiverStep
-        gymId={gymId}
+        kioskToken={kioskToken}
         memberId={stage.memberId}
         cancelLabel="Finish later"
         // Signup is where a gym collects EVERYTHING — the waiver plus any
@@ -224,7 +227,7 @@ function KioskSignupInner() {
               on a real iPad. The submit button below is gated on hydration so
               this should never fire; it is here for the case where that is
               somehow not enough. */}
-          <input type="hidden" name="gym" value={gymId} />
+          <input type="hidden" name="k" value={kioskToken} />
           <Field label="Full name" required>
             <input
               required

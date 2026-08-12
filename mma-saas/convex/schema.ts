@@ -517,6 +517,32 @@ export default defineSchema({
     // an absent field mean the same thing here, and a backfill would only
     // create a second place for the default to disagree with itself.
     minorAgeThreshold: v.optional(v.number()),
+    // THE CREDENTIAL THE FRONT-DESK TABLET CARRIES.
+    //
+    // Every kiosk function (check-in, new-member signup, waiver signing) is
+    // unauthenticated by necessity — the device at the door has no Clerk
+    // session. They used to take a raw `gymId`, which meant the gym's own
+    // document id, pasted into a bookmark, WAS the credential: anyone holding
+    // a kiosk URL could enumerate the roster through members.getActiveForGym
+    // and then read each member's date of birth, home address and minor
+    // status through documents.getUnsignedRequiredDocs. Children included.
+    //
+    // This replaces it. The token is what the URL carries, the gym is resolved
+    // from it server-side (gyms.ts:requireKioskGym), and a gym id on its own
+    // now opens nothing. Rotating it (gyms.ts:rotateKioskToken) invalidates
+    // every bookmarked kiosk URL at once, which is the control an owner needs
+    // when a tablet is lost or an ex-coach still has the link.
+    //
+    // Optional, and no backfill: a gym without one simply has no working kiosk
+    // URL until the owner generates it from the dashboard. That is the safe
+    // direction — the alternative is auto-issuing a credential nobody asked
+    // for and nobody knows exists.
+    //
+    // NOT the same thing as members.checkInToken, which identifies ONE member
+    // for a QR/card scan. This identifies the DEVICE's right to talk to the
+    // kiosk API at all. Both can be present; they answer different questions.
+    kioskToken: v.optional(v.string()),
+    kioskTokenIssuedAt: v.optional(v.number()),
     // The gym's short SMS opt-in code, from the env-boundary-verify branch
     // (commit 6dc4209). Present on all 14 rows of the dev deployment, so the
     // schema has to describe it — see the note on consentSubmissions.source
@@ -533,7 +559,8 @@ export default defineSchema({
     // PLATFORM customer ids only. A connected-account customer id must never
     // reach this index — see the naming rule on members.stripeConnectCustomerId.
     .index("by_stripe_customer", ["stripeCustomerId"])
-    .index("by_slug", ["slug"]),
+    .index("by_slug", ["slug"])
+    .index("by_kiosk_token", ["kioskToken"]),
   // Every winback text this product has actually sent.
   //
   // There was no such record. Texts went out and the ONLY copy of what was

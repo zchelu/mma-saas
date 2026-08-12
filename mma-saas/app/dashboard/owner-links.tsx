@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { getErrorMessage } from "../components/error-toast";
 
 // The two URLs a gym owner has to hand out, plus the consent gap those URLs
 // silently create.
@@ -14,27 +15,63 @@ import { api } from "../../convex/_generated/api";
 // it. A gym that can't collect member consent can never send a single retention
 // text, so "owner lost their consent link" and "gym is dead" are the same event.
 //
-// The kiosk URL is /checkin?gym=<raw Convex gym id> — there is no check-in
-// token despite what the stale comment at convex/gyms.ts:174 claims about
-// generateUniqueCheckInToken, which does not exist. Anyone with the link can
-// check anyone in; it is a front-desk tablet, same trust model as a paper
-// sign-in sheet. Worth knowing before it gets shared more widely than that.
+// The kiosk URLs are /checkin?k=<kioskToken> and /kiosk/signup?k=<kioskToken>.
+// The token is the device credential (gyms.kioskToken, 96 CSPRNG bits) and is
+// rotatable from this card. Anyone with the current link can check anyone in
+// and can see the roster; it is a front-desk tablet, same trust model as a
+// paper sign-in sheet. Worth knowing before it gets shared more widely than
+// that — and why the regenerate button sits right next to it.
 
 const CARD = { backgroundColor: "#222222", border: "1px solid #333333" };
 
-export default function OwnerLinks({ slug, gymId }: { slug: string | null; gymId: string | null }) {
+// `gymId` is still accepted and deliberately unused. The dashboard passes it,
+// and that file belongs to another lane's uncommitted work right now — keeping
+// the prop optional lets this change land without touching theirs. The kiosk
+// links no longer contain a gym id at all; they carry the rotatable token
+// below. Drop the prop when the lanes next meet.
+export default function OwnerLinks({ slug }: { slug: string | null; gymId?: string | null }) {
   // Rendered client-side because both URLs need the real origin, and because
   // hardcoding a base URL is how a link ends up pointing at the wrong
   // environment. window.location is the one source that can't be stale.
   const origin = typeof window === "undefined" ? "" : window.location.origin;
 
+  // THE KIOSK LINKS CARRY A ROTATABLE TOKEN, NOT THE GYM ID.
+  //
+  // They used to embed the gym's raw document id, which made a bookmarked
+  // kiosk URL the whole credential: anyone holding one could list the roster
+  // and read every member's date of birth, home address and minor status
+  // through the documents endpoints. Now the tablet carries a token the owner
+  // can regenerate — see the schema comment on gyms.kioskToken.
+  const kiosk = useQuery(api.gyms.getKioskToken);
+  const rotate = useMutation(api.gyms.rotateKioskToken);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+
+  const token = kiosk?.kioskToken ?? null;
   const consentUrl = slug ? `${origin}/consent/${slug}` : null;
-  const kioskUrl = gymId ? `${origin}/checkin?gym=${gymId}` : null;
-  // The kiosk's other half — new-member signup and waiver signing. Same raw
-  // gym id, same reason there's no separate token: see the check-in kiosk URL
-  // above and convex/documents.ts's note on what that endpoint does and
-  // doesn't protect.
-  const signupUrl = gymId ? `${origin}/kiosk/signup?gym=${gymId}` : null;
+  const kioskUrl = token ? `${origin}/checkin?k=${token}` : null;
+  const signupUrl = token ? `${origin}/kiosk/signup?k=${token}` : null;
+
+  async function handleRotate(firstTime: boolean) {
+    if (
+      !firstTime &&
+      !confirm(
+        "Regenerate the kiosk code? Every tablet bookmarked to the old link stops working immediately and will need the new one."
+      )
+    )
+      return;
+    setRotating(true);
+    setRotateError(null);
+    try {
+      await rotate({});
+    } catch (err) {
+      setRotateError(
+        getErrorMessage(err, "Couldn't generate a kiosk code — try refreshing the page.")
+      );
+    } finally {
+      setRotating(false);
+    }
+  }
 
   return (
     <div className="mt-12">
@@ -57,14 +94,47 @@ export default function OwnerLinks({ slug, gymId }: { slug: string | null; gymId
           title="Front-desk check-in kiosk"
           blurb="Open this on the tablet at your door. Members tap their name on the way in."
           url={kioskUrl}
-          missing="Available once your gym finishes setting up."
+          missing="Generate your kiosk code below to create this link."
         />
         <LinkCard
           title="New-member signup kiosk"
           blurb="Hand the tablet to someone walking in off the street. They sign your waiver before they step on the mat."
           url={signupUrl}
-          missing="Available once your gym finishes setting up."
+          missing="Generate your kiosk code below to create this link."
         />
+      </div>
+
+      <div
+        className="mt-6 rounded-xl px-5 py-4 flex flex-wrap items-center gap-x-6 gap-y-3"
+        style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333" }}
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium" style={{ color: "#FFFFFF" }}>
+            {token ? "Your kiosk code" : "No kiosk code yet"}
+          </p>
+          <p className="text-xs mt-1 max-w-xl" style={{ color: "#555555" }}>
+            {token
+              ? "Both kiosk links above carry this code. Regenerate it if a tablet goes missing or someone who shouldn't have the link still does — every old bookmark stops working the moment you do."
+              : "The tablet at your door needs a code to talk to your gym. Generate one to create the two kiosk links above."}
+          </p>
+          {rotateError && (
+            <p className="text-xs mt-2" style={{ color: "#F87171" }}>
+              {rotateError}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => handleRotate(!token)}
+          disabled={rotating || kiosk === undefined}
+          className="rounded-lg text-sm font-semibold px-4 py-2 transition-colors ml-auto disabled:opacity-50"
+          style={{
+            backgroundColor: token ? "#222222" : "#E02020",
+            border: token ? "1px solid #333333" : undefined,
+            color: "#FFFFFF",
+          }}
+        >
+          {rotating ? "Working…" : token ? "Regenerate code" : "Generate kiosk code"}
+        </button>
       </div>
 
       <ConsentGap />

@@ -5,7 +5,7 @@ import { query, mutation, internalMutation, MutationCtx } from "./_generated/ser
 // `npx tsc --noEmit` is the check that catches this class of error.
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireGym, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
+import { requireGym, requireKioskGym, requireWriteAccess, tryGetGym, tryGetKioskGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
@@ -426,14 +426,25 @@ export const regenerateCheckInToken = mutation({
   },
 });
 
-// No auth — public kiosk search, scoped by the gymId the kiosk page passes
-// in. Returns only the fields app/checkin/page.tsx actually renders
-// (_id/name/plan/status/beltRank) — previously returned full member docs
-// including phone, email, and SMS-consent fields to this unauthenticated
+// The kiosk's roster lookup — a member searching for their own name at the
+// door. Takes the DEVICE's kiosk token, never a gymId: this endpoint returning
+// every active member's name and id is what made a bookmarked kiosk URL enough
+// to enumerate a gym, which documents.getUnsignedRequiredDocs then turned into
+// dates of birth and home addresses. See the schema comment on gyms.kioskToken.
+//
+// Returns [] for an unknown or rotated token rather than throwing, so a stale
+// bookmark shows an empty kiosk instead of a crashed one.
+//
+// Returns only the fields app/checkin/page.tsx actually renders
+// (_id/name/plan/status/beltRank). It previously returned full member docs
+// including phone, email and SMS-consent fields to this unauthenticated
 // endpoint, which the kiosk UI never used.
 export const getActiveForGym = query({
-  args: { gymId: v.id("gyms") },
-  handler: async (ctx, { gymId }) => {
+  args: { kioskToken: v.string() },
+  handler: async (ctx, { kioskToken }) => {
+    const gym = await tryGetKioskGym(ctx, kioskToken);
+    if (!gym) return [];
+    const gymId = gym._id;
     const members = await ctx.db
       .query("members")
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
@@ -478,8 +489,12 @@ export const resolveCheckInToken = query({
 });
 
 // No auth — intentionally public for the kiosk check-in screen.
-// gymId is required so a stale/spoofed member id from another gym can't be checked in
-// through this gym's kiosk. Rate-limited per gym (not per caller — there's no
+// The device's kiosk token is required, and the member id is re-checked against
+// the gym it resolves to, so a stale/spoofed member id from another gym can't
+// be checked in through this gym's kiosk. Note the deliberate absence of a
+// plan-status check: a gym whose card bounced must still be able to open its
+// doors (gyms.ts:rotateKioskToken keeps the same rule for the same reason).
+// Rate-limited per gym (not per caller — there's no
 // reliable caller identity on a public kiosk mutation) so a scripted loop
 // against one kiosk can't hammer the table; 60/5min is far above any real
 // kiosk's walk-in rate.
@@ -496,7 +511,10 @@ export const resolveCheckInToken = query({
 export const checkIn = mutation({
   args: {
     id: v.id("members"),
-    gymId: v.id("gyms"),
+    // The kiosk device's token, not a gymId — see gyms.ts:requireKioskGym.
+    // The member id is still checked against the gym this token resolves to,
+    // so a remembered id from another gym cannot be checked in here.
+    kioskToken: v.string(),
     idempotencyKey: v.optional(v.string()),
     clientScannedAt: v.optional(v.number()),
     // Which class the kiosk had selected when this tap happened. Optional
@@ -510,7 +528,9 @@ export const checkIn = mutation({
     // bucketed server-side would land on the following day.
     localDate: v.optional(v.string()),
   },
-  handler: async (ctx, { id, gymId, idempotencyKey, clientScannedAt, classId, localDate }) => {
+  handler: async (ctx, { id, kioskToken, idempotencyKey, clientScannedAt, classId, localDate }) => {
+    const kioskGym = await requireKioskGym(ctx, kioskToken);
+    const gymId = kioskGym._id;
     if (idempotencyKey) {
       const existing = await ctx.db
         .query("checkIns")

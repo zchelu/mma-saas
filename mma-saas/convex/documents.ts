@@ -1,7 +1,14 @@
 import { mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
-import { hasWriteAccess, requireGym, requireWriteAccess, tryGetReadableGym } from "./gyms";
+import {
+  hasWriteAccess,
+  requireGym,
+  requireKioskGym,
+  requireWriteAccess,
+  tryGetKioskGym,
+  tryGetReadableGym,
+} from "./gyms";
 import { assertMaxLength } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { getConsentText, CONSENT_VERSION } from "../lib/consentText";
@@ -303,41 +310,46 @@ export const deleteTemplate = mutation({
 // ---------------------------------------------------------------------------
 
 // PUBLIC AND UNAUTHENTICATED, same posture as members.getActiveForGym and
-// members.checkIn: the caller supplies a gymId and every relationship is
-// re-derived here rather than trusted.
+// members.checkIn: the caller supplies a kiosk token and every relationship is
+// re-derived here rather than trusted. Nothing here trusts a gymId from the
+// wire — see gyms.ts:tryGetKioskGym.
 //
-// KNOWN EXPOSURE, stated at its real size rather than glossed.
-//
-// READ. This returns the document with placeholders already resolved, so if a
-// gym's waiver uses {{member_address}} or {{member_dob}} those values come
-// back over the wire, along with `isMinor`. The credential is the gym id in
-// the kiosk URL — and members.getActiveForGym, which the kiosk also needs,
-// hands out every active member id for that gym with no credential at all. So
-// the accurate statement is: anyone holding a gym's kiosk URL can enumerate
-// that roster and read each member's date of birth, home address and minor
-// status, children included.
+// WHAT IS CLOSED. The read gap is. This returns the document with
+// placeholders already resolved, so if a gym's waiver uses {{member_address}}
+// or {{member_dob}} those values go back over the wire along with `isMinor`.
+// That used to be reachable by anyone holding a bookmarked /checkin?gym=<id>
+// URL, because the credential WAS the gym's own document id — which also made
+// members.getActiveForGym a roster dump including children's dates of birth.
+// The credential is now gyms.kioskToken: 96 CSPRNG bits, not derivable from
+// anything public, and rotatable from the dashboard the moment a tablet walks
+// off. Possession of a gym id is no longer sufficient for any kiosk endpoint.
 //
 // The alternative — showing the signer blanks while STORING their real
 // details — was rejected because a signed record that doesn't match what was
 // on screen is worse on the axis this feature exists for.
 //
-// WRITE. signDocument below is public too, and this is not only a read gap.
-// It can insert a signature row for any member of that gym (bounded to one
-// per document, and rate-limited), and it can set a date of birth on a member
-// who has none. That second one matters beyond tampering: the designed flow
-// hands the tablet to the signer and treats the date they type as
-// authoritative from then on, so a 12-year-old who enters an adult date has
-// permanently disabled their own guardian requirement. An owner correcting
-// the date in the member modal is the only remedy today.
+// WHAT REMAINS OPEN. Anyone holding the CURRENT token still has the whole
+// kiosk surface for that gym, which is the intended grant (it is the tablet's
+// credential, and the tablet sits on a counter) but is worth naming:
 //
-// THE FIX, not made here: gate every kiosk function behind the per-member
-// checkInToken that already exists on the members table
-// (members.resolveCheckInToken), so possession of a gym id stops being
-// sufficient. That is a separate change with its own migration. Do not
-// describe this endpoint as closed.
+//   - The roster for that gym is still enumerable by a holder of the token,
+//     with the same dob/address/minor exposure as before. Rotation is the
+//     remedy, and it is why rotateKioskToken exists rather than a token
+//     generated once at gym creation.
+//   - signDocument can still set a date of birth on a member who has none.
+//     That matters beyond tampering: the designed flow hands the tablet to the
+//     signer and treats the date they type as authoritative from then on, so a
+//     12-year-old who enters an adult date has permanently disabled their own
+//     guardian requirement. An owner correcting the date in the member modal
+//     is the only remedy today. The planned fix is an "unverified DOB" flag
+//     set on kiosk-supplied dates and cleared only by an authenticated owner,
+//     so a guardian requirement can't be self-served away. Not in this pass.
 export const getUnsignedRequiredDocs = query({
   args: {
-    gymId: v.id("gyms"),
+    // The DEVICE's kiosk token — see gyms.ts:tryGetKioskGym. This endpoint
+    // resolves dates of birth, home addresses and minor status into the
+    // document preview, so a gym id in a bookmarked URL must not reach it.
+    kioskToken: v.string(),
     memberId: v.id("members"),
     // The signing device's own calendar date, "YYYY-MM-DD". NOT derived here.
     // This deployment runs in UTC and gyms sign people up in the evening, when
@@ -362,14 +374,17 @@ export const getUnsignedRequiredDocs = query({
   },
   handler: async (
     ctx,
-    { gymId, memberId, todayLocalDate, dobDraft, addressDraft, includeOptional }
+    { kioskToken, memberId, todayLocalDate, dobDraft, addressDraft, includeOptional }
   ) => {
     // A malformed date here would silently produce a null age, which reads as
     // "unknown" everywhere downstream. Rejecting outright keeps the one input
     // the minor rule depends on from being quietly discardable.
     if (!parseCalendarDate(todayLocalDate)) return null;
-    const gym = await ctx.db.get(gymId);
+
+    const gym = await tryGetKioskGym(ctx, kioskToken);
     if (!gym) return null;
+    const gymId = gym._id;
+
     const member = await ctx.db.get(memberId);
     if (!member || member.gymId !== gymId || member.archived) return null;
 
@@ -445,7 +460,10 @@ export const getUnsignedRequiredDocs = query({
 
 export const signDocument = mutation({
   args: {
-    gymId: v.id("gyms"),
+    // Device credential, not a gym id — see gyms.ts:requireKioskGym. This
+    // mutation writes the row asserting a named person accepted a liability
+    // release; possession of a gym id must not be enough to create one.
+    kioskToken: v.string(),
     memberId: v.id("members"),
     templateId: v.id("documentTemplates"),
     signatureData: v.string(),
@@ -463,7 +481,7 @@ export const signDocument = mutation({
   },
   handler: async (ctx, args) => {
     const {
-      gymId,
+      kioskToken,
       memberId,
       templateId,
       signatureData,
@@ -476,13 +494,13 @@ export const signDocument = mutation({
     // Same bucket shape as the kiosk's check-in limiter: a per-gym ceiling
     // that a real front desk cannot hit, consumed in this transaction rather
     // than via a round trip. See convex/rateLimit.ts.
+    const gym = await requireKioskGym(ctx, kioskToken);
+    const gymId = gym._id;
+
     const allowed = await consumeRateLimit(ctx, "documentSign", gymId);
     if (!allowed) {
       throw new ConvexError("Too many signatures right now — try again in a few minutes.");
     }
-
-    const gym = await ctx.db.get(gymId);
-    if (!gym) throw new ConvexError("Gym not found");
 
     const member = await ctx.db.get(memberId);
     if (!member || member.gymId !== gymId || member.archived) {
@@ -752,7 +770,8 @@ export const getUnsignedWaiverCount = query({
 // succeeds — with no phone number stored at all.
 export const createMemberFromKiosk = mutation({
   args: {
-    gymId: v.id("gyms"),
+    // Device credential — see gyms.ts:requireKioskGym.
+    kioskToken: v.string(),
     name: v.string(),
     dob: v.string(),
     address: v.optional(v.string()),
@@ -761,19 +780,21 @@ export const createMemberFromKiosk = mutation({
     smsConsent: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const allowed = await consumeRateLimit(ctx, "kioskSignup", args.gymId);
+    const gym = await requireKioskGym(ctx, args.kioskToken);
+    const gymId = gym._id;
+
+    const allowed = await consumeRateLimit(ctx, "kioskSignup", gymId);
     if (!allowed) {
       throw new ConvexError("Too many signups right now — try again in a few minutes.");
     }
 
-    const gym = await ctx.db.get(args.gymId);
     // The name is required, not merely nice to have: it is interpolated into
     // the SMS consent sentence stored as TCPA evidence below, and the kiosk
     // form shows that same sentence. A fallback string here would mean the
     // text on the tablet and the text on the evidence row could differ, which
     // is the one thing consentSubmissions exists to make impossible.
     // getKioskGym returns null for an unnamed gym, so the page never renders.
-    if (!gym?.name) throw new ConvexError("Gym not found");
+    if (!gym.name) throw new ConvexError("Gym not found");
     if (!hasWriteAccess(gym)) {
       throw new ConvexError(
         "This gym's subscription isn't active, so new members can't be added right now."
@@ -822,7 +843,7 @@ export const createMemberFromKiosk = mutation({
       // lives on planId (see the schema comment on members.plan).
       plan: "New member",
       status: "active",
-      gymId: args.gymId,
+      gymId,
       dob: args.dob.trim(),
       ...(address ? { address } : {}),
       ...(email ? { email } : {}),
@@ -846,7 +867,7 @@ export const createMemberFromKiosk = mutation({
     // this gym doesn't hold.
     if (storePhone) {
       await ctx.db.insert("consentSubmissions", {
-        gymId: args.gymId,
+        gymId,
         memberId,
         submittedName: name,
         submittedPhone: storePhone,
@@ -866,10 +887,11 @@ export const createMemberFromKiosk = mutation({
 // more. Deliberately narrow, same reasoning as gyms.getBySlug: no ids, no
 // roster, no member data.
 export const getKioskGym = query({
-  args: { gymId: v.id("gyms") },
-  handler: async (ctx, { gymId }) => {
-    const gym = await ctx.db.get(gymId);
+  args: { kioskToken: v.string() },
+  handler: async (ctx, { kioskToken }) => {
+    const gym = await tryGetKioskGym(ctx, kioskToken);
     if (!gym?.name) return null;
+    const gymId = gym._id;
 
     // Whether the signup form should ask for an address, and mark it REQUIRED
     // rather than optional.

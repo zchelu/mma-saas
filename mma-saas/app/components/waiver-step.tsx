@@ -31,7 +31,8 @@ import { useLocalDate } from "./use-local-date";
 // once means the query args change exactly ONCE, before any pad is enabled.
 
 type Props = {
-  gymId: Id<"gyms">;
+  /** The kiosk device's token — see convex/gyms.ts:tryGetKioskGym. */
+  kioskToken: string;
   memberId: Id<"members">;
   /**
    * New-member signup collects every outstanding document; the check-in gate
@@ -49,7 +50,7 @@ type Props = {
 type Details = { dob?: string; address?: string };
 
 export default function WaiverStep({
-  gymId,
+  kioskToken,
   memberId,
   includeOptional = false,
   onDone,
@@ -68,7 +69,7 @@ export default function WaiverStep({
     api.documents.getUnsignedRequiredDocs,
     today
       ? {
-          gymId,
+          kioskToken,
           memberId,
           todayLocalDate: today,
           includeOptional,
@@ -140,7 +141,7 @@ export default function WaiverStep({
     setError(null);
     try {
       await signDocument({
-        gymId,
+        kioskToken,
         memberId,
         templateId: current._id,
         signatureData: signature,

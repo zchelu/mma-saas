@@ -1,6 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireGym, requireOwnClass, requireWriteAccess, tryGetGym, tryGetReadableGym } from "./gyms";
+import {
+  requireGym,
+  requireOwnClass,
+  requireWriteAccess,
+  tryGetGym,
+  tryGetKioskGym,
+  tryGetReadableGym,
+} from "./gyms";
 import { assertMaxLength } from "./validate";
 
 const classFields = {
@@ -29,11 +36,16 @@ export const getAll = query({
   },
 });
 
+// Today's schedule for the front-desk tablet.
+//
 // PUBLIC AND UNAUTHENTICATED — the check-in kiosk is a tablet at the front
-// door with no login, the same trust model as members.getActiveForGym, which
-// already exposes the full active roster for a gymId. Class names, instructor
-// names and times are strictly less sensitive than that, so this widens
-// nothing that isn't already open.
+// door with no login. Kiosk-token scoped like every other kiosk endpoint (see
+// gyms.ts:tryGetKioskGym), so it is the same trust model as
+// members.getActiveForGym, which hands the same token holder the full active
+// roster. Class names, instructor names and times are strictly less sensitive
+// than that, so this widens nothing that isn't already open. Empty list for an
+// unknown or rotated token, so a stale bookmark degrades to "no classes"
+// rather than an error on a screen nobody is watching.
 //
 // Returns EVERY class for the gym, not just today's, and deliberately does no
 // day filtering server-side. Convex runs in UTC: after 6pm in Denver it is
@@ -49,8 +61,11 @@ export const getAll = query({
 // automatic current-class detection would require, and is deliberately not
 // part of this change.
 export const listForKiosk = query({
-  args: { gymId: v.id("gyms") },
-  handler: async (ctx, { gymId }) => {
+  args: { kioskToken: v.string() },
+  handler: async (ctx, { kioskToken }) => {
+    const gym = await tryGetKioskGym(ctx, kioskToken);
+    if (!gym) return [];
+    const gymId = gym._id;
     const classes = await ctx.db
       .query("classes")
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))

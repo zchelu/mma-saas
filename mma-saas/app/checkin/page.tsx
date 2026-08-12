@@ -39,24 +39,28 @@ export default function CheckInPage() {
   );
 }
 
-// Convex document IDs are base32-ish strings; this isn't a full validator,
-// just a sanity gate so an obviously-malformed URL fails soft instead of
-// throwing a server-side ArgumentValidationError that crashes the kiosk.
-const CONVEX_ID_SHAPE = /^[a-z0-9]{20,40}$/;
+// Shape gate on the kiosk token in the URL, so an obviously-malformed bookmark
+// fails soft here rather than as a server-side ArgumentValidationError that
+// crashes the tablet. 24 hex characters — convex/gyms.ts:generateKioskToken.
+//
+// The URL used to carry the gym's raw document id. It no longer does: that made
+// a bookmarked kiosk link sufficient to enumerate the roster and, through the
+// documents endpoints, read every member's date of birth and home address. See
+// the schema comment on gyms.kioskToken.
+const KIOSK_TOKEN_SHAPE = /^[a-f0-9]{24}$/;
 
 function CheckInPageInner() {
   const searchParams = useSearchParams();
-  const rawGymId = searchParams.get("gym");
-  const gymId =
-    rawGymId && CONVEX_ID_SHAPE.test(rawGymId) ? (rawGymId as Id<"gyms">) : null;
+  const rawToken = searchParams.get("k");
+  const kioskToken = rawToken && KIOSK_TOKEN_SHAPE.test(rawToken) ? rawToken : null;
 
   const members = useQuery(
     api.members.getActiveForGym,
-    gymId ? { gymId } : "skip"
+    kioskToken ? { kioskToken } : "skip"
   );
   const classes = useQuery(
     api.classes.listForKiosk,
-    gymId ? { gymId } : "skip"
+    kioskToken ? { kioskToken } : "skip"
   );
   const checkIn = useMutation(api.members.checkIn);
 
@@ -114,8 +118,8 @@ function CheckInPageInner() {
   // (a member turning 18 today may need a different signer).
   const pendingDocs = useQuery(
     api.documents.getUnsignedRequiredDocs,
-    stage.type === "selected" && gymId && today
-      ? { gymId, memberId: stage.member._id, todayLocalDate: today }
+    stage.type === "selected" && kioskToken && today
+      ? { kioskToken, memberId: stage.member._id, todayLocalDate: today }
       : "skip"
   );
   // `undefined` is "still loading", `null` is "member not found", and a gym
@@ -141,10 +145,10 @@ function CheckInPageInner() {
   }, [members, search]);
 
   async function confirmCheckIn(member: Member) {
-    if (!gymId) return;
+    if (!kioskToken) return;
     await checkIn({
       id: member._id,
-      gymId,
+      kioskToken,
       // Both optional server-side. A gym with no schedule, an open mat, or a
       // member arriving outside class hours all check in with neither.
       ...(classId ? { classId } : {}),
@@ -153,14 +157,14 @@ function CheckInPageInner() {
     setStage({ type: "success", firstName: member.name.trim().split(/\s+/)[0] });
   }
 
-  if (!gymId) {
+  if (!kioskToken) {
     return (
       <div className="h-screen flex flex-col items-center justify-center text-center px-8" style={{ backgroundColor: "#0D0D0D" }}>
         <h1 className="text-3xl font-bold mb-3" style={{ color: "#FFFFFF" }}>Kiosk not configured</h1>
         <p className="text-lg max-w-md" style={{ color: "#888888" }}>
-          This check-in page is missing a gym ID. Bookmark this device to
-          <code className="mx-1" style={{ color: "#E02020" }}>/checkin?gym=&lt;your gym ID&gt;</code>
-          from your dashboard.
+          This check-in page has no valid kiosk link. Get the current one from your
+          dashboard under &ldquo;Your gym&apos;s links&rdquo; and bookmark this device to it —
+          an old link stops working once the kiosk code is regenerated.
         </p>
       </div>
     );
@@ -186,7 +190,7 @@ function CheckInPageInner() {
     const m = stage.member;
     return (
       <WaiverStep
-        gymId={gymId}
+        kioskToken={kioskToken}
         memberId={m._id}
         cancelLabel="Not now"
         // The door gates on REQUIRED documents only — the waiver. A photo
@@ -373,7 +377,7 @@ function CheckInPageInner() {
             tablet only ever has to be bookmarked once. */}
         <div className="mt-14 text-center">
           <a
-            href={`/kiosk/signup?gym=${gymId}`}
+            href={`/kiosk/signup?k=${kioskToken}`}
             className="inline-block rounded-2xl px-8 py-5 text-lg font-semibold"
             style={{ backgroundColor: "#222222", border: "1px solid #333333", color: "#888888" }}
           >

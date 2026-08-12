@@ -148,6 +148,128 @@ export async function requireOwnMember(
   return member;
 }
 
+// ---------------------------------------------------------------------------
+// Kiosk device credential
+// ---------------------------------------------------------------------------
+
+// THE ONE PLACE a kiosk request is turned into a gym.
+//
+// Every unauthenticated kiosk function goes through this rather than accepting
+// a gymId, because the tablet at the door has no Clerk session and something
+// has to stand in for one. Before this, that something was the gym's own
+// document id in a bookmarked URL — which meant anyone holding a kiosk link
+// could list the roster and read each member's date of birth, address and
+// minor status. See the schema comment on gyms.kioskToken.
+//
+// Returns null rather than throwing: every caller is a public kiosk endpoint
+// where a bad or rotated token is an expected state (a stale bookmark), not an
+// exception, and a thrown error there would render as a crashed tablet at the
+// door. Callers render "kiosk not configured" instead.
+//
+// NOTE the deliberate absence of a plan-status check. members.checkIn has
+// never had one, on purpose: a gym whose card bounced must still be able to
+// open its doors. Roster GROWTH is gated instead, inside
+// documents.createMemberFromKiosk.
+export async function tryGetKioskGym(
+  ctx: QueryCtx | MutationCtx,
+  kioskToken: string
+): Promise<Doc<"gyms"> | null> {
+  // An empty token must never match a gym that simply hasn't generated one.
+  // by_kiosk_token would happily return the first row with kioskToken unset,
+  // which is every gym on the deployment.
+  if (!kioskToken) return null;
+  const gym = await ctx.db
+    .query("gyms")
+    .withIndex("by_kiosk_token", (q) => q.eq("kioskToken", kioskToken))
+    .unique();
+  return gym ?? null;
+}
+
+// Mutation-side counterpart for the write paths, which need a hard failure
+// rather than a soft null — a signature or a check-in must not silently
+// succeed against no gym.
+export async function requireKioskGym(
+  ctx: MutationCtx,
+  kioskToken: string
+): Promise<Doc<"gyms">> {
+  const gym = await tryGetKioskGym(ctx, kioskToken);
+  if (!gym) {
+    // ConvexError, not a plain Error — production redacts plain Error messages
+    // to "Server Error", and this one has to be readable on a tablet at the
+    // front desk. See assertReadAccess above.
+    throw new ConvexError(
+      "This kiosk link is no longer valid. Ask the gym owner for the current one."
+    );
+  }
+  return gym;
+}
+
+// 24 hex characters from the CSPRNG. Same construction and the same reasoning
+// as members.ts:generateCheckInToken — Web Crypto because Node's crypto isn't
+// available outside a "use node" action, hex because it is URL-safe with no
+// padding or charset edge cases. 12 bytes rather than 20: this sits in a URL
+// an owner reads aloud and retypes on a tablet, and 96 bits is far beyond
+// guessable for a value that also rotates on demand.
+function generateKioskToken(): string {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function generateUniqueKioskToken(ctx: MutationCtx): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = generateKioskToken();
+    const collision = await ctx.db
+      .query("gyms")
+      .withIndex("by_kiosk_token", (q) => q.eq("kioskToken", candidate))
+      .unique();
+    if (!collision) return candidate;
+  }
+  throw new Error("Failed to generate a unique kiosk token after 5 attempts");
+}
+
+// Issue a kiosk token, or replace the existing one.
+//
+// REPLACING IS DESTRUCTIVE ON PURPOSE: every bookmarked kiosk URL for this gym
+// stops working the moment this runs, which is exactly what an owner wants
+// after a tablet walks off or a coach leaves. The UI says so before calling it.
+//
+// NO requireWriteAccess HERE, DELIBERATELY — do not "fix" this by adding it.
+// This mutation writes a row, so the reflex is to gate it like every other
+// write. But the thing it writes is the credential that opens the front door,
+// and tryGetKioskGym has no plan-status check for the same reason members.
+// checkIn never had one: a gym whose card bounced must still be able to run
+// its 6am class. Gating issuance would mean a gym that lapses before it ever
+// generates a token — or after a tablet is lost — can never get one, and its
+// door goes permanently dark while it is still being asked to pay. requireGym
+// still blocks "inactive" (never subscribed) gyms, and roster GROWTH stays
+// gated inside documents.createMemberFromKiosk, so a lapsed gym can check in
+// the members it already has but cannot sign up new ones.
+export const rotateKioskToken = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const gym = await requireGym(ctx);
+    const kioskToken = await generateUniqueKioskToken(ctx);
+    await ctx.db.patch(gym._id, { kioskToken, kioskTokenIssuedAt: Date.now() });
+    return kioskToken;
+  },
+});
+
+// What the dashboard's kiosk links panel renders. Returns the token itself —
+// this is the authenticated owner asking for their own device credential,
+// which is the one context where handing it out is the entire point.
+export const getKioskToken = query({
+  args: {},
+  handler: async (ctx) => {
+    const gym = await tryGetGym(ctx);
+    if (!gym) return null;
+    return {
+      kioskToken: gym.kioskToken ?? null,
+      kioskTokenIssuedAt: gym.kioskTokenIssuedAt ?? null,
+    };
+  },
+});
+
 function slugifyGymName(name: string): string {
   const base = name
     .toLowerCase()
@@ -174,10 +296,11 @@ function randomSlugSuffix(): string {
 // slugifying to the same base) falls through to a suffixed retry, checked
 // against by_slug.
 //
-// (An earlier version of this comment referenced generateUniqueCheckInToken
-// and a by_check_in_token index as the precedent. Neither exists anywhere in
-// this codebase — the kiosk is reached at /checkin?gym=<raw gym id> with no
-// token at all. Removed 2026-08-02 after it nearly got designed around.)
+// THE SLUG IS NOT A CREDENTIAL and must never be used as one: it is derived
+// from the gym's name, so it is guessable, and it appears in public consent
+// links by design. The two real credentials in this codebase are
+// members.checkInToken (per member, for a scanned card) and gyms.kioskToken
+// (per gym, for the tablet at the door — generated above).
 export async function generateGymSlug(ctx: MutationCtx, name: string): Promise<string> {
   const base = slugifyGymName(name);
   for (let attempt = 0; attempt < 5; attempt++) {
