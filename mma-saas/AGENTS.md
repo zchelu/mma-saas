@@ -141,3 +141,37 @@ a variable, branch on it, construct the client afterwards.
 Revenue and customer-facing work first. Infrastructure only when it unblocks a
 sale. Nothing is "done" until it is demoable on the live site. Push back on
 scope creep — including your own.
+
+## 9. Test data must be unroutable to a stranger
+
+**The repo is public.** Any fixture, seed or example you write is published.
+
+The rule is not "make it look fake", it is **nobody outside this project can be
+reached through it**. Two ways to satisfy that:
+
+- **A domain we own** — `demo.kombatdesk.com` — for anything a prospect sees on
+  screen. This is what the seeder uses, deliberately.
+- **A reserved range** — `example.com`, `.test`, and `555` phone numbers — for
+  fixtures nobody demos.
+
+Prefer the reserved range by default and reach for the owned domain only where a
+human will read it. `scripts/seed-demo-gym.js:76` explains why the seeder went
+the other way: `@demo.kombatdesk.test` was safe but "renders as visibly fake in
+the /members Email column and cost more in demo credibility than it bought".
+`convex/relabelDemoEmails.ts` exists solely to migrate the already-seeded gym
+between those two, and it is **not** evidence that demo mail ever reached a real
+inbox — both domains were always unroutable.
+
+**Never a real date of birth or street address.** `members.dob` and
+`members.address` arrived with Documents & Waivers, and a waiver fixture is
+exactly where a real one would get pasted in for realism. A date of birth is
+also the field that decides whether a minor may sign for themselves, so a
+plausible fake is the *only* correct kind.
+
+**Known violation, not yet fixed:** the four CSV fixtures in
+`migration-assets/fixtures/` carry ~58 realistic addresses at `gmail.com`,
+`yahoo.com` and `outlook.com` — domains we do not own — while every phone in the
+same files correctly uses `555`. They postdate the rule above and were added by
+the CSV importer (`bce584a`). The hazard is the one the seeder comment already
+names: *"a realistic-looking address at a domain we don't control belongs to a
+real person"*.
