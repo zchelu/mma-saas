@@ -5,7 +5,7 @@ import { query, mutation, internalMutation, MutationCtx } from "./_generated/ser
 // `npx tsc --noEmit` is the check that catches this class of error.
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireGym, requireKioskGym, requireWriteAccess, tryGetGym, tryGetKioskGym, tryGetReadableGym } from "./gyms";
+import { requireGym, requireKioskGym, requireOwnMember, requireWriteAccess, tryGetGym, tryGetKioskGym, tryGetReadableGym } from "./gyms";
 import { assertMaxLength, assertEmailFormat } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { validateRank, disciplineValidator } from "./beltTaxonomy";
@@ -47,6 +47,11 @@ export const getAll = query({
       // neither.
       dob: m.dob,
       address: m.address,
+      // Drives the "not checked" prompt on the roster and in the member modal.
+      // Without shipping it the flag exists only in the database, which is the
+      // same as not existing — the whole point is that an owner sees the date
+      // nobody vouched for. See the schema comment on members.dobUnverified.
+      dobUnverified: m.dobUnverified,
       smsConsentConfirmed: m.smsConsentConfirmed,
       smsConsentConfirmedAt: m.smsConsentConfirmedAt,
       // Needed by the Members table's "Texts" column to tell "this member told
@@ -358,8 +363,45 @@ export const update = mutation({
     const isFreshModalConsent =
       fields.smsConsentConfirmed &&
       fields.smsConsentConfirmedAt !== existing.smsConsentConfirmedAt;
+
+    // An owner who changes the date to a DIFFERENT value has demonstrably
+    // looked at it, so the kiosk's "nobody checked this" flag no longer holds.
+    //
+    // GATED ON THE VALUE CHANGING, not merely on a date being present. The
+    // modal resends every field on every save, so clearing the flag whenever
+    // `fields.dob` arrived would mean editing a member's belt rank silently
+    // marked their unchecked date of birth as checked — the flag would clear
+    // itself the first time anyone touched the record for any reason, which is
+    // worth less than not having it. An owner who has read the date and finds
+    // it correct says so through confirmDob below.
+    //
+    // `dobUnverified: undefined` DELETES the field, which is the intended
+    // clear — see normalizedDocumentFields above for why that distinction is
+    // dangerous elsewhere and deliberate here. The key is emitted only inside
+    // this branch, so an unrelated save never touches it.
+    //
+    // Tested with `in` rather than `!== undefined`, which is the same
+    // omitted-versus-cleared distinction normalizedDocumentFields exists for.
+    // An owner ERASING a wrong date sends "", which normalizes to `undefined`
+    // with the key still present — that has to count as a change, or the row
+    // ends up with no date of birth and a leftover "nobody checked this date"
+    // flag pointing at nothing.
+    const dobChanged = "dob" in fields && fields.dob !== existing.dob;
+    // Typing a value IS the attestation, so the same evidence confirmDob writes
+    // is written here — otherwise "the owner corrected it" and "the owner
+    // clicked past it" leave identical rows. Only when a date remains: erasing
+    // one leaves nothing to have confirmed.
+    const identity = dobChanged ? await ctx.auth.getUserIdentity() : null;
     await ctx.db.patch(id, {
       ...fields,
+      ...(dobChanged
+        ? {
+            dobUnverified: undefined,
+            ...(fields.dob
+              ? { dobConfirmedAt: Date.now(), dobConfirmedByClerkUserId: identity?.subject }
+              : { dobConfirmedAt: undefined, dobConfirmedByClerkUserId: undefined }),
+          }
+        : {}),
       // Guarded on newPhoneDigits as well as phoneChanged: CLEARING a member's
       // phone number is a change, but it hands the opt-out to nobody. Writing
       // smsOptedOut: false there would let "delete the number, save, retype the
@@ -369,6 +411,59 @@ export const update = mutation({
       // commitment requires.
       ...(phoneChanged && newPhoneDigits ? { smsOptedOut: inheritedOptOut } : {}),
       ...(isFreshModalConsent ? { smsConsentSource: "member_modal" as const } : {}),
+    });
+  },
+});
+
+// "I've read this date of birth and it's right."
+//
+// The other half of members.dobUnverified. `update` above clears the flag when
+// the owner CHANGES the date, which covers a correction — this covers the
+// commoner case where the walk-in typed it correctly and the owner simply has
+// to say so. Without it the only way to clear a correct date would be to change
+// it to something else and change it back.
+//
+// AUTHENTICATED, and that is the entire security property. The flag means
+// "an unauthenticated tablet supplied this and nobody at the gym checked it",
+// so the one caller who must never be able to clear it is the tablet. There is
+// deliberately no kiosk-token equivalent of this mutation, and adding one would
+// let the kiosk mark its own work as checked and quietly restore the hole the
+// flag exists to expose.
+//
+// Idempotent, and silent on a member who was never flagged: an owner clicking
+// twice, or clicking on a row someone else just confirmed, is not an error
+// worth surfacing at a front desk.
+//
+// NO requireWriteAccess, and unlike everything else in this file that is a
+// decision rather than an oversight. The path that SETS this flag —
+// documents.ts:signDocument — has no billing gate on purpose, because a gym
+// whose card bounced must still be able to open its doors. So a lapsed gym
+// keeps accumulating flagged members. Gate the clear side and it is shown a
+// growing "DOB unchecked" count with no way to act on it, about children's
+// waivers, while it is being asked to pay. Clearing a flag is not roster
+// growth; it costs nothing and only makes the record more honest. Same
+// reasoning as gyms.ts:rotateKioskToken — read that comment before adding a
+// gate here. requireGym still blocks never-subscribed gyms.
+export const confirmDob = mutation({
+  args: { memberId: v.id("members") },
+  handler: async (ctx, { memberId }) => {
+    const gym = await requireGym(ctx);
+    const member = await requireOwnMember(ctx, gym._id, memberId);
+    if (member.archived) throw new Error("Member not found");
+    // Confirming a date that isn't there would assert something about nothing.
+    // The UI never offers it, so this is a direct-call guard and a plain Error
+    // (redacted in production) is the right weight — nothing at a front desk
+    // needs to read it.
+    if (!member.dob) throw new Error("No date of birth to confirm");
+    if (member.dobUnverified !== true) return;
+    // requireGym above already established an identity, so this cannot be null
+    // in practice — but recording who confirmed is the entire point of the
+    // pair, so it is read rather than assumed.
+    const identity = await ctx.auth.getUserIdentity();
+    await ctx.db.patch(memberId, {
+      dobUnverified: undefined,
+      dobConfirmedAt: Date.now(),
+      dobConfirmedByClerkUserId: identity?.subject,
     });
   },
 });

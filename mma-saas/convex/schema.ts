@@ -133,6 +133,65 @@ export default defineSchema({
     // deliberately no backfill: a date of birth cannot be inferred, only
     // asked for, which is what the signing step does.
     dob: v.optional(v.string()),
+    // WAS THIS DATE OF BIRTH TYPED BY WHOEVER WAS HOLDING THE TABLET?
+    //
+    // The kiosk is unauthenticated and hands the device to the signer, so the
+    // date it collects is self-reported and nobody at the gym has checked it.
+    // That matters more here than anywhere else in this schema: `dob` above is
+    // the single input to the guardian rule, so a 12-year-old who types an
+    // adult date has quietly disabled their own guardian requirement, and
+    // nothing in the product would ever have said so.
+    //
+    // No software can verify an age at a kiosk. What it can do is refuse to
+    // pretend it did. This field makes the gap visible and closeable rather
+    // than silent: the owner sees "not checked" against that member and
+    // confirms or corrects it at the desk.
+    //
+    // DELIBERATELY NOT `dobVerified`. Only ever written as `true`, and only by
+    // the two kiosk paths that write a date nobody checked — same convention as
+    // smsOptedOut. A `dobVerified` field would instead assert something nobody
+    // actually did, and would need every future write path to remember to set
+    // it in order to stay honest.
+    //
+    // NO BACKFILL, and here is the specific reason rather than a hand-wave:
+    // absent means "not written by a kiosk path", which is only equivalent to
+    // "the owner typed it" because the kiosk paths that could have written a
+    // date have never run against production. Both of them
+    // (documents.createMemberFromKiosk, and signDocument's fill-in branch)
+    // arrived with Documents & Waivers, whose frontend never reached Vercel
+    // until 2026-08-11 — /kiosk/signup returned 404 the whole time — and
+    // production still has no waiver template at all, so no signature has ever
+    // been taken. The unflagged-kiosk-date cohort is empty in production.
+    //
+    // IT IS NOT NECESSARILY EMPTY ON THE DEV DEPLOYMENT, where the flow was
+    // exercised by hand. Dev rows reading as owner-entered is harmless. If a
+    // kiosk date is ever found on a production row with no flag, that is a
+    // migration, not a mystery.
+    //
+    // Cleared by members.ts:confirmDob (the owner says the date is right) or by
+    // members.ts:update changing the date to a different value (the owner
+    // looked at it and typed a correction). Never cleared by an unauthenticated
+    // caller — that would let the kiosk mark its own work as checked.
+    //
+    // NOT A GATE. It must never block a check-in, a signature or a signup:
+    // every new kiosk member starts out flagged, so gating on it would break
+    // the front door for exactly the people the kiosk exists to serve.
+    dobUnverified: v.optional(v.boolean()),
+    // WHO said the date was right, and when.
+    //
+    // Clearing dobUnverified on its own destroys the only thing that was known
+    // and records nothing in its place: afterwards, a date an owner checked
+    // against a birth certificate is byte-identical to one they clicked past.
+    // This pair is the same evidence smsConsentSource/smsConsentConfirmedAt
+    // carry for a smaller stake — and the stake here is whether a child signed
+    // a liability release alone, which is the question a dispute actually asks.
+    //
+    // Written together by members.ts:confirmDob and by members.ts:update when
+    // the owner changes the date (typing a value is its own attestation).
+    // Clerk user id rather than a name: names change, and this has to stay
+    // answerable from the row alone months later.
+    dobConfirmedAt: v.optional(v.number()),
+    dobConfirmedByClerkUserId: v.optional(v.string()),
     // Free-text, single field, on purpose. It exists to fill the
     // {{member_address}} placeholder in a waiver the gym wrote — it is not
     // structured for shipping, tax, or Stripe, and nothing should try to
@@ -673,6 +732,23 @@ export default defineSchema({
     // guardian on an adult's waiver is simply an absent field.
     guardianName: v.optional(v.string()),
     guardianSignatureData: v.optional(v.string()),
+    // Had anyone at the gym checked the signer's date of birth, AS OF THIS
+    // SIGNING? Frozen here for the same reason renderedContent is: this row is
+    // evidence, and what the gym knew later is not what the gym knew then. An
+    // owner who confirms a date next week must not retroactively make an
+    // unchecked signature look checked.
+    //
+    // Says only that the date was unchecked — NOT that it decided a guardian
+    // question. It is set whenever the signer's date was unchecked, including
+    // on templates with requiresGuardianForMinors false, where no guardian rule
+    // ran at all. The date can still matter there ({{member_dob}} prints into
+    // the text), so the flag is worth setting; claiming more than that would be
+    // false on exactly those documents.
+    //
+    // Copied from members.dobUnverified at insert time and, like it, only ever
+    // written as `true`. Absent means the age came from a date the owner had
+    // entered themselves. See the comment on members.dobUnverified.
+    signerDobUnverified: v.optional(v.boolean()),
     signedAt: v.number(),
     // Deliberately UNSET by the current signing path, not merely unused.
     // Convex mutations cannot see the caller's address, and the kiosk is

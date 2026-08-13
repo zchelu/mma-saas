@@ -336,14 +336,19 @@ export const deleteTemplate = mutation({
 //     with the same dob/address/minor exposure as before. Rotation is the
 //     remedy, and it is why rotateKioskToken exists rather than a token
 //     generated once at gym creation.
-//   - signDocument can still set a date of birth on a member who has none.
-//     That matters beyond tampering: the designed flow hands the tablet to the
-//     signer and treats the date they type as authoritative from then on, so a
-//     12-year-old who enters an adult date has permanently disabled their own
-//     guardian requirement. An owner correcting the date in the member modal
-//     is the only remedy today. The planned fix is an "unverified DOB" flag
-//     set on kiosk-supplied dates and cleared only by an authenticated owner,
-//     so a guardian requirement can't be self-served away. Not in this pass.
+//   - signDocument can still set a date of birth on a member who has none, and
+//     nothing can verify an age at an unattended tablet. The designed flow
+//     hands the device to the signer, so a 12-year-old who enters an adult date
+//     signs alone. That is not fixed and cannot be fixed here.
+//
+//     What IS now true (2026-08-12) is that it can no longer happen silently:
+//     both kiosk paths stamp members.dobUnverified on any date they write, only
+//     an authenticated owner can clear it (members.confirmDob, or editing the
+//     date), and signedDocuments.signerDobUnverified freezes that state onto
+//     the signature itself. The owner is shown the unchecked dates and asked to
+//     confirm them. DELIBERATELY NOT A GATE — see the schema comment on
+//     members.dobUnverified; every kiosk signup starts out flagged, so blocking
+//     on it would shut the front door on exactly the people the kiosk serves.
 export const getUnsignedRequiredDocs = query({
   args: {
     // The DEVICE's kiosk token — see gyms.ts:tryGetKioskGym. This endpoint
@@ -531,12 +536,35 @@ export const signDocument = mutation({
     // is already on file — that value decides whether a guardian signature is
     // required, so an overwrite here would be a way to sign a child's waiver
     // as an adult.
-    const memberPatch: { dob?: string; address?: string } = {};
+    const memberPatch: { dob?: string; address?: string; dobUnverified?: boolean } = {};
     if (member.dob === undefined && args.dob !== undefined) {
       const parsed = parseCalendarDate(args.dob);
       if (!parsed) throw new ConvexError("That date of birth doesn't look right.");
       memberPatch.dob = args.dob.trim();
+      // FLAGGED, because whoever is holding the tablet typed it and nobody at
+      // the gym has looked. This is the exact write that lets a 12-year-old
+      // disable their own guardian requirement by entering an adult date, and
+      // the flag is what stops that being invisible — the owner gets asked to
+      // confirm it. It cannot be enforced here: refusing the signature would
+      // strand every genuine new member at the door.
+      // See the schema comment on members.dobUnverified.
+      memberPatch.dobUnverified = true;
     }
+
+    // COMPUTED HERE, BEFORE THE PATCH BELOW, AND DELIBERATELY SO. `member` is
+    // the pre-patch snapshot, which is the only correct source: this records
+    // what was true when the pen touched the screen. Reading it after the patch
+    // would still work today only by accident of `member` being stale — and the
+    // first person to add `const fresh = await ctx.db.get(memberId)` and switch
+    // the read to it would silently invert the meaning of every signature.
+    //
+    // BOTH sources, because the date that decides `age` below could have
+    // arrived either way: typed into this very signing (memberPatch), or typed
+    // at an earlier kiosk visit and still unconfirmed (member.dobUnverified).
+    // Checking only the first would mark a second document signed by the same
+    // unverified member as though someone had vouched for their age.
+    const signerDobUnverified =
+      memberPatch.dobUnverified === true || member.dobUnverified === true;
     if (member.address === undefined && args.address !== undefined) {
       const address = args.address.trim();
       assertKioskMaxLength(address, MAX_MEMBER_ADDRESS, "Address");
@@ -643,6 +671,11 @@ export const signDocument = mutation({
     // signature are present, so there is nothing further to re-test here.
     const storeGuardian = guardianRequired;
 
+    // signerDobUnverified was computed above, against the pre-patch snapshot.
+    // Stored rather than joined to the member row at read time: this is
+    // evidence of what was known at signing, and confirming the date next week
+    // must not rewrite what this signature meant. Same freeze as
+    // renderedContent above.
     return await ctx.db.insert("signedDocuments", {
       gymId,
       memberId,
@@ -653,6 +686,7 @@ export const signDocument = mutation({
       ...(storeGuardian
         ? { guardianName: trimmedGuardian, guardianSignatureData: guardianSignatureData! }
         : {}),
+      ...(signerDobUnverified ? { signerDobUnverified: true } : {}),
       signedAt: now,
       // ipAddress is left unset on purpose. Convex mutations cannot see the
       // caller's address, and accepting one as an argument from an
@@ -700,6 +734,11 @@ export const listSignedDocuments = query({
             signerName: s.signerName,
             guardianName: s.guardianName,
             guardianSignatureData: s.guardianSignatureData,
+            // Shipped so the drawer can say the age behind this signature was
+            // never checked. Read off the SIGNED ROW, never re-derived from
+            // the member — the member's flag may since have been cleared, and
+            // this record is about what was true at signing.
+            signerDobUnverified: s.signerDobUnverified,
             signedAt: s.signedAt,
           };
         })
@@ -845,6 +884,11 @@ export const createMemberFromKiosk = mutation({
       status: "active",
       gymId,
       dob: args.dob.trim(),
+      // Self-reported, like everything else on this screen — the walk-in is
+      // holding the tablet. Flagged so the owner is asked to confirm it rather
+      // than inheriting a date nobody checked as though it were roster data.
+      // See the schema comment on members.dobUnverified.
+      dobUnverified: true,
       ...(address ? { address } : {}),
       ...(email ? { email } : {}),
       ...(storePhone

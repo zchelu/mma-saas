@@ -31,6 +31,7 @@ type SignedDoc = {
   signerName: string;
   guardianName?: string;
   guardianSignatureData?: string;
+  signerDobUnverified?: boolean;
   signedAt: number;
 };
 
@@ -204,6 +205,28 @@ function ViewModal({ doc, onClose }: { doc: SignedDoc; onClose: () => void }) {
               dataUrl={doc.guardianSignatureData}
               accent="#FBBF24"
             />
+          )}
+
+          {/* Frozen at signing, not read from the member row — confirming a
+              date of birth next week must not make a signature that was taken
+              on an unchecked date look as though it had been checked. See the
+              schema comment on signedDocuments.signerDobUnverified. */}
+          {doc.signerDobUnverified && (
+            <div
+              className="rounded-lg px-4 py-3"
+              style={{ backgroundColor: "#2A1F0A", border: "1px solid #FBBF24" }}
+            >
+              {/* Says only what is true on EVERY document this can appear on.
+                  The flag is set whenever the signer's date was unchecked,
+                  including on templates with no guardian rule — claiming it
+                  "decided whether a guardian had to sign" would be false on
+                  exactly those. */}
+              <p className="text-xs" style={{ color: "#FBBF24" }}>
+                When this was signed, the signer&apos;s date of birth had been typed on the
+                tablet and not checked by anyone at the gym. Confirming it later doesn&apos;t
+                change that — this record shows what was known at the time.
+              </p>
+            </div>
           )}
 
           <p className="text-xs" style={{ color: "#555555" }}>

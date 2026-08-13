@@ -14,6 +14,7 @@ type Member = {
   phone?: string;
   beltRank?: string;
   dob?: string;
+  dobUnverified?: boolean;
   address?: string;
   smsConsentConfirmed?: boolean;
   smsConsentConfirmedAt?: number;
@@ -27,6 +28,7 @@ type Props = {
 export default function MemberModal({ member, onClose }: Props) {
   const add = useMutation(api.members.add);
   const update = useMutation(api.members.update);
+  const confirmDob = useMutation(api.members.confirmDob);
 
   const [name, setName] = useState(member?.name ?? "");
   const [plan, setPlan] = useState(member?.plan ?? "");
@@ -43,6 +45,16 @@ export default function MemberModal({ member, onClose }: Props) {
   const [consentError, setConsentError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Local, so the prompt disappears the instant it's confirmed rather than
+  // after the members query round-trips. Also suppressed the moment the owner
+  // edits the date at all — at that point they are clearly looking at it, and
+  // "nobody checked this" nagging under a field being actively typed into
+  // reads as a bug. The server clears the flag on save either way
+  // (members.ts:update), so this is presentation only.
+  const [dobConfirmed, setDobConfirmed] = useState(false);
+  const [confirmingDob, setConfirmingDob] = useState(false);
+  const dobUnverified =
+    !!member?.dobUnverified && !dobConfirmed && dob === (member?.dob ?? "");
 
   const trimmedPhone = phone.trim();
   const originalPhone = member?.phone ?? "";
@@ -199,6 +211,46 @@ export default function MemberModal({ member, onClose }: Props) {
               Without a date of birth we can&apos;t tell whether a guardian has to sign this
               member&apos;s waiver — they&apos;ll be asked for it at the kiosk.
             </p>
+          )}
+          {/* The only place the unverified-DOB gap is closeable. This date came
+              off the tablet, typed by whoever was holding it, and it is the
+              single input to the guardian rule — see the schema comment on
+              members.dobUnverified. Deliberately a prompt and not a block:
+              every kiosk signup starts out flagged, so blocking anything on it
+              would break the front door. */}
+          {dobUnverified && (
+            <div
+              className="rounded-lg p-3 -mt-2 flex flex-wrap items-center gap-x-4 gap-y-2"
+              style={{ backgroundColor: "#2A1F0A", border: "1px solid #FBBF24" }}
+            >
+              <p className="text-xs flex-1 min-w-[14rem]" style={{ color: "#FBBF24" }}>
+                This date of birth was typed on the tablet and nobody here has checked it.
+                It decides whether a guardian has to sign — correct it above, or confirm it.
+              </p>
+              <button
+                type="button"
+                disabled={confirmingDob}
+                onClick={async () => {
+                  if (!member) return;
+                  setConfirmingDob(true);
+                  setSaveError(null);
+                  try {
+                    await confirmDob({ memberId: member._id });
+                    setDobConfirmed(true);
+                  } catch (err) {
+                    setSaveError(
+                      getErrorMessage(err, "Couldn't confirm that — try refreshing the page.")
+                    );
+                  } finally {
+                    setConfirmingDob(false);
+                  }
+                }}
+                className="rounded-lg text-xs font-semibold px-3 py-1.5 transition-colors disabled:opacity-50 shrink-0"
+                style={{ backgroundColor: "#FBBF24", color: "#0D0D0D" }}
+              >
+                {confirmingDob ? "Confirming…" : "It's correct"}
+              </button>
+            </div>
           )}
           <Field label="Status">
             <select value={status} onChange={(e) => setStatus(e.target.value as "active" | "inactive")} className="input">

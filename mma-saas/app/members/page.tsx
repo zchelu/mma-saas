@@ -22,6 +22,7 @@ type Member = {
   beltRank?: string;
   lastVisit?: string;
   dob?: string;
+  dobUnverified?: boolean;
   address?: string;
   smsConsentConfirmed?: boolean;
   smsConsentConfirmedAt?: number;
@@ -131,6 +132,12 @@ export default function MembersPage() {
   // number away from the tile it's supposed to match.
   const textableCount = memberList.filter(isTextEligibleMember).length;
 
+  // Members whose date of birth came off the tablet and nobody here has
+  // checked. Counted over the whole roster for the same reason textableCount
+  // is — it answers "how much of this is outstanding", which a filtered count
+  // would misreport. See the schema comment on members.dobUnverified.
+  const dobUncheckedCount = memberList.filter((m) => m.dobUnverified).length;
+
   // Copy deliberately promises only what archiveMember actually does: the row
   // is archived, not erased, so this must not claim the record is deleted.
   async function handleRemove(member: Member) {
@@ -182,6 +189,14 @@ export default function MembersPage() {
                 label="Docs unsigned"
                 color={unsignedWaivers > 0 ? "#FBBF24" : "#4ADE80"}
               />
+            )}
+            {/* Only when there are some. A gym that never uses the signup
+                kiosk would otherwise carry a permanent "0" for a concept it
+                has no reason to learn — unlike the badges above it, which
+                describe the roster itself. Computed from the rows already on
+                screen; no extra query. */}
+            {dobUncheckedCount > 0 && (
+              <SummaryBadge value={dobUncheckedCount} label="DOB unchecked" color="#FBBF24" />
             )}
           </div>
         )}
@@ -272,6 +287,19 @@ export default function MembersPage() {
                           {getInitials(m.name)}
                         </div>
                         <span className="font-medium" style={{ color: "#FFFFFF" }}>{m.name}</span>
+                        {/* Marks the row so the "DOB unchecked" badge above is
+                            actionable rather than just a number. Clicking the
+                            row opens the modal, which is where it's resolved.
+                            See the schema comment on members.dobUnverified. */}
+                        {m.dobUnverified && (
+                          <span
+                            className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold shrink-0"
+                            style={{ backgroundColor: "#2A1F0A", color: "#FBBF24" }}
+                            title="This date of birth was typed on the tablet and nobody here has checked it. It decides whether a guardian has to sign."
+                          >
+                            DOB?
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4" style={{ color: "#888888" }}>{m.email || "—"}</td>
@@ -338,7 +366,14 @@ export default function MembersPage() {
       </main>
 
       {modal !== null && (
+        // Keyed so every field — and the "I've checked this date of birth"
+        // acknowledgement in particular — is seeded fresh per member rather
+        // than surviving a member-to-member switch. Safe today only because
+        // the modal is a full-screen overlay, so `modal` cannot go from one
+        // member to another without passing through null; the key makes that
+        // structural instead of incidental.
         <MemberModal
+          key={modal === "add" ? "add" : modal._id}
           member={modal === "add" ? undefined : modal}
           onClose={() => setModal(null)}
         />

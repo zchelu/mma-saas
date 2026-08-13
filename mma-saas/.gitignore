@@ -42,3 +42,11 @@ next-env.d.ts
 
 # local mirrors of claude.ai project docs — canonical copy lives there, never commit
 .claude-docs/
+
+# Vendored agent skills, pulled from third-party repos (skills-lock.json records
+# source + hash). Not this app's code, has its own upstream, and would put
+# unrelated video-editing tooling in the deploy artifact. Re-fetchable from the
+# lock file, so nothing is lost by ignoring it.
+.agents/
+.claude/skills/
+skills-lock.json
