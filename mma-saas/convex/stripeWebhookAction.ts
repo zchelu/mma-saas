@@ -6,7 +6,7 @@ import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS, resolvePlanFromPriceId } from "../lib/plans";
-import { alertUnresolvedPrice } from "../lib/alerts";
+import { alertMissingTrialConfirmation, alertUnresolvedPrice } from "../lib/alerts";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
 
@@ -126,12 +126,36 @@ async function sendTrialConfirmationEmail(
     // itself already kept whatever plan it had (upsertSubscription/
     // upsertUnclaimedSubscription omit the field rather than guessing), so
     // this only skips the confirmation email, not the customer's access.
+    // No alert here ON PURPOSE, and do not "fix" that by adding one:
+    // applySubscriptionState already calls alertUnresolvedPrice for exactly this
+    // condition, immediately before it calls this function (see the !plan branch
+    // below the upsert). That alert's copy already states that the C.R.S.
+    // 6-1-732 confirmation must be sent by hand. A second email about the same
+    // subscription seconds later is noise, and noise is how alerts stop getting
+    // read. The other two bail-outs below are NOT covered anywhere, and those do
+    // alert.
     if (!plan) {
       console.error(`Trial confirmation email skipped: subscription has no resolved plan (customer ${customerId})`);
       return;
     }
     const customer = typeof customerRef === "string" ? await stripe.customers.retrieve(customerId) : customerRef;
-    if (customer.deleted || !customer.email) return;
+    // This used to be a bare `return` with no log at all — the quietest of the
+    // three exits, on a customer who is being billed. No email address means the
+    // statutory record cannot be produced for them by any route.
+    if (customer.deleted || !customer.email) {
+      const detail = customer.deleted
+        ? "the Stripe customer was deleted"
+        : "no email address on the Stripe customer";
+      console.error(`Trial confirmation email skipped: ${detail} (customer ${customerId})`);
+      await alertMissingTrialConfirmation({
+        reason: "customer_unreachable",
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscriptionId,
+        plan,
+        detail,
+      });
+      return;
+    }
 
     // Explicit lookup, not slug capitalization — that rendered multi-word
     // tiers as "Fightteam"/"Blackbelt". Bail rather than send a confirmation
@@ -141,6 +165,15 @@ async function sendTrialConfirmationEmail(
     const planLabel = PLAN_LABEL[plan];
     if (price === undefined || planLabel === undefined) {
       console.error(`Trial confirmation email skipped: no price/label copy for plan "${plan}"`);
+      // Deterministic config gap — a plan slug reached billing that lib/plans.ts
+      // has no copy for — so it will recur for every customer on that slug until
+      // someone adds it. Alerting is what makes "someone" happen.
+      await alertMissingTrialConfirmation({
+        reason: "missing_plan_copy",
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscriptionId,
+        plan,
+      });
       return;
     }
 

@@ -186,3 +186,60 @@ export async function alertUnresolvedPrice(params: {
     ].join("\n")
   );
 }
+
+// Fires when convex/stripeWebhookAction.ts:sendTrialConfirmationEmail bails out
+// and therefore never sends the customer their trial/subscription confirmation.
+//
+// That email is the ONLY written C.R.S. 6-1-732 record of price, frequency and
+// cancellation terms, and it fires off customer.subscription.created, which
+// Stripe never re-fires. A skipped send is therefore permanent: nothing retries
+// it, and the customer has already been trialed or charged.
+//
+// Until now these paths only console.error'd, and one of them did not even do
+// that. A compliance artifact failing quietly, traceable only through a log line
+// nobody reads, is the same failure shape as the missing-Convex-key webhook bug
+// in docs/stripe-key-gap-closed-2026-08-09.md — which is exactly how that one
+// survived three handoffs.
+//
+// NOT raised for an unresolved plan: alertUnresolvedPrice above already covers
+// that case and runs immediately before this function's caller
+// (convex/stripeWebhookAction.ts:309), with copy that already spells out the
+// manual send. A second email about the same subscription seconds later would
+// be noise, and noise is how alerts stop being read.
+export async function alertMissingTrialConfirmation(params: {
+  reason: "missing_plan_copy" | "customer_unreachable";
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  plan?: string;
+  detail?: string;
+}): Promise<void> {
+  const { reason, stripeCustomerId, stripeSubscriptionId, plan, detail } = params;
+
+  const explanation =
+    reason === "missing_plan_copy"
+      ? `The subscription resolved to plan "${plan}", but PLAN_PRICE_USD and/or PLAN_LABEL in lib/plans.ts has no copy for that slug. The email was skipped rather than sent quoting "$undefined" — a wrong statutory record is worse than a missing one, but this one is now missing.`
+      : `The Stripe customer has no usable email address (${detail ?? "deleted, or no email on file"}), so there is nowhere to send the confirmation.`;
+
+  const fix =
+    reason === "missing_plan_copy"
+      ? `Add "${plan}" to PLAN_PRICE_USD and PLAN_LABEL in lib/plans.ts, or correct the price ID mapping so the subscription resolves to a tier that has copy.`
+      : `Find this customer's real email address in the Stripe dashboard and confirm whether they were charged.`;
+
+  await sendAlertEmail(
+    "KombatDesk: a C.R.S. 6-1-732 confirmation email was NOT sent",
+    [
+      `A customer's trial/subscription confirmation email was skipped. That email is their only written record of price, frequency and cancellation terms.`,
+      ``,
+      `Condition: ${reason}`,
+      `Stripe customer ID: ${stripeCustomerId}`,
+      `Stripe subscription ID: ${stripeSubscriptionId}`,
+      `Resolved plan: ${plan ?? "(none)"}`,
+      ``,
+      explanation,
+      ``,
+      `ACTION REQUIRED, and it does not fix itself: this email only fires on customer.subscription.created, which Stripe never re-fires for this subscription. Fixing the cause afterwards will NOT retroactively send it — you must send this customer their price/frequency/cancellation confirmation by hand, or that compliance record is permanently missing for them.`,
+      ``,
+      `To stop it recurring: ${fix}`,
+    ].join("\n")
+  );
+}
