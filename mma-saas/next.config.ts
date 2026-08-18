@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Dev server rejects cross-origin asset/HMR requests by default (Next 15+).
+  // Needed so the site works when accessed through the cloudflared tunnel
+  // (e.g. for testing kiosk pages on a phone/iPad). Update if the tunnel
+  // hostname changes — quick tunnels mint a new random subdomain each run.
+  allowedDevOrigins: ["banana-hung-corn-wars.trycloudflare.com"],
   // Twilio has /demo/sms-consent on file from earlier submissions, where it
   // still served the static "Add Member" checkbox mockup that was rejected.
   // Point it at the real, live member-facing consent form instead. Config-level

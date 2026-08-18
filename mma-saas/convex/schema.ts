@@ -646,7 +646,17 @@ export default defineSchema({
     // reach this index — see the naming rule on members.stripeConnectCustomerId.
     .index("by_stripe_customer", ["stripeCustomerId"])
     .index("by_slug", ["slug"])
-    .index("by_kiosk_token", ["kioskToken"]),
+    .index("by_kiosk_token", ["kioskToken"])
+    // The Connect webhook (convex/connectWebhookAction.ts) receives an
+    // account.updated event carrying only the CONNECTED-account id, so this is
+    // the only way it can find the gym. Without it that lookup is a full table
+    // scan on every account.updated Stripe sends, and Stripe sends them often
+    // during onboarding.
+    //
+    // Distinct from by_stripe_customer above, which is PLATFORM customer ids —
+    // see the naming rule. Nothing may look a connected-account id up in that
+    // index or a member's dues event could flip a gym's SaaS plan status.
+    .index("by_stripe_connect_account", ["stripeConnectAccountId"]),
   // Every winback text this product has actually sent.
   //
   // There was no such record. Texts went out and the ONLY copy of what was
