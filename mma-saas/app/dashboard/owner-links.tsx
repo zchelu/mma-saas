@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { getErrorMessage } from "../components/error-toast";
+import { useOrigin } from "../components/use-origin";
 
 // The two URLs a gym owner has to hand out, plus the consent gap those URLs
 // silently create.
@@ -25,10 +26,14 @@ import { getErrorMessage } from "../components/error-toast";
 const CARD = { backgroundColor: "#222222", border: "1px solid #333333" };
 
 export default function OwnerLinks({ slug }: { slug: string | null }) {
-  // Rendered client-side because both URLs need the real origin, and because
-  // hardcoding a base URL is how a link ends up pointing at the wrong
-  // environment. window.location is the one source that can't be stale.
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  // Client-side because both URLs need the real origin, and because hardcoding
+  // a base URL is how a link ends up pointing at the wrong environment.
+  // window.location is the one source that can't be stale.
+  //
+  // Was an inline server/client branch on `typeof window`, which is a hydration
+  // mismatch by construction — see use-origin.ts. It threw on every dashboard
+  // load and was the standing "1 Issue" in the dev overlay.
+  const origin = useOrigin();
 
   // THE KIOSK LINKS CARRY A ROTATABLE TOKEN, NOT THE GYM ID.
   //

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { loadConnectAndInitialize } from "@stripe/connect-js";
-import type { AppearanceOptions, StripeConnectInstance } from "@stripe/connect-js";
+import type { AppearanceOptions } from "@stripe/connect-js";
 import {
   ConnectAccountManagement,
   ConnectAccountOnboarding,
@@ -11,6 +11,7 @@ import {
   ConnectNotificationBanner,
 } from "@stripe/react-connect-js";
 import { api } from "../../convex/_generated/api";
+import { useDetectedTimezone } from "../components/use-detected-timezone";
 
 // Stage C of Connect member billing (spec §5.1): the owner-facing surface for
 // connecting a Stripe account so the gym can bill its own members.
@@ -153,21 +154,13 @@ export default function ConnectBilling() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
-  const [connectInstance, setConnectInstance] = useState<StripeConnectInstance | null>(null);
-
-  // The browser's IANA zone, read after mount rather than during render.
-  // Resolving it inline would run once on the server (where it is UTC) and again
-  // in the browser — both a hydration mismatch and the wrong answer. See spec §3.
-  const [detectedTimezone, setDetectedTimezone] = useState<string | null>(null);
   const [timezoneDraft, setTimezoneDraft] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      setDetectedTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || null);
-    } catch {
-      setDetectedTimezone(null);
-    }
-  }, []);
+  // See use-detected-timezone.ts. Was a useState + effect pair here, which is
+  // the react-hooks/set-state-in-effect shape use-hydrated.ts and
+  // use-local-date.ts both exist to avoid — this file just hadn't been brought
+  // in line with them yet.
+  const detectedTimezone = useDetectedTimezone();
 
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
 
@@ -194,6 +187,10 @@ export default function ConnectBilling() {
   // Built once, lazily, and only when the owner actually opens the panel — this
   // loads Stripe's script and mints a session, neither of which should happen on
   // every dashboard render for gyms that will never click it.
+  // Read directly, NOT mirrored into state. This was a useMemo whose value was
+  // copied into a `connectInstance` state by an effect, which bought nothing:
+  // the memo is already stable across renders, so the extra state only added a
+  // second render pass on open and a set-state-in-effect lint error.
   const instance = useMemo(() => {
     if (!open || !publishableKey) return null;
     return loadConnectAndInitialize({
@@ -202,10 +199,6 @@ export default function ConnectBilling() {
       appearance: CONNECT_APPEARANCE,
     });
   }, [open, publishableKey, fetchClientSecret]);
-
-  useEffect(() => {
-    setConnectInstance(instance);
-  }, [instance]);
 
   const recheck = useCallback(async () => {
     setChecking(true);
@@ -284,8 +277,8 @@ export default function ConnectBilling() {
       {/* Stripe renders these inside its own iframes. The notification banner is
           what actually tells an owner what Stripe still needs, which is why our
           stored status codes are captured rather than interpreted. */}
-      {connectInstance && (
-        <ConnectComponentsProvider connectInstance={connectInstance}>
+      {instance && (
+        <ConnectComponentsProvider connectInstance={instance}>
           <div className="mb-4">
             <ConnectNotificationBanner />
           </div>

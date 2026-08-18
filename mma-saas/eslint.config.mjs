@@ -17,6 +17,14 @@ const eslintConfig = defineConfig([
     // overwrites the edit. Was emitting 4 "unused eslint-disable directive"
     // warnings that no one could ever action.
     "convex/_generated/**",
+    // Vendored agent skill packs. Not application source, not bundled by Next,
+    // not ours to fix: these are third-party skill bundles that ship their own
+    // .cjs scripts and minified vendor assets (gsap.min.js alone accounts for
+    // hundreds of findings). They were producing 83 of the repo's 85 lint
+    // errors and 380+ warnings, which made `npm run lint` unreadable — two real
+    // errors in app/dashboard/connect-billing.tsx sat undetected in that noise
+    // until 2026-08-18. A gate nobody can read is not a gate.
+    ".agents/**",
   ]),
   {
     // Standalone Node scripts, run directly with `node scripts/x.js` and never
