@@ -21,6 +21,7 @@ import { action, ActionCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { ConvexError } from "convex/values";
+import { extractConnectStatus } from "../lib/connectStatus";
 
 // Pinned explicitly, never inherited from the SDK default. Variant 7 is
 // generally available; the express + Stripe-losses combination that would have
@@ -323,30 +324,21 @@ export const refreshConnectStatus = action({
       );
     }
 
-    // v2 reports per-capability status rather than v1's booleans. A brand-new
-    // unonboarded account reads "restricted" with a requirements_past_due code —
-    // NOT "pending" — which is why both the status and its codes are stored, and
-    // why the booleans alone were lossy.
-    const merchant = stripeConnectAccount.configuration?.merchant;
-    const cardPayments = merchant?.capabilities?.card_payments;
-    const payouts = merchant?.capabilities?.stripe_balance?.payouts;
-
-    const codesOf = (details: Array<{ code?: string }> | undefined): string[] =>
-      (details ?? []).map((d) => d.code).filter((c): c is string => typeof c === "string");
-
-    const chargesEnabled = cardPayments?.status === "active";
-    const payoutsEnabled = payouts?.status === "active";
+    // Shared with convex/connectWebhookAction.ts via lib/connectStatus.ts. Both
+    // write the same six fields, and the extraction lives in one tested place
+    // precisely so they cannot drift — two writers disagreeing about whether a
+    // gym can charge is the failure this whole status model exists to prevent.
+    const status = extractConnectStatus(stripeConnectAccount.configuration?.merchant);
 
     await ctx.runMutation(internal.connect.setConnectAccountStatus, {
       gymId: gym._id,
-      chargesEnabled,
-      payoutsEnabled,
-      chargesStatus: cardPayments?.status,
-      chargesStatusCodes: codesOf(cardPayments?.status_details),
-      payoutsStatus: payouts?.status,
-      payoutsStatusCodes: codesOf(payouts?.status_details),
+      ...status,
     });
 
-    return { connected: true, chargesEnabled, payoutsEnabled };
+    return {
+      connected: true,
+      chargesEnabled: status.chargesEnabled,
+      payoutsEnabled: status.payoutsEnabled,
+    };
   },
 });

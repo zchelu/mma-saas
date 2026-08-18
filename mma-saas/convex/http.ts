@@ -35,6 +35,52 @@ http.route({
   }),
 });
 
+// Stripe CONNECT webhook — connected-account events, a different stream from
+// /stripe/webhook above and deliberately not folded into it (spec §1).
+//
+// Different signing secret (STRIPE_CONNECT_WEBHOOK_SECRET), different dedupe
+// table (stripeConnectWebhookEvents), different failure consequences. The
+// platform stream provisions gyms that have already paid; this one is the only
+// thing that ever learns a connected account went live, because embedded
+// components never redirect and so produce no arrival event.
+//
+// Register this URL in the Stripe dashboard under CONNECT events, not account
+// events: <deployment>.convex.site/stripe/connect-webhook
+http.route({
+  path: "/stripe/connect-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const signature = request.headers.get("stripe-signature");
+    if (!signature) {
+      return new Response(JSON.stringify({ error: "Missing stripe-signature header" }), {
+        status: 400,
+      });
+    }
+
+    const payload = await request.text();
+    const result = await ctx.runAction(api.connectWebhookAction.verifyAndProcess, {
+      signature,
+      payload,
+    });
+
+    if (result.status === "invalid_signature") {
+      return new Response(JSON.stringify({ error: "Invalid webhook signature" }), { status: 400 });
+    }
+
+    // 500, not 400 — processing hit a transient failure and the dedupe claim has
+    // been released, so Stripe should redeliver. Stripe retries any non-2xx, so
+    // a 400 would also get retried, but it would record an outage as a rejected
+    // signature and send whoever is debugging to rotate a healthy secret.
+    if (result.status === "retry") {
+      return new Response(JSON.stringify({ error: "Temporarily unable to process" }), {
+        status: 500,
+      });
+    }
+
+    return new Response(JSON.stringify({ received: true }), { status: 200 });
+  }),
+});
+
 // Twilio inbound-SMS webhook (STOP/START opt-out handling). Lives here rather
 // than as a Next.js API route so the HMAC signature verification and the
 // internal-only member mutation it guards stay in the same trust boundary —

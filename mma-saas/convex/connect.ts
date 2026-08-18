@@ -72,6 +72,31 @@ export const getGymForConnect = internalQuery({
   },
 });
 
+// Resolves a gym from a CONNECTED-account id, for the Connect webhook.
+//
+// The webhook is unauthenticated by nature — Stripe calls it, not an owner — so
+// there is no identity to derive a gym from the way getGymForConnect does. The
+// account id in the signed event payload is the only handle, which is why the
+// signature check in convex/connectWebhookAction.ts is the entire trust boundary
+// for this path.
+//
+// Returns null rather than throwing on no match. Stripe will send account.updated
+// for accounts we no longer have a gym for — a gym row deleted in development, or
+// an orphan from a raced create (see claimStripeConnectAccountId below) — and a
+// throw there would fail the event, burn Stripe's retries on something that can
+// never succeed, and bury the real events behind it.
+export const getGymByStripeConnectAccountId = internalQuery({
+  args: { stripeConnectAccountId: v.string() },
+  handler: async (ctx, { stripeConnectAccountId }) => {
+    return await ctx.db
+      .query("gyms")
+      .withIndex("by_stripe_connect_account", (q) =>
+        q.eq("stripeConnectAccountId", stripeConnectAccountId)
+      )
+      .unique();
+  },
+});
+
 // Records the connected-account id, but only if the gym doesn't already have
 // one, and reports which way it went.
 //
