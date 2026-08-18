@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { loadConnectAndInitialize } from "@stripe/connect-js";
-import type { StripeConnectInstance } from "@stripe/connect-js";
+import type { AppearanceOptions, StripeConnectInstance } from "@stripe/connect-js";
 import {
   ConnectAccountManagement,
   ConnectAccountOnboarding,
@@ -32,6 +32,107 @@ import { api } from "../../convex/_generated/api";
 // is. Once charges are live it collapses to a line in /settings, because it
 // stops being something to discover and becomes something to administer. Do not
 // "simplify" that into one location — each half is wrong in the other's state.
+
+// Stripe's embedded components render in their own iframes and default to a
+// LIGHT theme, which puts dark-grey text on our #222222 card. "Add information
+// to start accepting money" — the single most important sentence on this card —
+// came out close to unreadable. `appearance` is the only way in: we cannot style
+// across the iframe boundary with CSS.
+//
+// EVERY VALUE BELOW IS COPIED FROM SOMETHING THAT ALREADY EXISTS. Nothing here
+// is a new colour. Sources:
+//   #222222  this card's own backgroundColor, and .input in app/globals.css
+//   #1A1A1A  inset surfaces — the timezone input and status pill in this file
+//   #333333  the card border, .input border, secondary button border
+//   #FFFFFF  primary text
+//   #8A8A8A  secondary/muted text — see the contrast note below
+//   #FF4D4D  .legal-content a:hover in app/globals.css
+//   #CCCCCC  secondary button text in this file
+//   #E02020  brand red — the primary button here and the .input focus ring
+//   #F87171 / #4ADE80 / #FBBF24  the danger/success/warning already used on the
+//            dashboard panels
+//   Arial, Helvetica, sans-serif — the body font in app/globals.css (NOT the
+//            Geist variables, which that stylesheet defines but body overrides)
+//   8px      rounded-lg, what every button and input in this card uses
+//
+// Buttons are themed as well as text, deliberately: Stripe's default blue CTA
+// against a red-accented dark card reads as pasted on rather than part of the
+// product, which is the impression this whole card exists to avoid.
+//
+// THREE VALUES ARE DELIBERATELY NOT COPIES, because the originals fail WCAG AA
+// (4.5:1 for normal-size text) against these backgrounds. Measured, not guessed:
+//   colorSecondaryText        #888888 on #222222 = 4.49:1 -> #8A8A8A = 4.61:1
+//   actionPrimaryColorText    #E02020 on #222222 = 3.33:1 -> #FF4D4D = 4.86:1
+//   formPlaceholderTextColor  #555555 on #1A1A1A = 2.33:1 -> #8A8A8A = 5.04:1
+// actionPrimary mattered most: Stripe styles every "Learn more" and "Why do we
+// need this?" link in onboarding with it, so #E02020 was the same illegibility
+// bug this block exists to fix, one element over. The placeholder one is the
+// same defect that still ships in .input::placeholder (#555555 on #222222 =
+// 2.13:1) — NOT fixed there — and Stripe's KYC placeholders carry format hints
+// (SSN, routing number, DOB) an owner has to be able to read.
+//
+// THE TYPE ANNOTATION IS LOAD-BEARING — do not drop it. Every variable here is
+// optional, and TypeScript's excess-property check only applies to inline object
+// literals. Assigned to a named const without the annotation, a mistyped
+// variable name compiles clean and is then silently ignored by Stripe, leaving
+// exactly the unreadable-text bug this block exists to fix. Confirmed both ways:
+// a bogus `colorTotallyMadeUp` drew no error before the annotation and a TS2353
+// after it.
+const CONNECT_APPEARANCE: AppearanceOptions = {
+  variables: {
+    fontFamily: "Arial, Helvetica, sans-serif",
+    fontSizeBase: "14px",
+    borderRadius: "8px",
+
+    colorBackground: "#222222",
+    colorText: "#FFFFFF",
+    colorSecondaryText: "#8A8A8A",
+    colorBorder: "#333333",
+    colorPrimary: "#E02020",
+    colorDanger: "#F87171",
+
+    // Surfaces Stripe insets against the base — matched to the pattern this
+    // card already uses, where nested elements go darker rather than lighter.
+    offsetBackgroundColor: "#1A1A1A",
+    formBackgroundColor: "#1A1A1A",
+    formBorderRadius: "8px",
+    formPlaceholderTextColor: "#8A8A8A",
+    formHighlightColorBorder: "#E02020",
+    formAccentColor: "#E02020",
+
+    buttonPrimaryColorBackground: "#E02020",
+    buttonPrimaryColorBorder: "#E02020",
+    buttonPrimaryColorText: "#FFFFFF",
+    buttonSecondaryColorBackground: "#1A1A1A",
+    buttonSecondaryColorBorder: "#333333",
+    buttonSecondaryColorText: "#CCCCCC",
+
+    // Outlined, NOT filled. colorPrimary is already brand red, so a filled red
+    // danger button is indistinguishable from the primary CTA beside it — and in
+    // ConnectAccountManagement the destructive action (remove a bank account)
+    // must not look like the thing you are meant to click.
+    buttonDangerColorBackground: "#1A1A1A",
+    buttonDangerColorBorder: "#F87171",
+    buttonDangerColorText: "#F87171",
+
+    actionPrimaryColorText: "#FF4D4D",
+    actionSecondaryColorText: "#8A8A8A",
+
+    // Same shape as StatusPill below: dark chip, coloured label, quiet border.
+    badgeNeutralColorBackground: "#1A1A1A",
+    badgeNeutralColorText: "#8A8A8A",
+    badgeNeutralColorBorder: "#333333",
+    badgeSuccessColorBackground: "#1A1A1A",
+    badgeSuccessColorText: "#4ADE80",
+    badgeSuccessColorBorder: "#333333",
+    badgeWarningColorBackground: "#1A1A1A",
+    badgeWarningColorText: "#FBBF24",
+    badgeWarningColorBorder: "#333333",
+    badgeDangerColorBackground: "#1A1A1A",
+    badgeDangerColorText: "#F87171",
+    badgeDangerColorBorder: "#333333",
+  },
+};
 
 // Convex surfaces a thrown ConvexError to the client with the payload on
 // `.data`; a plain Error is redacted to "Server Error" in production, which is
@@ -74,8 +175,20 @@ export default function ConnectBilling() {
   // it whenever the secret expires. That is the shape difference from the old
   // redirect flow, where a single account link was minted and handed over.
   const fetchClientSecret = useCallback(async () => {
-    const { clientSecret } = await createSession({});
-    return clientSecret;
+    try {
+      const { clientSecret } = await createSession({});
+      return clientSecret;
+    } catch (err) {
+      // connect-js calls this EAGERLY and synchronously inside
+      // loadConnectAndInitialize — before Stripe's script even loads — and keeps
+      // the resulting promise to itself (initStripeConnect's
+      // eagerClientSecretPromise). It never hands the rejection back, so without
+      // this catch the likeliest failure in this card reached the owner as an
+      // empty panel and a console warning. Re-thrown so connect-js still learns
+      // the mint failed.
+      setError(errorText(err, "Couldn't start member billing setup. Try again in a moment."));
+      throw err;
+    }
   }, [createSession]);
 
   // Built once, lazily, and only when the owner actually opens the panel — this
@@ -83,7 +196,11 @@ export default function ConnectBilling() {
   // every dashboard render for gyms that will never click it.
   const instance = useMemo(() => {
     if (!open || !publishableKey) return null;
-    return loadConnectAndInitialize({ publishableKey, fetchClientSecret });
+    return loadConnectAndInitialize({
+      publishableKey,
+      fetchClientSecret,
+      appearance: CONNECT_APPEARANCE,
+    });
   }, [open, publishableKey, fetchClientSecret]);
 
   useEffect(() => {
@@ -188,6 +305,16 @@ export default function ConnectBilling() {
         </ConnectComponentsProvider>
       )}
 
+      {/* OUTSIDE the !open guard on purpose. The account session is minted the
+          instant the panel opens, so the likeliest error in this card happens
+          while open === true, and rendering this inside the !open block made
+          exactly that error unrenderable. */}
+      {error && (
+        <p className="text-xs mb-3 leading-relaxed" style={{ color: "#FF6B6B" }}>
+          {error}
+        </p>
+      )}
+
       {!open && (
         <div className="flex items-center gap-3 flex-wrap">
           <button
@@ -216,11 +343,6 @@ export default function ConnectBilling() {
             </button>
           )}
 
-          {error && (
-            <span className="text-xs" style={{ color: "#FF6B6B" }}>
-              {error}
-            </span>
-          )}
         </div>
       )}
     </div>
