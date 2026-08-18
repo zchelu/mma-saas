@@ -115,13 +115,26 @@ export const setConnectAccountStatus = internalMutation({
     gymId: v.id("gyms"),
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
+    // v2's richer per-configuration status, written alongside the booleans.
+    // Strings, not unions — see the schema comment on connectChargesStatus.
+    chargesStatus: v.optional(v.string()),
+    chargesStatusCodes: v.optional(v.array(v.string())),
+    payoutsStatus: v.optional(v.string()),
+    payoutsStatusCodes: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, { gymId, chargesEnabled, payoutsEnabled }) => {
+  handler: async (
+    ctx,
+    { gymId, chargesEnabled, payoutsEnabled, chargesStatus, chargesStatusCodes, payoutsStatus, payoutsStatusCodes }
+  ) => {
     const gym = await ctx.db.get(gymId);
     if (!gym) throw new Error(`No gym found with id ${gymId}`);
     await ctx.db.patch(gymId, {
       connectChargesEnabled: chargesEnabled,
       connectPayoutsEnabled: payoutsEnabled,
+      connectChargesStatus: chargesStatus,
+      connectChargesStatusCodes: chargesStatusCodes,
+      connectPayoutsStatus: payoutsStatus,
+      connectPayoutsStatusCodes: payoutsStatusCodes,
       ...(chargesEnabled && !gym.connectOnboardedAt ? { connectOnboardedAt: Date.now() } : {}),
     });
   },
@@ -195,6 +208,14 @@ export const getConnectStatus = query({
       connected: !!gym.stripeConnectAccountId,
       chargesEnabled: gym.connectChargesEnabled ?? false,
       payoutsEnabled: gym.connectPayoutsEnabled ?? false,
+      // The four-state status behind the booleans. The card uses it to tell
+      // "Stripe is still reviewing" (pending) apart from "they need to do
+      // something" (restricted) — both of which the booleans render as false.
+      // Codes are returned but deliberately not interpreted in stage C; Stripe's
+      // notification_banner does the remediation prompting.
+      chargesStatus: gym.connectChargesStatus ?? null,
+      chargesStatusCodes: gym.connectChargesStatusCodes ?? [],
+      payoutsStatus: gym.connectPayoutsStatus ?? null,
       onboardedAt: gym.connectOnboardedAt ?? null,
       timezone: gym.timezone ?? null,
     };

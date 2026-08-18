@@ -24,12 +24,7 @@ import { getErrorMessage } from "../components/error-toast";
 
 const CARD = { backgroundColor: "#222222", border: "1px solid #333333" };
 
-// `gymId` is still accepted and deliberately unused. The dashboard passes it,
-// and that file belongs to another lane's uncommitted work right now — keeping
-// the prop optional lets this change land without touching theirs. The kiosk
-// links no longer contain a gym id at all; they carry the rotatable token
-// below. Drop the prop when the lanes next meet.
-export default function OwnerLinks({ slug }: { slug: string | null; gymId?: string | null }) {
+export default function OwnerLinks({ slug }: { slug: string | null }) {
   // Rendered client-side because both URLs need the real origin, and because
   // hardcoding a base URL is how a link ends up pointing at the wrong
   // environment. window.location is the one source that can't be stale.

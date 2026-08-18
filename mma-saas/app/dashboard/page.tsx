@@ -12,6 +12,7 @@ import AtRiskPanel from "./at-risk";
 import SettlingGate from "./settling-gate";
 import WinbackPanel from "./winback-panel";
 import OwnerLinks from "./owner-links";
+import ConnectBilling from "./connect-billing";
 
 export default async function DashboardPage({
   searchParams,
@@ -106,7 +107,8 @@ export default async function DashboardPage({
         <StatsGrid />
         <AtRiskPanel />
         <WinbackPanel gymId={subscription.gymId} gymCreatedAt={subscription.createdAt} />
-        <OwnerLinks slug={subscription.slug} gymId={subscription.gymId} />
+        <OwnerLinks slug={subscription.slug} />
+        <ConnectBilling />
       </main>
     </div>
   );

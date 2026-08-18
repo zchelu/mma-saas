@@ -2,91 +2,40 @@
 
 // Stripe Connect member billing — the Stripe half of stage C (spec §5.1).
 //
-// NOTHING HERE CHARGES ANYTHING. This module creates a connected account and a
-// hosted onboarding link, and reads back what Stripe says about the account. No
-// Customer, no Price, no Subscription, no charge. Those are stages D–F.
+// NOTHING HERE CHARGES ANYTHING. This module creates a connected account and
+// mints short-lived Account Session secrets so the browser can mount Stripe's
+// embedded components. No Customer, no Price, no Subscription, no charge.
+// Those are stages D–F.
 //
-// Split from convex/connect.ts because the Stripe SDK needs the Node runtime
-// and Convex allows only actions in a "use node" module — every query and
-// mutation this file calls lives there. Same split, same reason, as
-// convex/http.ts and convex/stripeWebhookAction.ts.
+// Split from convex/connect.ts because the Stripe SDK needs the Node runtime and
+// Convex allows only actions in a "use node" module — every query and mutation
+// this file calls lives there. Same split, same reason, as convex/http.ts and
+// convex/stripeWebhookAction.ts.
+//
+// VARIANT 7, decided 2026-08-13 (spec §1a). Read that before touching the
+// account config below: the shape was probed against the sandbox and every field
+// diffed against what came back, because dashboard type is IMMUTABLE per account
+// and a wrong value means every gym gets recreated and re-onboarded.
 import Stripe from "stripe";
 import { action, ActionCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { ConvexError, v } from "convex/values";
+import { ConvexError } from "convex/values";
 
-// Where Stripe is allowed to send an owner back to.
-//
-// The origin arrives from the browser because Convex has no request URL to
-// derive one from, and hardcoding a single base URL is how a link ends up
-// pointing at the wrong environment (see app/dashboard/owner-links.tsx, which
-// reads window.location.origin for exactly this reason). Caller-supplied means
-// checkable, so it gets checked: an unvalidated origin would let a caller mint
-// a Stripe-hosted onboarding link on our platform account that returns the
-// owner to a domain of their choosing.
-//
-// Both apex and www are listed. kombatdesk.com 308-redirects to www, which a
-// browser follows on the GET that Stripe's return does — but the redirect is
-// the reason to accept both rather than assume which one the owner started on.
-const PRODUCTION_RETURN_ORIGINS = ["https://www.kombatdesk.com", "https://kombatdesk.com"];
-
-// http://localhost:3000 used to sit in the list above, which meant a localhost
-// return origin was accepted by the one PRODUCTION Convex deployment — this
-// module is compiled into `limitless-raven-596`, and a constant cannot tell
-// which environment it is running in.
-//
-// It comes from the Convex environment instead. Dev and prod are SEPARATE Convex
-// deployments with separate variable stores (`polished-peacock-100` vs
-// `limitless-raven-596`), so setting it on dev and never on prod makes the
-// permission simply absent in production rather than conditionally ignored.
-// That is the same separation `docs/stripe-key-gap-closed-2026-08-09.md` is
-// about: Convex has its own env, and reasoning from Vercel's tells you nothing.
-//
-// Unset is the safe state — no extra origin is permitted. To develop locally:
-//   npx convex env set CONNECT_DEV_RETURN_ORIGIN http://localhost:3000
-// Never set it with `--prod`.
-function allowedReturnOrigins(): Set<string> {
-  const devOrigin = process.env.CONNECT_DEV_RETURN_ORIGIN;
-  return new Set(devOrigin ? [...PRODUCTION_RETURN_ORIGINS, devOrigin] : PRODUCTION_RETURN_ORIGINS);
-}
-
-// A connected account that no longer exists, as opposed to Stripe being briefly
-// unreachable. The distinction is the whole point: we clear the gym's
-// charge/payout flags on a definite gone signal, and a transient failure must
-// NOT do that — a Stripe blip would otherwise mark every gym unable to charge.
-//
-// Same narrowing discipline as isCouponSpecificError in
-// app/api/stripe/checkout/route.ts and the invalid_signature/retry split in
-// convex/stripeWebhookAction.ts: only invalid-request errors are considered, and
-// never the connection/rate-limit/API classes, which always mean "ask again".
-//
-// Closure is a real path, not a hypothesis — verified 2026-08-09 that a
-// connected account carrying multiple v2 configurations must be closed via
-// v2/core/accounts/close, and a closed account is exactly what these two calls
-// then hit.
-function isAccountGoneError(err: unknown): boolean {
-  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
-  if (err.code === "resource_missing" || err.code === "account_invalid") return true;
-  const message = err.message?.toLowerCase() ?? "";
-  return (
-    message.includes("no such account") ||
-    message.includes("account is closed") ||
-    message.includes("does not exist")
-  );
-}
+// Pinned explicitly, never inherited from the SDK default. Variant 7 is
+// generally available; the express + Stripe-losses combination that would have
+// required 2026-07-29.preview was rejected because Stripe declined in writing to
+// commit that preview-era accounts will behave like post-GA ones (spec §1a).
+const STRIPE_API_VERSION = "2026-06-24.dahlia";
 
 // AGENTS.md §7: read into a variable, branch, construct after. `new
-// Stripe(undefined!)` throws SYNCHRONOUSLY, so constructing above the guard
-// puts the throw above every catch in the caller — the exact shape of the
-// webhook outage documented in docs/stripe-key-gap-closed-2026-08-09.md.
+// Stripe(undefined!)` throws SYNCHRONOUSLY, so constructing above the guard puts
+// the throw above every catch in the caller — the exact shape of the webhook
+// outage in docs/stripe-key-gap-closed-2026-08-09.md.
 //
 // These are CONVEX environment variables, set in the Convex dashboard. Vercel
 // having STRIPE_SECRET_KEY says nothing about whether Convex does; that is what
 // made the webhook instance invisible across three handoffs.
-//
-// Returns null rather than throwing so each caller decides what a missing key
-// means for its own surface.
 function readStripeClient(): Stripe | null {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
@@ -100,39 +49,56 @@ function readStripeClient(): Stripe | null {
 }
 
 // Verifies the caller and resolves their gym. Identity is read here, in the
-// action, and the verified subject is passed down explicitly — see
-// convex/connect.ts:getGymForConnect for why that is preferred over relying on
-// auth propagation through ctx.runQuery.
+// action, and the verified subject passed down explicitly — see
+// convex/connect.ts:getGymForConnect for why that beats relying on auth
+// propagating through ctx.runQuery.
 async function requireOwnerGym(ctx: ActionCtx): Promise<Doc<"gyms">> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new ConvexError("You need to be signed in to set up member billing.");
   return await ctx.runQuery(internal.connect.getGymForConnect, { clerkUserId: identity.subject });
 }
 
+// A connected account that no longer exists, as opposed to Stripe being briefly
+// unreachable. The distinction is the whole point: we clear the gym's
+// charge/payout flags on a definite gone signal, and a transient failure must
+// NOT do that — a Stripe blip would otherwise mark every gym unable to charge.
+//
+// Same narrowing discipline as isCouponSpecificError in
+// app/api/stripe/checkout/route.ts and the invalid_signature/retry split in
+// convex/stripeWebhookAction.ts: only invalid-request errors count, never the
+// connection/rate-limit/API classes, which always mean "ask again".
+//
+// Closure is a real path. Verified 2026-08-09 that an account carrying multiple
+// v2 configurations must be closed via v2/core/accounts/close, and a closed
+// account is exactly what the calls below then hit.
+function isAccountGoneError(err: unknown): boolean {
+  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
+  if (err.code === "resource_missing" || err.code === "account_invalid") return true;
+  const message = err.message?.toLowerCase() ?? "";
+  return (
+    message.includes("no such account") ||
+    message.includes("account is closed") ||
+    message.includes("does not exist")
+  );
+}
+
 // Records that the gym can no longer charge, and returns the error to throw.
 //
-// Shared by BOTH Stripe calls that take an existing account id. Handling only
-// the status refresh would have left the other half open: because we keep
-// stripeConnectAccountId (below), an owner whose account is closed still sees
-// "Finish setup", which calls accountLinks.create against that dead id and
-// fails identically.
+// Clears connectChargesEnabled/connectPayoutsEnabled. Stage D's gate is "nothing
+// may create a charge until chargesEnabled is true", so a stale `true` on a
+// closed account is a live hazard. Fail closed.
 //
-// Clears connectChargesEnabled/connectPayoutsEnabled. Stage D's gate is
-// "nothing may create a charge until chargesEnabled is true", so a stale `true`
-// on a closed account is a live hazard, not a cosmetic one. Fail closed.
-//
-// Deliberately does NOT clear stripeConnectAccountId. It is the only link
+// Deliberately does NOT clear stripeConnectAccountId: it is the only link
 // between this gym and its historical duesInvoices rows, and clearing it would
 // make the next click silently create a SECOND connected account. Same instinct
 // as archiving members rather than hard-deleting them.
 //
-// KNOWN GAP, deliberately not closed here: keeping the id means there is no
-// self-serve way back — the card offers "Finish setup" and lands here again.
-// A real reconnect needs a schema field marking the old account dead while
-// preserving it for the audit trail, and stage C is being rebuilt once spec §1a
-// resolves. So the copy points at a human instead of at a button that cannot work.
+// KNOWN GAP, deliberately open: keeping the id means there is no self-serve way
+// back. A real reconnect needs a schema field marking the old account dead while
+// preserving it for the audit trail. The copy points at a human rather than at a
+// button that cannot work.
 //
-// Returns rather than throws so the call sites read `throw await …` and TypeScript
+// Returns rather than throws so call sites read `throw await …` and TypeScript
 // can see the path terminates.
 async function goneAccountError(
   ctx: ActionCtx,
@@ -156,15 +122,122 @@ async function goneAccountError(
   );
 }
 
-// Creates the gym's Express connected account if it has none, then returns a
-// fresh Stripe-hosted onboarding link to redirect to.
+// Creates the gym's connected account if it has none. Returns the id either way.
 //
-// Safe to call repeatedly, and the UI does: account links are single-use and
-// short-lived, so "resume onboarding" and "start onboarding" are the same call.
-// An existing account is reused, never replaced.
-export const startConnectOnboarding = action({
-  args: { origin: v.string() },
-  handler: async (ctx, { origin }): Promise<{ url: string }> => {
+// THE CONFIG IS IMMUTABLE AND WAS PROBED BEFORE IT WAS WRITTEN. Spec §1a:
+// dashboard type cannot be changed after creation, so a wrong value means every
+// gym is recreated and re-onboarded, KYC included.
+async function ensureConnectedAccount(
+  ctx: ActionCtx,
+  stripe: Stripe,
+  gym: Doc<"gyms">
+): Promise<string> {
+  if (gym.stripeConnectAccountId) return gym.stripeConnectAccountId;
+
+  // Accounts v2. The SDK emits a runtime warning on every v1 accounts.create
+  // recommending v2, and v2 is where Stripe directs new platforms.
+  const created = await stripe.v2.core.accounts.create(
+    {
+      contact_email: gym.email,
+      display_name: gym.name,
+      // VARIANT 7. "none" means no Stripe-hosted dashboard, which is precisely
+      // why this stage builds embedded components instead. Immutable.
+      dashboard: "none",
+      identity: {
+        // UPPERCASE, deliberately. "us" is accepted and silently stored as "US"
+        // (ISO 3166-1 canonical casing). Country is IMMUTABLE, so send the
+        // canonical form and keep any comparison case-insensitive. This was
+        // previously inherited by omission, which is exactly what §1a exists to
+        // stop.
+        country: "US",
+        entity_type: "company",
+      },
+      configuration: {
+        merchant: {
+          // 7997 — membership clubs, sports and recreation. Set by us because
+          // otherwise Stripe asks the gym owner to choose their own MCC
+          // mid-onboarding and they will choose wrong. It is also exactly the
+          // kind of friction that disqualified the full-dashboard variant.
+          //
+          // configuration.merchant.mcc is the v2 location; business_profile.mcc
+          // is v1 and does not exist here.
+          mcc: "7997",
+          // Direct charges need card_payments. Do NOT add stripe_balance here:
+          // it is recipient-scoped and the endpoint rejects it under merchant
+          // ("Unknown field"), yet payouts still comes back on the response at
+          // merchant.capabilities.stripe_balance.payouts. Measured, not assumed.
+          capabilities: { card_payments: { requested: true } },
+        },
+      },
+      defaults: {
+        currency: "usd",
+        responsibilities: {
+          // READS BACKWARDS — "stripe" here means the GYM pays Stripe's
+          // processing fees directly, with KombatDesk never in the middle. v1
+          // spelled the same decision `fees.payer: "account"`. The v2 field is
+          // named for who COLLECTS, not who pays, so a mechanical port of the v1
+          // value would land on "application" and route every gym's processing
+          // through our own Stripe balance. Confirmed by reading one account
+          // through both API versions.
+          fees_collector: "stripe",
+          // Stripe bears negative balances, not KombatDesk. This is the whole
+          // reason variant 7 was chosen, and the reason the three embedded
+          // components are mandatory. Do not change without reading §1a and §8.2.
+          losses_collector: "stripe",
+          // requirements_collector is NOT settable — it is derived, and passing
+          // it returns "Unknown field". It comes back "stripe", meaning Stripe
+          // still collects and chases KYC even with dashboard "none".
+        },
+      },
+      include: ["configuration.merchant", "identity", "requirements"],
+    },
+    { apiVersion: STRIPE_API_VERSION }
+  );
+
+  const claim = await ctx.runMutation(internal.connect.claimStripeConnectAccountId, {
+    gymId: gym._id,
+    stripeConnectAccountId: created.id,
+  });
+
+  if (!claim.stored) {
+    // Two starts raced and the other stored first. Ours is now an empty orphan
+    // at Stripe. Continue with the id that actually stuck — overwriting would
+    // strand the gym's real account — and log both so the orphan can be removed.
+    console.error(
+      `Connect onboarding: raced account creation for gym ${gym._id}. ` +
+        `Orphaned connected account ${created.id} (delete it in the Stripe dashboard); ` +
+        `continuing with the stored account ${claim.stripeConnectAccountId}.`
+    );
+  }
+  return claim.stripeConnectAccountId;
+}
+
+// Mints a short-lived Account Session secret for the embedded components.
+//
+// REPLACES accountLinks.create. There is no redirect any more, so there is no
+// return_url, no refresh_url, no ?connect=return hop, and no origin allowlist —
+// with no return target there is nothing to validate, so that control deleted
+// itself along with CONNECT_DEV_RETURN_ORIGIN.
+//
+// CALLED REPEATEDLY, NOT ONCE. client_secret expires, and connect-js takes a
+// `fetchClientSecret` callback that it re-invokes whenever it needs a fresh one.
+// So this is a session factory rather than a one-shot handoff, and it has to
+// stay cheap and idempotent.
+//
+// Account Sessions are v1-only in stripe@22.3.0. Passing a v2 account id to a v1
+// endpoint is documented as supported — "the response is structured as a v1
+// Account, but any updates still apply to the corresponding properties of the v2
+// object" — so accounts are created on v2 and sessions minted on v1.
+//
+// All three components are enabled because Stripe REQUIRES them wherever it
+// bears losses, which is what variant 7 chose. account_management and
+// notification_banner are not optional extras: with dashboard "none" the gym has
+// no Stripe-hosted surface at all, so these are the only place an owner can see
+// or fix anything, and notification_banner is what actually prompts remediation
+// — which is why the status codes we store are captured and not branched on.
+export const createConnectSession = action({
+  args: {},
+  handler: async (ctx): Promise<{ clientSecret: string }> => {
     const stripe = readStripeClient();
     if (!stripe) {
       throw new ConvexError(
@@ -172,115 +245,49 @@ export const startConnectOnboarding = action({
       );
     }
 
-    if (!allowedReturnOrigins().has(origin)) {
-      console.error(`Connect onboarding: refused return origin "${origin}"`);
-      throw new ConvexError("Member billing setup can't run from this address.");
-    }
-
     const gym = await requireOwnerGym(ctx);
+    const stripeConnectAccountId = await ensureConnectedAccount(ctx, stripe, gym);
 
-    let stripeConnectAccountId = gym.stripeConnectAccountId;
-
-    if (!stripeConnectAccountId) {
-      // `type: "express"` is DEPRECATED in stripe v22 — the typings say to use
-      // `controller`, which is also the only place the spec's liability
-      // decisions can actually be written down. Spelling them out beats
-      // inheriting whatever the deprecated shorthand defaults to, because two
-      // of these four fields decide who eats a chargeback.
-      const created = await stripe.accounts.create({
-        email: gym.email,
-        controller: {
-          // Express: Stripe hosts the connected-account dashboard. Spec §1 —
-          // this is what puts KYC, disputes, payouts and 1099-K filing on
-          // Stripe instead of on a solo founder.
-          stripe_dashboard: { type: "express" },
-          // Stripe collects and chases KYC requirements, not us. The other
-          // half of the same decision.
-          requirement_collection: "stripe",
-          // The GYM is billed Stripe's processing fees directly. That is what
-          // "pass through at cost" means in §1: we add no application fee and
-          // never sit in the middle of the fee. See the note in the commit
-          // message — this maps a business decision onto a Stripe axis and is
-          // worth confirming against §8.5 before anyone is quoted a rate.
-          fees: { payer: "account" },
-          // Chargebacks and refunds land on the GYM's balance. Spec §1 reason
-          // 2, verbatim: destination charges "would make us liable for a
-          // closing gym's negative balance." "application" here would hand
-          // KombatDesk that liability — do not change this without reading §8.2.
-          losses: { payments: "stripe" },
-        },
-        // Direct charges need card_payments; transfers lets the account hold
-        // and be paid out its own funds.
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-      });
-
-      const claim = await ctx.runMutation(internal.connect.claimStripeConnectAccountId, {
-        gymId: gym._id,
-        stripeConnectAccountId: created.id,
-      });
-
-      if (!claim.stored) {
-        // Two onboarding starts raced and the other one stored first. Ours is
-        // now an empty orphan at Stripe. Continue with the id that actually
-        // stuck — overwriting it would strand the gym's real account — and log
-        // both so the orphan can be deleted by hand.
-        console.error(
-          `Connect onboarding: raced account creation for gym ${gym._id}. ` +
-            `Orphaned connected account ${created.id} (delete it in the Stripe dashboard); ` +
-            `continuing with the stored account ${claim.stripeConnectAccountId}.`
-        );
-      }
-      stripeConnectAccountId = claim.stripeConnectAccountId;
-    }
-
-    // refresh_url is where Stripe sends the owner if the link expired before
-    // they used it, which is a normal outcome — these links are short-lived.
-    // The dashboard card treats it as "start again" rather than an error.
-    //
-    // Wrapped because stripeConnectAccountId may be one we stored earlier and
-    // the gym has since closed at Stripe. That is reachable precisely BECAUSE
-    // goneAccountError keeps the id: the card keeps offering "Finish setup".
-    // An unhandled throw here is redacted to "Server Error" in production and
-    // the owner hits a dead end — the failure convex/gyms.ts:assertReadAccess
-    // uses ConvexError to avoid. A freshly created account cannot be gone, so
-    // in practice this only fires on the reuse path.
-    let accountLink: Stripe.AccountLink;
     try {
-      accountLink = await stripe.accountLinks.create({
+      const session = await stripe.accountSessions.create({
         account: stripeConnectAccountId,
-        refresh_url: `${origin}/dashboard?connect=refresh`,
-        return_url: `${origin}/dashboard?connect=return`,
-        type: "account_onboarding",
+        components: {
+          account_onboarding: { enabled: true },
+          account_management: { enabled: true },
+          notification_banner: { enabled: true },
+        },
       });
+      return { clientSecret: session.client_secret };
     } catch (err) {
       if (isAccountGoneError(err)) {
         throw await goneAccountError(ctx, gym._id, stripeConnectAccountId, err);
       }
-      // Anything else — Stripe unreachable, rate limited, transient API fault —
-      // rethrows untouched and changes no stored state. Clearing the flags on a
-      // blip would mark a healthy gym unable to charge.
-      throw err;
+      // Transient — Stripe unreachable, rate limited, API fault. Rethrow without
+      // touching stored state; clearing flags on a blip would mark a healthy gym
+      // unable to charge.
+      console.error(`Connect: could not mint an account session for gym ${gym._id}:`, err);
+      throw new ConvexError(
+        "Couldn't open member billing setup just now. Nothing has changed on your account — try again shortly."
+      );
     }
-
-    return { url: accountLink.url };
   },
 });
 
 // Asks Stripe what the connected account can actually do, and records it.
 //
-// Called when the owner comes back from onboarding. Returning from the hosted
-// flow does NOT mean onboarding succeeded — Stripe returns the owner to
-// return_url whenever they leave, including partway through with requirements
-// outstanding. Spec §5.1: re-check on return, show real status, don't assume
-// success. This is that re-check.
+// THERE IS NO ARRIVAL EVENT ANY MORE, and that is the important consequence of
+// dropping the redirect. The old flow returned to a return_url, and that
+// redirect was the signal to re-check. Embedded components never navigate: the
+// component's exit callback fires when the OWNER CLOSES THE PANEL, which is not
+// when Stripe finishes reviewing them. An owner can complete everything, close
+// the panel while verification is still running, and be enabled minutes later
+// with our UI none the wiser.
 //
-// Stage D adds the account.updated webhook, which keeps these fields current
-// when Stripe enables an account later without the owner touching our UI. Until
-// then this is the only writer, which is why the card calls it on return rather
-// than trusting the redirect.
+// So this is a best-effort poll, and STAGE D'S account.updated WEBHOOK IS
+// LOAD-BEARING RATHER THAN A CONVENIENCE. It is the only thing that will ever
+// observe the transition to enabled for an owner who has closed the panel. Until
+// it ships, a gym can be live at Stripe and still read "Setup incomplete" here
+// until somebody presses refresh.
 export const refreshConnectStatus = action({
   args: {},
   handler: async (
@@ -299,32 +306,45 @@ export const refreshConnectStatus = action({
       );
     }
 
-    // A gym can close its connected account at Stripe at any time, and this
-    // read is where we find out. Unhandled, the raw Stripe error is redacted to
-    // a generic "Server Error" in production and the owner is left staring at a
-    // card that cannot explain itself.
-    let stripeConnectAccount: Stripe.Account;
+    let stripeConnectAccount;
     try {
-      stripeConnectAccount = await stripe.accounts.retrieve(gym.stripeConnectAccountId);
+      stripeConnectAccount = await stripe.v2.core.accounts.retrieve(
+        gym.stripeConnectAccountId,
+        { include: ["configuration.merchant", "requirements"] },
+        { apiVersion: STRIPE_API_VERSION }
+      );
     } catch (err) {
       if (isAccountGoneError(err)) {
         throw await goneAccountError(ctx, gym._id, gym.stripeConnectAccountId, err);
       }
-      // Transient. Say so, and leave every stored flag exactly as it was — a
-      // Stripe outage must not be recorded as "this gym cannot charge".
       console.error(`Connect: status refresh failed for gym ${gym._id}; leaving stored flags unchanged:`, err);
       throw new ConvexError(
         "Couldn't check your member billing status just now. Nothing has changed on your account — try again shortly."
       );
     }
 
-    const chargesEnabled = stripeConnectAccount.charges_enabled === true;
-    const payoutsEnabled = stripeConnectAccount.payouts_enabled === true;
+    // v2 reports per-capability status rather than v1's booleans. A brand-new
+    // unonboarded account reads "restricted" with a requirements_past_due code —
+    // NOT "pending" — which is why both the status and its codes are stored, and
+    // why the booleans alone were lossy.
+    const merchant = stripeConnectAccount.configuration?.merchant;
+    const cardPayments = merchant?.capabilities?.card_payments;
+    const payouts = merchant?.capabilities?.stripe_balance?.payouts;
+
+    const codesOf = (details: Array<{ code?: string }> | undefined): string[] =>
+      (details ?? []).map((d) => d.code).filter((c): c is string => typeof c === "string");
+
+    const chargesEnabled = cardPayments?.status === "active";
+    const payoutsEnabled = payouts?.status === "active";
 
     await ctx.runMutation(internal.connect.setConnectAccountStatus, {
       gymId: gym._id,
       chargesEnabled,
       payoutsEnabled,
+      chargesStatus: cardPayments?.status,
+      chargesStatusCodes: codesOf(cardPayments?.status_details),
+      payoutsStatus: payouts?.status,
+      payoutsStatusCodes: codesOf(payouts?.status_details),
     });
 
     return { connected: true, chargesEnabled, payoutsEnabled };
