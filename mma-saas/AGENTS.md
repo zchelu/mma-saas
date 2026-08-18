@@ -117,6 +117,35 @@ App code frequently reads Convex fields and queries that must exist first. Ship
 Convex, confirm, then push. Getting this backwards on 2026-08-02 would have
 routed every paying gym into the setup wizard, because `!undefined === true`.
 
+### Checking what is actually deployed, instead of guessing
+
+```
+npx convex function-spec --prod
+```
+
+Read-only, needs no dashboard access, and answers "did the Convex half of that
+commit ship" in seconds. On 2026-08-09 that question came up three times and was
+answered by guessing twice.
+
+Two things about it, and both bite:
+
+- **Identifiers are `module.js:fn`, not `module:fn`.** Grepping for `documents:`
+  returns nothing while `documents.js:listTemplates` sits right there. That
+  produced a false negative on the first attempt and nearly became a false
+  "production is broken" alarm — the only reason it didn't is that the results
+  were internally inconsistent (`confirmDob` present, its own module apparently
+  absent). If a spec check disagrees with itself, suspect the pattern.
+- **It reads export signatures only.** It proves a MODULE is deployed; it cannot
+  tell you which VERSION is running. A commit that changes behaviour inside a
+  function without touching any export is completely invisible to it. Only the
+  dashboard's deployment history, timestamped against the commit, settles that —
+  the same limit already recorded for the SMS opt-out work.
+
+**Convex ships schema and functions atomically.** A schema field cannot be
+missing while a function pushed alongside it is present, so confirming the
+function is enough to confirm the field. That is what made the `55cf398` check
+conclusive rather than suggestive.
+
 ## 6. Money and consent
 
 - **Never complete a Stripe checkout to test.** Creating a Checkout Session is
