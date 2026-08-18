@@ -563,6 +563,33 @@ export default defineSchema({
     // human be charged. The second one shipped wrong once already, inside a
     // statutory disclosure.
     timezone: v.optional(v.string()),
+    // v2's per-configuration status, stored ALONGSIDE connectChargesEnabled /
+    // connectPayoutsEnabled rather than replacing them. Do not widen those
+    // booleans into these.
+    //
+    // Measured on a real unonboarded account 2026-08-13: card_payments comes
+    // back `status: "restricted"` with
+    // `status_details: [{ code: "requirements_past_due", ... }]` — NOT
+    // "pending". Four states exist (active | pending | restricted |
+    // unsupported) and the booleans flatten pending and restricted both to
+    // false, which is exactly the distinction an owner reading "Setup
+    // incomplete" needs.
+    //
+    // BOTH ARE v.string(), never a v.union, and that is deliberate. Stripe's
+    // status and code vocabularies grow; a union would fail schema validation
+    // ON WRITE the first time they add a value, which is strictly worse than
+    // not having the data. This session hit the typings-are-wider-than-the-API
+    // trap three times (requirements_collector, application_express,
+    // stripe_balance) — the same lesson pointed at our own schema.
+    //
+    // Codes are captured, NOT branched on. Stripe's notification_banner
+    // component does the remediation prompting; these exist to decide what the
+    // dashboard card says and, later, to find gyms stuck mid-onboarding without
+    // opening each one. Capture now, interpret when there is a reason.
+    connectChargesStatus: v.optional(v.string()),
+    connectChargesStatusCodes: v.optional(v.array(v.string())),
+    connectPayoutsStatus: v.optional(v.string()),
+    connectPayoutsStatusCodes: v.optional(v.array(v.string())),
     // Age below which a signer needs a parent/guardian signature on any
     // document whose template sets requiresGuardianForMinors. Per gym because
     // it isn't a fact about the world — it's whatever the gym's own waiver
