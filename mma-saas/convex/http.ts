@@ -35,8 +35,9 @@ http.route({
   }),
 });
 
-// Stripe CONNECT webhook — connected-account events, a different stream from
-// /stripe/webhook above and deliberately not folded into it (spec §1).
+// Stripe CONNECT webhook — Accounts v2 event notifications for the platform's
+// connected accounts, a different stream from /stripe/webhook above and
+// deliberately not folded into it (spec §1).
 //
 // Different signing secret (STRIPE_CONNECT_WEBHOOK_SECRET), different dedupe
 // table (stripeConnectWebhookEvents), different failure consequences. The
@@ -44,8 +45,14 @@ http.route({
 // thing that ever learns a connected account went live, because embedded
 // components never redirect and so produce no arrival event.
 //
-// Register this URL in the Stripe dashboard under CONNECT events, not account
-// events: <deployment>.convex.site/stripe/connect-webhook
+// REGISTER THIS URL AS AN EVENT DESTINATION AT "YOUR ACCOUNT" SCOPE — NOT
+// "Connected accounts". Accounts v2 events for accounts that belong directly to
+// the platform are delivered to the platform's own destinations; the v1 routing
+// does not apply, and a Connect-scoped endpoint receives NOTHING AT ALL. Read
+// verbatim from the Stripe dashboard, 2026-08-18. See the header of
+// convex/connectWebhookAction.ts for the rest of the v1/v2 differences.
+//
+// URL: <deployment>.convex.site/stripe/connect-webhook
 http.route({
   path: "/stripe/connect-webhook",
   method: "POST",

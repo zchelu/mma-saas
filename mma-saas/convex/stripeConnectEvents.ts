@@ -26,8 +26,9 @@ const CLEANUP_BATCH = 20;
 // concurrent retries cannot both read "unseen".
 //
 // Lives here rather than in convex/connectWebhookAction.ts because that file is
-// "use node" (the Stripe SDK's constructEvent needs it) and Convex permits only
-// actions in Node-runtime modules — no mutations, so no ctx.db.
+// "use node" (the Stripe SDK's parseEventNotification needs the Node crypto
+// provider) and Convex permits only actions in Node-runtime modules — no
+// mutations, so no ctx.db.
 export const claimConnectEventId = internalMutation({
   args: { eventId: v.string() },
   handler: async (ctx, { eventId }): Promise<boolean> => {
