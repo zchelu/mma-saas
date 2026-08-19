@@ -410,6 +410,9 @@ export const getSubscription = query({
         slug: null,
         gymId: null,
         createdAt: null,
+        gymName: null,
+        city: null,
+        state: null,
       };
     }
     const gym = await ctx.db
@@ -451,6 +454,18 @@ export const getSubscription = query({
       // file for why.
       gymId: gym?._id ?? null,
       createdAt: gym?.createdAt ?? null,
+      // Exposed so app/onboarding/onboarding-wizard.tsx can PREFILL. These are
+      // written by onboarding.completeOnboarding and were then unreadable, so
+      // the wizard's useState("") defaults meant an owner who reached Stripe
+      // Checkout, hesitated, and came back retyped everything into blank
+      // fields — which reads as "nothing saved" at the exact moment they have
+      // already flinched once. The data was never lost; nothing read it back.
+      //
+      // Not sensitive: name/city/state are the gym's own public details, and
+      // this query is already identity-scoped to the caller's own gym.
+      gymName: gym?.name ?? null,
+      city: gym?.city ?? null,
+      state: gym?.state ?? null,
     };
   },
 });

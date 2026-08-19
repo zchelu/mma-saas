@@ -70,9 +70,20 @@ export default function OnboardingWizard({
   initialPlan,
   priceIdByPlan,
   repairMode = false,
+  initialGymName = "",
+  initialCity = "",
+  initialState = "",
 }: {
   initialPlan: string;
   priceIdByPlan: Record<string, string | undefined>;
+  // Seeded from the gym row (app/onboarding/page.tsx). Anyone re-entering the
+  // wizard has already been through it at least once — completeOnboarding runs
+  // BEFORE Stripe Checkout, so their name/city/state are saved even though the
+  // redirect guard sends them back here. Defaulted to "" so a brand-new owner
+  // is unaffected.
+  initialGymName?: string;
+  initialCity?: string;
+  initialState?: string;
   // True only for a gym that already has an active/trialing plan but no slug —
   // the guest-checkout dead-gym state (see app/onboarding/page.tsx). These
   // owners have already paid; the wizard exists for them purely to capture the
@@ -93,9 +104,9 @@ export default function OnboardingWizard({
   const { user } = useUser();
 
   const [step, setStep] = useState(0);
-  const [gymName, setGymName] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
+  const [gymName, setGymName] = useState(initialGymName);
+  const [city, setCity] = useState(initialCity);
+  const [state, setState] = useState(initialState);
 
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);

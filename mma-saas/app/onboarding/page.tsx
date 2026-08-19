@@ -68,10 +68,18 @@ export default async function OnboardingPage({
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: "#0D0D0D" }}>
+      {/* initialGymName/City/State: whatever completeOnboarding already saved.
+          Passed as props rather than fetched inside the wizard so the values
+          arrive with the FIRST render — a client-side query would paint empty
+          fields first, which is the exact "nothing saved" impression this
+          exists to remove. */}
       <OnboardingWizard
         initialPlan={initialPlan}
         priceIdByPlan={priceIdByPlan}
         repairMode={needsSetupRepair}
+        initialGymName={subscription.gymName ?? ""}
+        initialCity={subscription.city ?? ""}
+        initialState={subscription.state ?? ""}
       />
     </div>
   );
