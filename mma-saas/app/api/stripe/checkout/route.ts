@@ -132,18 +132,27 @@ export async function POST(request: NextRequest) {
       ...(applyDiscount && foundingOffer
         ? { discounts: [{ coupon: foundingOffer.couponId }] }
         : {}),
+      // BOTH paths now carry {CHECKOUT_SESSION_ID}, and the session id is the
+      // whole point: it is the only thing that lets the destination page
+      // re-verify the purchase against Stripe itself instead of waiting on a
+      // webhook that may never arrive.
+      //
       // Signed-in buyers (the auth-first onboarding flow — the gym already
       // exists via completeOnboarding/getOrCreateGym, linked by clerkUserId)
-      // land straight on /dashboard; SettlingGate there already knows how to
-      // wait out the async webhook rather than bounce prematurely (see the
-      // awaitingCheckout handling in app/dashboard/settling-gate.tsx). Guest
-      // checkouts (no signed-in user — the old pay-first fallback, kept
+      // land on /dashboard, which claims the session synchronously via
+      // claimGymBySessionId before it decides anything (app/dashboard/page.tsx).
+      // It used to land there with `checkout=success` alone and nothing but
+      // SettlingGate waiting out the async webhook — so when a delivery failed
+      // signature verification on 2026-08-19, a gym owner who HAD PAID was
+      // bounced to /pricing after 8 seconds and re-entered the wizard, forever,
+      // with no error anywhere. Never remove the session id from this URL.
+      //
+      // Guest checkouts (no signed-in user — the old pay-first fallback, kept
       // alive per claimGymBySessionId/claimGymByRecoveryToken) still land on
-      // /welcome, which re-verifies the session with Stripe directly and
-      // activates the plan synchronously — never send a guest straight to
-      // /dashboard, since there's no account yet to link it to.
+      // /welcome, which does the same re-verification — never send a guest
+      // straight to /dashboard, since there's no account yet to link it to.
       success_url: user
-        ? `${origin}/dashboard?checkout=success`
+        ? `${origin}/dashboard?checkout=success&session_id={CHECKOUT_SESSION_ID}`
         : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
       // Mirrors subscription_data.metadata.clerkUserId below for Stripe

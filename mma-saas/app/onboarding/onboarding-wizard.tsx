@@ -5,6 +5,7 @@ import { useUser } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
+import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
 
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
 
@@ -112,6 +113,12 @@ export default function OnboardingWizard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Declared once each, because `disabled` and the disabled STYLE now read the
+  // same boolean. Inlining the expression twice per button is how a control
+  // ends up looking enabled while refusing to click, or the reverse.
+  const step0Blocked = !gymName.trim() || (skipConsent && submitting);
+  const step1Blocked = submitting || !consent;
+
   async function handleFinish() {
     if (submitting) return;
     setSubmitting(true);
@@ -207,10 +214,10 @@ export default function OnboardingWizard({
 
           <button
             type="button"
-            disabled={!gymName.trim() || (skipConsent && submitting)}
+            disabled={step0Blocked}
             onClick={() => (skipConsent ? handleFinish() : setStep(1))}
-            className="mt-4 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+            className="mt-4 rounded-lg font-semibold px-6 py-3 text-sm disabled:cursor-not-allowed"
+            style={step0Blocked ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
             {skipConsent ? (submitting ? "Setting up…" : "Continue to payment") : "Continue"}
           </button>
@@ -272,17 +279,22 @@ export default function OnboardingWizard({
               type="button"
               onClick={() => setStep(0)}
               disabled={submitting}
-              className="rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40"
-              style={{ backgroundColor: "#1A1A1A", color: "#AAAAAA", border: "1px solid #333333" }}
+              className="rounded-lg font-semibold px-6 py-3 text-sm disabled:cursor-not-allowed"
+              style={{
+                backgroundColor: "#1A1A1A",
+                color: "#AAAAAA",
+                border: "1px solid #333333",
+                ...(submitting ? DISABLED_BUTTON_STYLE : {}),
+              }}
             >
               Back
             </button>
             <button
               type="button"
-              disabled={submitting || !consent}
+              disabled={step1Blocked}
               onClick={handleFinish}
-              className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+              className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:cursor-not-allowed"
+              style={step1Blocked ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
               {submitting ? "Setting up…" : repairMode ? "Finish setup" : "Continue to payment"}
             </button>

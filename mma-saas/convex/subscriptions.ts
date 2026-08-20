@@ -97,11 +97,35 @@ export const upsertUnclaimedSubscription = internalMutation({
   },
 });
 
-// Public entry point for linking a checkout's paid subscription to the
-// Clerk account — called from app/welcome/page.tsx for BOTH the guest path
-// (account created right after payment) and an already-signed-in buyer
-// (success_url now routes everyone through here, not straight to
-// /dashboard). Never trusts a client-supplied Stripe customer id —
+// A Checkout Session that the buyer actually completed. `status` is the field
+// that means "they finished checkout"; payment_status describes MONEY, and on a
+// first subscription checkout there isn't any — every plan carries a TRIAL_DAYS
+// trial (lib/plans.ts), so nothing is due that day and Stripe reports
+// "no_payment_required". It is never "paid".
+//
+// The gate below used to read `payment_status !== "paid"`, which therefore
+// rejected every session it was ever handed. /welcome answered every guest who
+// had just successfully checked out with "I couldn't confirm your payment", and
+// this whole function was unusable as the webhook-independent fallback the
+// auth-first flow needed.
+//
+// NOT YET CONFIRMED AGAINST A LIVE SESSION OBJECT as of 2026-08-20 — the
+// reasoning is from Stripe's trial semantics plus TRIAL_DAYS = 30, not from a
+// read of a real `payment_status`. Confirm with
+// `stripe checkout sessions list --limit 1` against the sandbox and record the
+// value here. Accepting both values is safe either way; the point of checking
+// is to know whether the guest /welcome path was ALSO broken this whole time.
+//
+// "unpaid" stays rejected: it is reachable alongside status "complete" when a
+// delayed-payment method hasn't settled, and that is genuinely not a
+// subscription to provision against.
+const PROVISIONABLE_PAYMENT_STATUSES = new Set(["paid", "no_payment_required"]);
+
+// Public entry point for linking a completed checkout's subscription to the
+// Clerk account — called from app/welcome/page.tsx for the guest path
+// (account created right after payment) and from app/dashboard/page.tsx for
+// the auth-first path, where it is the ONLY thing that provisions a paid gym
+// without the webhook. Never trusts a client-supplied Stripe customer id —
 // re-verifies the checkout session against Stripe itself server-side, so
 // the caller can't hijack someone else's subscription by guessing/reusing
 // an id. Also expands the subscription on that same call and activates
@@ -135,7 +159,11 @@ export const claimGymBySessionId = action({
     if (!res.ok) throw new Error("Could not verify checkout session");
     const session = await res.json();
 
-    if (session.mode !== "subscription" || session.payment_status !== "paid") {
+    if (
+      session.mode !== "subscription" ||
+      session.status !== "complete" ||
+      !PROVISIONABLE_PAYMENT_STATUSES.has(session.payment_status)
+    ) {
       throw new Error("Checkout session is not a completed subscription payment");
     }
     const stripeCustomerId =

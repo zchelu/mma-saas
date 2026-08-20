@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { SignUp } from "@clerk/nextjs";
+import { DISABLED_BUTTON_STYLE } from "../../components/button-styles";
 
 export function SignUpGate({ redirectUrl }: { redirectUrl?: string }) {
   const [agreed, setAgreed] = useState(false);
@@ -60,8 +61,8 @@ export function SignUpGate({ redirectUrl }: { redirectUrl?: string }) {
         type="button"
         disabled={!agreed}
         onClick={() => setRevealed(true)}
-        className="w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+        className="w-full rounded-lg px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed"
+        style={agreed ? { backgroundColor: "#E02020", color: "#FFFFFF" } : DISABLED_BUTTON_STYLE}
       >
         Continue
       </button>

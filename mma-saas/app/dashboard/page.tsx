@@ -1,10 +1,11 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { fetchQuery, fetchMutation } from "convex/nextjs";
+import { fetchQuery, fetchMutation, fetchAction } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 import { planHasTexting } from "@/lib/plans";
+import { alertStrandedCheckout } from "@/lib/alerts";
 import AppHeader from "../components/app-header";
 import StatsGrid from "./stats";
 import RetentionButton from "./retention-button";
@@ -17,12 +18,12 @@ import ConnectBilling from "./connect-billing";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkout?: string }>;
+  searchParams: Promise<{ checkout?: string; session_id?: string }>;
 }) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const { checkout } = await searchParams;
+  const { checkout, session_id: sessionId } = await searchParams;
   const token = await getConvexToken();
 
   // First authenticated page a new sign-up ever reaches — provisions this
@@ -35,7 +36,50 @@ export default async function DashboardPage({
     { token }
   );
 
-  const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
+  let subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
+
+  // WEBHOOK-INDEPENDENT PROVISIONING. Everything below this block decides what
+  // to show based on planStatus, and until 2026-08-20 the ONLY thing that ever
+  // wrote planStatus on the auth-first path was the customer.subscription.created
+  // webhook. When a delivery failed signature verification that night, a gym
+  // owner who had already paid got SettlingGate for 8 seconds, then /pricing,
+  // then the wizard again — forever, with no error emitted anywhere. The guest
+  // path had been immune the whole time because /welcome re-verifies the session
+  // against Stripe itself; this is that same mechanism, finally on this path too.
+  //
+  // Gated on an inactive plan, not just on the params: claimGymBySessionId shares
+  // the rate-limited "auth" bucket with claimGymByRecoveryToken, so calling it on
+  // every dashboard load would spend a real customer's allowance on nothing. Once
+  // it succeeds, stripeCustomerId is set, and the /onboarding redirect below stops
+  // firing even if a refresh drops the query params.
+  //
+  // Deliberately NOT fatal. A buyer who has just been charged must never see an
+  // error page, so a failure here falls through to SettlingGate's stranded state
+  // (which tells them the truth and gives them /recover) rather than throwing.
+  if (
+    checkout === "success" &&
+    sessionId &&
+    (!subscription.planStatus || subscription.planStatus === "inactive")
+  ) {
+    try {
+      await fetchAction(api.subscriptions.claimGymBySessionId, { sessionId }, { token });
+      subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(
+        `Auth-first checkout claim failed for session ${sessionId} (user ${user.id}) — falling through to the stranded state:`,
+        err
+      );
+      // A rate-limit rejection is the same person refreshing, not a new
+      // failure. Alerting on it would let one stranded customer fill the
+      // inbox, and an alert channel that cries wolf stops being read — the
+      // same reasoning as the duplicate-email suppression in
+      // lib/alerts.ts:alertMissingTrialConfirmation.
+      if (!detail.includes("Too many attempts")) {
+        await alertStrandedCheckout({ clerkUserId: user.id, sessionId, detail });
+      }
+    }
+  }
 
   // Auth-first signup: onboarding runs before any checkout, so a gym that
   // hasn't finished it yet has no stripeCustomerId either. A gym that DOES

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -18,6 +18,7 @@ export default function SettlingGate({ awaitingCheckout = false }: { awaitingChe
   const subscription = useQuery(api.subscriptions.getSubscription);
   const router = useRouter();
   const refreshed = useRef(false);
+  const [stranded, setStranded] = useState(false);
 
   const isActive = !!(
     subscription?.plan &&
@@ -59,10 +60,67 @@ export default function SettlingGate({ awaitingCheckout = false }: { awaitingChe
     }
 
     const timer = setTimeout(() => {
+      // THE LOOP ENDED HERE. This branch used to send everyone to /pricing, and
+      // for awaitingCheckout that meant a buyer Stripe had just accepted was
+      // dropped back at the top of the funnel with no message — they re-entered
+      // the wizard, checked out again, and landed here again. Silent, repeatable,
+      // and it burned a founding coupon slot on every lap.
+      //
+      // /pricing is still right for the non-checkout case: no stripeCustomerId
+      // and no checkout in flight genuinely means this person never bought
+      // anything, and the pricing page is where they should be.
+      if (awaitingCheckout) {
+        setStranded(true);
+        return;
+      }
       window.location.href = "/pricing";
     }, MAX_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [subscription, isActive, hasBilling, router]);
+  }, [subscription, isActive, hasBilling, awaitingCheckout, router]);
+
+  // Deliberately says "checkout completed", not "payment went through": every
+  // plan starts on a TRIAL_DAYS trial, so nothing has actually been charged
+  // today and telling them it has would be a false statement about billing.
+  if (stranded) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center text-center px-6"
+        style={{ backgroundColor: "#0D0D0D" }}
+      >
+        <p className="text-2xl font-bold mb-3" style={{ color: "#FFFFFF" }}>
+          Your checkout went through — your account didn&apos;t finish setting up
+        </p>
+        <p className="text-sm mb-6 max-w-md" style={{ color: "#888888" }}>
+          Stripe has your subscription. Something on my end didn&apos;t finish, and
+          I&apos;ve already been alerted. Don&apos;t check out again — it would
+          start a second subscription.
+        </p>
+        <div className="flex items-center gap-3">
+          <a
+            href="/recover"
+            className="rounded-lg font-semibold px-6 py-3 text-sm"
+            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+          >
+            Recover my purchase
+          </a>
+          <a
+            href="/dashboard"
+            className="rounded-lg font-semibold px-6 py-3 text-sm"
+            style={{ border: "1px solid #333333", color: "#FFFFFF" }}
+          >
+            Try again
+          </a>
+        </div>
+        <p className="text-sm mt-6" style={{ color: "#888888" }}>
+          Or email{" "}
+          <a className="underline" href="mailto:kombatdesk@outlook.com" style={{ color: "#AAAAAA" }}>
+            kombatdesk@outlook.com
+          </a>{" "}
+          and I&apos;ll sort it out.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

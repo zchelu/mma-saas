@@ -243,3 +243,43 @@ export async function alertMissingTrialConfirmation(params: {
     ].join("\n")
   );
 }
+
+// Fires from app/dashboard/page.tsx when the auth-first flow could not claim a
+// just-completed Checkout Session. The customer is signed in, Stripe took the
+// card, and Convex still has no plan for them — so they are looking at
+// SettlingGate's stranded screen right now.
+//
+// This is the alert that did not exist on 2026-08-19, which is why a failed
+// webhook signature turned into a paying gym owner silently re-entering the
+// setup wizard until they gave up. Nothing else in the system notices: the
+// webhook path logs to Convex, this path logs to Vercel, and neither is read
+// unless someone already suspects a problem. An email is the only channel that
+// reaches Zain without him going looking.
+//
+// Deliberately NOT fired for a rate-limit rejection — that is the same person
+// refreshing, not a new failure, and one stranded customer must not be able to
+// generate an inbox full of duplicates. The caller filters those out.
+export async function alertStrandedCheckout(params: {
+  clerkUserId: string;
+  sessionId: string;
+  detail: string;
+}): Promise<void> {
+  const { clerkUserId, sessionId, detail } = params;
+
+  await sendAlertEmail(
+    "KombatDesk: a PAID signup could not be provisioned",
+    [
+      `A signed-in buyer completed Stripe Checkout and the synchronous claim failed. They have been charged (or started a trial against a saved card) and their gym has no active plan.`,
+      ``,
+      `Clerk user ID: ${clerkUserId}`,
+      `Checkout session ID: ${sessionId}`,
+      `Failure: ${detail}`,
+      ``,
+      `WHAT THEY SEE: the "we couldn't finish setting up your account" screen on /dashboard, with the recovery link. They are not looping back into the wizard any more, but they also cannot use the product until this is resolved.`,
+      ``,
+      `TO RECOVER THEM BY HAND: open the checkout session above in the Stripe dashboard, find the subscription it created, and resend its customer.subscription.created event — NOT customer.subscription.updated. Only "created" triggers the C.R.S. 6-1-732 trial confirmation email, which is this customer's only written record of price, frequency and cancellation terms.`,
+      ``,
+      `THEN FIND THE CAUSE: if the platform webhook is also failing, the two share it. Check the delivery response code on the event destination before assuming this is a code bug — a 400 there means the signing secret in the CONVEX environment does not match that destination, which is a config problem, not a bug in the claim path.`,
+    ].join("\n")
+  );
+}
