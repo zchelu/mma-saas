@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { currentUser } from "@clerk/nextjs/server";
-import { fetchAction } from "convex/nextjs";
+import { fetchAction, fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
+import { getConvexToken } from "@/lib/convex-auth";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
 import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
@@ -124,6 +125,35 @@ export async function POST(request: NextRequest) {
 
   const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;
 
+  // REUSE THIS BUYER'S EXISTING STRIPE CUSTOMER.
+  //
+  // Without this, every checkout minted a brand-new customer for the same
+  // person, because customer_email prefills a form but does not identify
+  // anyone. On 2026-08-19 one gym owner looping through a broken funnel
+  // produced two customers and two subscriptions eight minutes apart; because
+  // convex/subscriptions.ts:upsertSubscription resolves the gym row by
+  // clerkUserId alone, the two then raced for the same row and cancelling the
+  // stale one downgraded the live one. See
+  // claude/gym-row-clobber-2026-08-20.md — the guards there contain the damage,
+  // this removes the precondition.
+  //
+  // Signed-in only. A guest has no gym row to read a customer from, and
+  // /welcome's claimGymBySessionId is what links them afterwards.
+  //
+  // Deliberately non-fatal: a Convex hiccup here must not take checkout down.
+  // Falling through with null just restores the old behaviour for that one
+  // request — a duplicate customer, which the guards now survive.
+  let reusedCustomerId: string | null = null;
+  if (user) {
+    try {
+      const token = await getConvexToken();
+      const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
+      reusedCustomerId = subscription.stripeCustomerId ?? null;
+    } catch (err) {
+      console.error("Stripe checkout: could not read the existing Stripe customer, using a new one:", err);
+    }
+  }
+
   function buildSessionParams(applyDiscount: boolean): Stripe.Checkout.SessionCreateParams {
     return {
       mode: "subscription",
@@ -161,6 +191,10 @@ export async function POST(request: NextRequest) {
       // subscription metadata, not this field, since client_reference_id
       // lives on the Checkout Session and isn't present on the
       // customer.subscription.* events the webhook processes.
+      // Mutually exclusive in Stripe: sending both `customer` and
+      // `customer_email` is rejected outright. When we know the customer, the
+      // email is already on it, so prefilling is redundant anyway.
+      ...(reusedCustomerId ? { customer: reusedCustomerId } : {}),
       ...(user ? { client_reference_id: user.id } : {}),
       billing_address_collection: "required",
       automatic_tax: { enabled: true },
@@ -176,15 +210,20 @@ export async function POST(request: NextRequest) {
         // claimGymBySessionId (see convex/subscriptions.ts).
         ...(user ? { metadata: { clerkUserId: user.id } } : {}),
       },
-      // Signed-in: prefill email.
-      ...(user ? { customer_email: user.emailAddresses[0]?.emailAddress } : {}),
+      // Signed-in and no known customer: prefill email. Never alongside
+      // `customer` above.
+      ...(user && !reusedCustomerId
+        ? { customer_email: user.emailAddresses[0]?.emailAddress }
+        : {}),
     };
   }
 
-  try {
-    let session;
+  // The founding-coupon fallback, unchanged, lifted into a function so the
+  // stale-customer retry below can run the whole thing again rather than
+  // duplicating it. Both fallbacks stay one level deep this way.
+  async function createSessionWithCouponFallback(): Promise<Stripe.Checkout.Session> {
     try {
-      session = await stripe.checkout.sessions.create(buildSessionParams(true));
+      return await stripe.checkout.sessions.create(buildSessionParams(true));
     } catch (err) {
       // Only a coupon-specific rejection falls back to standard price. A
       // network blip or rate limit here must NOT silently drop the discount
@@ -214,7 +253,29 @@ export async function POST(request: NextRequest) {
             `The /pricing page may have shown this customer a founding price before they clicked through — they may expect it. Check whether the coupon is exhausted, expired, or deleted, and whether the founding block on /pricing needs to come down.`,
           ].join("\n")
         );
-        session = await stripe.checkout.sessions.create(buildSessionParams(false));
+        return await stripe.checkout.sessions.create(buildSessionParams(false));
+      }
+      throw err;
+    }
+  }
+
+  try {
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await createSessionWithCouponFallback();
+    } catch (err) {
+      // A stored customer id can go stale — deleted during test-mode
+      // housekeeping, or left over from the other Stripe mode after a key
+      // switch. Without this, that gym's checkout would 500 forever with no
+      // way to self-heal, which is a worse failure than the duplicate customer
+      // reuse exists to prevent. Retry once with a fresh customer.
+      if (reusedCustomerId && isMissingCustomerError(err)) {
+        console.error(
+          `Stripe checkout: stored customer ${reusedCustomerId} no longer exists in Stripe — retrying with a new one:`,
+          err
+        );
+        reusedCustomerId = null;
+        session = await createSessionWithCouponFallback();
       } else {
         throw err;
       }
@@ -235,6 +296,17 @@ export async function POST(request: NextRequest) {
 // other invalid-request error, and excludes non-invalid-request error classes
 // entirely (StripeRateLimitError, StripeConnectionError, StripeAPIError,
 // etc.), which must always rethrow rather than silently drop the discount.
+// Narrow to "the customer id we sent does not exist", and nothing else. Any
+// other invalid-request error must rethrow — retrying those without the
+// customer would quietly split a returning buyer into a second customer for a
+// reason that had nothing to do with the customer.
+function isMissingCustomerError(err: unknown): boolean {
+  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
+  if (err.param?.toLowerCase() !== "customer") return false;
+  const message = err.message?.toLowerCase() ?? "";
+  return err.code === "resource_missing" || message.includes("no such customer");
+}
+
 function isCouponSpecificError(err: unknown): boolean {
   if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
 
