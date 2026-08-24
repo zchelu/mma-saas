@@ -7,6 +7,12 @@ import { hasWriteAccess } from "./gyms";
 import { planHasTexting, resolvePlanFromPriceId } from "../lib/plans";
 import { alertUnresolvedPrice } from "../lib/alerts";
 
+// Statuses that mean "this subscription is the one currently entitling the
+// gym". Mirrors the active/trialing pair the dashboard and requireGym already
+// gate on — kept as its own set because this one is a WRITE guard, not a
+// read gate, and the two must be free to diverge.
+const LIVE_PLAN_STATUSES = new Set(["active", "trialing"]);
+
 export const upsertSubscription = internalMutation({
   args: {
     clerkUserId: v.string(),
@@ -36,6 +42,40 @@ export const upsertSubscription = internalMutation({
     // canceled subscription still means onboarding genuinely happened —
     // planStatus is what tracks current billing state, not this flag.
     if (existing) {
+      // A DEAD SIBLING MUST NOT OUTRANK A LIVE SUBSCRIPTION.
+      //
+      // This row is found by clerkUserId alone, and one Clerk user can own more
+      // than one Stripe customer — the checkout route passes customer_email but
+      // never customer, so every retried checkout mints a fresh customer for the
+      // same person (see claude/gym-row-clobber-2026-08-20.md). Without this
+      // guard the last event to arrive wins, whatever it says: on 2026-08-20
+      // cancelling a duplicate subscription fired customer.subscription.deleted
+      // carrying the same clerkUserId, and it rewrote a live TRIALING gym to
+      // canceled — pointing at the cancelled subscription and its dead customer.
+      //
+      // The test is subscription identity plus liveness, deliberately NOT event
+      // type: applySubscriptionState re-retrieves from Stripe and never branches
+      // on the event, because a stale "deleted" used to force "canceled" over the
+      // subscription's real state. So the rule is — an event for a DIFFERENT
+      // subscription that is not itself active/trialing cannot take this row.
+      //
+      // What still writes normally, all deliberate:
+      //   • same subscription id, any status (a real cancellation registers)
+      //   • a different subscription that IS active/trialing (a genuine upgrade
+      //     or resubscribe legitimately takes over)
+      //   • a first subscription (no stripeSubscriptionId on the row yet)
+      if (
+        existing.stripeSubscriptionId &&
+        existing.stripeSubscriptionId !== args.stripeSubscriptionId &&
+        !LIVE_PLAN_STATUSES.has(args.planStatus)
+      ) {
+        console.warn(
+          `Ignored ${args.planStatus} subscription ${args.stripeSubscriptionId} for gym ${existing._id}: ` +
+            `row is held by ${existing.stripeSubscriptionId}. A non-live sibling cannot take the row.`
+        );
+        return { gymId: existing._id };
+      }
+
       await ctx.db.patch(existing._id, {
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
@@ -501,6 +541,15 @@ export const getSubscription = query({
   },
 });
 
+// No runtime callers as of 2026-08-20 — this exists for manual repair via
+// `npx convex run`, which is exactly why the miss case throws.
+//
+// It used to be `if (gym) { patch }` with no else. A stale customer id matched
+// nothing, patched nothing, and returned void — and `convex run` prints nothing
+// for a void mutation, so a repair that did absolutely nothing was
+// byte-identical on screen to one that worked. On 2026-08-20 that made a failed
+// restore look successful twice while a gym sat wrongly marked canceled. Silence
+// is not confirmation; a repair tool that cannot fail loudly is worse than none.
 export const updatePlanStatusByCustomer = internalMutation({
   args: { stripeCustomerId: v.string(), planStatus: v.string() },
   handler: async (ctx, { stripeCustomerId, planStatus }) => {
@@ -508,9 +557,14 @@ export const updatePlanStatusByCustomer = internalMutation({
       .query("gyms")
       .withIndex("by_stripe_customer", (q) => q.eq("stripeCustomerId", stripeCustomerId))
       .unique();
-    if (gym) {
-      await ctx.db.patch(gym._id, { planStatus });
+    if (!gym) {
+      throw new Error(
+        `No gym has stripeCustomerId "${stripeCustomerId}" — nothing was updated. ` +
+          `The row may have been repointed at a different customer; read it before retrying.`
+      );
     }
+    await ctx.db.patch(gym._id, { planStatus });
+    return { gymId: gym._id, planStatus };
   },
 });
 
