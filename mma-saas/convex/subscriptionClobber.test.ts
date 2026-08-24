@@ -35,12 +35,14 @@ async function seedLiveGym(t: ReturnType<typeof convexTest>) {
   });
 }
 
+// Collect-and-find rather than withIndex("by_clerk_user"): inside t.run,
+// convex-test types ctx.db without the schema's own indexes, so an index name
+// fails `tsc` even though it runs fine. Each test seeds one row, so a full
+// collect is cheaper than the workaround would be.
 async function readGym(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
-    return await ctx.db
-      .query("gyms")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", CLERK_USER))
-      .unique();
+    const gyms = await ctx.db.query("gyms").collect();
+    return gyms.find((g) => g.clerkUserId === CLERK_USER) ?? null;
   });
 }
 
