@@ -8,7 +8,9 @@
 // Every TSX/TS consumer imports this constant. Do not hardcode the number
 // again anywhere; "day 31" phrasing is TRIAL_DAYS + 1, also computed.
 // Verified consumers as of 2026-07-30:
-//   app/api/stripe/checkout/route.ts  trial_period_days (the actual grant)
+//   lib/checkoutSession.ts            trial_period_days (the actual grant —
+//                                     moved out of app/api/stripe/checkout/
+//                                     route.ts 2026-08-24 so it could be tested)
 //   app/pricing/page.tsx              x3 — tier footnote, guarantee block,
 //                                     founding block
 //   app/page.tsx                      homepage guarantee block

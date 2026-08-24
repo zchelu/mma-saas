@@ -6,7 +6,8 @@ import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
-import { TRIAL_DAYS, allowedPriceIds } from "@/lib/plans";
+import { allowedPriceIds } from "@/lib/plans";
+import { buildCheckoutSessionParams } from "@/lib/checkoutSession";
 import { getFoundingOfferResult } from "@/lib/foundingOffer";
 import { missingApiKeyResult, planCheckout } from "@/lib/foundingOfferPolicy";
 import {
@@ -154,68 +155,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Thin adapter over lib/checkoutSession.ts — the params themselves live there
+  // so they can be unit-tested; a Next route module cannot export them.
   function buildSessionParams(applyDiscount: boolean): Stripe.Checkout.SessionCreateParams {
-    return {
-      mode: "subscription",
-      payment_method_types: ["card"],
-      line_items: [{ price: priceId, quantity: 1 }],
-      ...(applyDiscount && foundingOffer
-        ? { discounts: [{ coupon: foundingOffer.couponId }] }
-        : {}),
-      // BOTH paths now carry {CHECKOUT_SESSION_ID}, and the session id is the
-      // whole point: it is the only thing that lets the destination page
-      // re-verify the purchase against Stripe itself instead of waiting on a
-      // webhook that may never arrive.
-      //
-      // Signed-in buyers (the auth-first onboarding flow — the gym already
-      // exists via completeOnboarding/getOrCreateGym, linked by clerkUserId)
-      // land on /dashboard, which claims the session synchronously via
-      // claimGymBySessionId before it decides anything (app/dashboard/page.tsx).
-      // It used to land there with `checkout=success` alone and nothing but
-      // SettlingGate waiting out the async webhook — so when a delivery failed
-      // signature verification on 2026-08-19, a gym owner who HAD PAID was
-      // bounced to /pricing after 8 seconds and re-entered the wizard, forever,
-      // with no error anywhere. Never remove the session id from this URL.
-      //
-      // Guest checkouts (no signed-in user — the old pay-first fallback, kept
-      // alive per claimGymBySessionId/claimGymByRecoveryToken) still land on
-      // /welcome, which does the same re-verification — never send a guest
-      // straight to /dashboard, since there's no account yet to link it to.
-      success_url: user
-        ? `${origin}/dashboard?checkout=success&session_id={CHECKOUT_SESSION_ID}`
-        : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/pricing`,
-      // Mirrors subscription_data.metadata.clerkUserId below for Stripe
-      // Dashboard visibility (shows next to the customer without opening the
-      // subscription object) — the actual webhook resolution still reads the
-      // subscription metadata, not this field, since client_reference_id
-      // lives on the Checkout Session and isn't present on the
-      // customer.subscription.* events the webhook processes.
-      // Mutually exclusive in Stripe: sending both `customer` and
-      // `customer_email` is rejected outright. When we know the customer, the
-      // email is already on it, so prefilling is redundant anyway.
-      ...(reusedCustomerId ? { customer: reusedCustomerId } : {}),
-      ...(user ? { client_reference_id: user.id } : {}),
-      billing_address_collection: "required",
-      automatic_tax: { enabled: true },
-      // Same trial on all plans, guest or signed-in alike — don't
-      // special-case by priceId. Length comes from lib/plans.ts so the
-      // number Stripe grants and the number the UI promises stay identical.
-      subscription_data: {
-        trial_period_days: TRIAL_DAYS,
-        // Signed-in: tag the subscription so the webhook can also link it
-        // (redundant with claimGymBySessionId, harmless). Guest: leave
-        // clerkUserId unset — Stripe's hosted page collects the email
-        // itself, and /welcome links the account after signup via
-        // claimGymBySessionId (see convex/subscriptions.ts).
-        ...(user ? { metadata: { clerkUserId: user.id } } : {}),
-      },
-      // Signed-in and no known customer: prefill email. Never alongside
-      // `customer` above.
-      ...(user && !reusedCustomerId
-        ? { customer_email: user.emailAddresses[0]?.emailAddress }
-        : {}),
-    };
+    return buildCheckoutSessionParams({
+      priceId,
+      origin,
+      buyer: user
+        ? { clerkUserId: user.id, email: user.emailAddresses[0]?.emailAddress }
+        : null,
+      existingCustomerId: reusedCustomerId,
+      couponId: applyDiscount && foundingOffer ? foundingOffer.couponId : null,
+    });
   }
 
   // The founding-coupon fallback, unchanged, lifted into a function so the
