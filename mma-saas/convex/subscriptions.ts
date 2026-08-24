@@ -97,28 +97,31 @@ export const upsertUnclaimedSubscription = internalMutation({
   },
 });
 
-// A Checkout Session that the buyer actually completed. `status` is the field
-// that means "they finished checkout"; payment_status describes MONEY, and on a
-// first subscription checkout there isn't any — every plan carries a TRIAL_DAYS
-// trial (lib/plans.ts), so nothing is due that day and Stripe reports
-// "no_payment_required". It is never "paid".
+// A Checkout Session the buyer actually completed.
 //
-// The gate below used to read `payment_status !== "paid"`, which therefore
-// rejected every session it was ever handed. /welcome answered every guest who
-// had just successfully checked out with "I couldn't confirm your payment", and
-// this whole function was unusable as the webhook-independent fallback the
-// auth-first flow needed.
+// MEASURED, not reasoned — sandbox session
+// cs_test_a1SGFLXLLAn0FJZZMkbXyHQ13S5cMki0GCS8PoztJSvkKUvLEsjyqRxCrd
+// (subscription sub_1U6H2fQwB6kCcMIgsjKqhIV9), read 2026-08-20:
+//   status "complete", payment_status "paid", mode "subscription"
 //
-// NOT YET CONFIRMED AGAINST A LIVE SESSION OBJECT as of 2026-08-20 — the
-// reasoning is from Stripe's trial semantics plus TRIAL_DAYS = 30, not from a
-// read of a real `payment_status`. Confirm with
-// `stripe checkout sessions list --limit 1` against the sandbox and record the
-// value here. Accepting both values is safe either way; the point of checking
-// is to know whether the guest /welcome path was ALSO broken this whole time.
+// A TRIAL_DAYS trial does NOT make these sessions "no_payment_required". An
+// earlier version of this comment asserted it did, and it was wrong: the
+// checkout route sets payment_method_collection "always", a card IS collected,
+// and Stripe reports "paid" even though nothing is charged that day. So the old
+// `payment_status !== "paid"` gate was never rejecting real checkouts, and the
+// guest /welcome path was never broken by it. The auth-first stranding had an
+// entirely different cause — nothing on that path called this function at all
+// until app/dashboard/page.tsx started to.
 //
-// "unpaid" stays rejected: it is reachable alongside status "complete" when a
-// delayed-payment method hasn't settled, and that is genuinely not a
-// subscription to provision against.
+// What the set is actually for is `amount_total: 0`. A 100%-off founding coupon,
+// or any future plan that collects no card, produces a zero-amount session that
+// Stripe marks "no_payment_required" — a completed purchase this would otherwise
+// refuse to provision. Founding pricing runs on coupons here, so that is a live
+// possibility rather than a hypothetical.
+//
+// `status === "complete"` is the real gate; payment_status only filters money
+// states beneath it. "unpaid" stays rejected — reachable alongside "complete"
+// when a delayed-payment method hasn't settled, and not something to provision.
 const PROVISIONABLE_PAYMENT_STATUSES = new Set(["paid", "no_payment_required"]);
 
 // Public entry point for linking a completed checkout's subscription to the
