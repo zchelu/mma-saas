@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { loadConnectAndInitialize } from "@stripe/connect-js";
-import type { AppearanceOptions } from "@stripe/connect-js";
+import type { AppearanceOptions, StripeConnectInstance } from "@stripe/connect-js";
 import {
   ConnectAccountManagement,
   ConnectAccountOnboarding,
@@ -12,6 +12,7 @@ import {
 } from "@stripe/react-connect-js";
 import { api } from "../../convex/_generated/api";
 import { useDetectedTimezone } from "../components/use-detected-timezone";
+import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
 
 // Stage C of Connect member billing (spec §5.1): the owner-facing surface for
 // connecting a Stripe account so the gym can bill its own members.
@@ -184,21 +185,27 @@ export default function ConnectBilling() {
     }
   }, [createSession]);
 
-  // Built once, lazily, and only when the owner actually opens the panel — this
-  // loads Stripe's script and mints a session, neither of which should happen on
-  // every dashboard render for gyms that will never click it.
-  // Read directly, NOT mirrored into state. This was a useMemo whose value was
-  // copied into a `connectInstance` state by an effect, which bought nothing:
-  // the memo is already stable across renders, so the extra state only added a
-  // second render pass on open and a set-state-in-effect lint error.
-  const instance = useMemo(() => {
-    if (!open || !publishableKey) return null;
-    return loadConnectAndInitialize({
-      publishableKey,
-      fetchClientSecret,
-      appearance: CONNECT_APPEARANCE,
-    });
-  }, [open, publishableKey, fetchClientSecret]);
+  // MINTED BY THE CLICK, NEVER BY A RENDER. See openPanel below.
+  //
+  // loadConnectAndInitialize is a side effect: it loads Stripe's script and
+  // eagerly calls fetchClientSecret, which mints a real account session on our
+  // Stripe account. It sat in a useMemo keyed on `open`, and a memo is a render
+  // computation — React is free to run it more than once for a given input, and
+  // StrictMode (the Next dev default) deliberately double-invokes the render
+  // function. So a single click minted TWO account sessions, and the second
+  // instance replaced the first while the first's eager client-secret promise
+  // was left orphaned inside connect-js. That is the ~20s spin with no overlay
+  // and no error: the provider was holding an instance whose session had been
+  // abandoned.
+  //
+  // The lesson generalises past this file — a memo is not "run once", it is
+  // "may be recomputed"; anything that costs money or mints a resource does not
+  // belong in one. Event handlers are not double-invoked, so the click is the
+  // correct place.
+  //
+  // Still lazy, which is why it was in a memo to begin with: gyms that never
+  // click this never load Stripe's script and never mint a session.
+  const [instance, setInstance] = useState<StripeConnectInstance | null>(null);
 
   const recheck = useCallback(async () => {
     setChecking(true);
@@ -216,13 +223,27 @@ export default function ConnectBilling() {
 
   const timezone = timezoneDraft ?? status.timezone ?? detectedTimezone ?? "";
 
+  // Declared once each so `disabled` and the disabled STYLE cannot disagree.
+  const setupDisabled = checking || !publishableKey;
+
   async function openPanel() {
     setError(null);
+    if (!publishableKey) return;
     try {
       // Saved BEFORE the panel opens on purpose: an owner who abandons Stripe's
       // flow still leaves their timezone recorded instead of losing it with the
       // rest of the attempt.
       if (timezone) await saveTimezone({ timezone });
+
+      // Exactly one instance per click. Both setStates batch into a single
+      // render, so this costs no more passes than flipping `open` alone did.
+      setInstance(
+        loadConnectAndInitialize({
+          publishableKey,
+          fetchClientSecret,
+          appearance: CONNECT_APPEARANCE,
+        })
+      );
       setOpen(true);
     } catch (err) {
       setError(errorText(err, "Couldn't start member billing setup. Try again in a moment."));
@@ -235,6 +256,11 @@ export default function ConnectBilling() {
   // the header comment on refreshConnectStatus.
   function onPanelExit() {
     setOpen(false);
+    // Dropped on the way out so reopening mints a fresh session rather than
+    // reusing one whose client secret may have expired while the panel sat
+    // closed. Matches what the old memo did when `open` flipped back to true —
+    // the fix changes WHERE the instance is created, not how long it lives.
+    setInstance(null);
     void recheck();
   }
 
@@ -313,9 +339,9 @@ export default function ConnectBilling() {
           <button
             type="button"
             onClick={openPanel}
-            disabled={checking || !publishableKey}
-            className="text-xs font-semibold rounded-lg px-4 py-2 disabled:opacity-40"
-            style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+            disabled={setupDisabled}
+            className="text-xs font-semibold rounded-lg px-4 py-2 disabled:cursor-not-allowed"
+            style={setupDisabled ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
             {!status.connected
               ? "Set up member billing"
@@ -329,8 +355,12 @@ export default function ConnectBilling() {
               type="button"
               onClick={recheck}
               disabled={checking}
-              className="text-xs rounded-lg px-4 py-2 disabled:opacity-40"
-              style={{ border: "1px solid #333333", color: "#CCCCCC" }}
+              className="text-xs rounded-lg px-4 py-2 disabled:cursor-not-allowed"
+              style={{
+                border: "1px solid #333333",
+                color: "#CCCCCC",
+                ...(checking ? DISABLED_BUTTON_STYLE : {}),
+              }}
             >
               {checking ? "Checking…" : "Refresh status"}
             </button>
