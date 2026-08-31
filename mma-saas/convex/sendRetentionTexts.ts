@@ -195,14 +195,16 @@ async function sendRetentionTextsCore(
   // conflating them would make an owner's saved automatic wording silently
   // become the body of a manual send that failed to pass one.
   automaticTemplate?: string
-): Promise<{ attempted: number; succeeded: number }> {
+): Promise<{ attempted: number; succeeded: number; configError?: boolean }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
     console.error("Missing Twilio env vars — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER");
-    return { attempted: 0, succeeded: 0 };
+    // configError distinguishes this from a run that simply had nobody to
+    // text — both return attempted: 0, and only this one is a failure.
+    return { attempted: 0, succeeded: 0, configError: true };
   }
 
   const atRisk = await ctx.runQuery(internal.sendRetentionTexts.getAtRiskMembers, { gymId });
@@ -290,7 +292,7 @@ export const sendRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId}: retention run cooldown active — skipping automated run`);
       return;
     }
-    const { attempted, succeeded } = await sendRetentionTextsCore(
+    const { attempted, succeeded, configError } = await sendRetentionTextsCore(
       ctx,
       gymId,
       gym.name ?? "your gym",
@@ -302,7 +304,20 @@ export const sendRetentionTextsForGym = internalAction({
       // Zero successes out of a non-empty attempt (or a config error before
       // any attempt) means the failure is systemic, not a few bad numbers —
       // don't let it burn the gym's cooldown and block a legitimate retry.
-      console.error(`Gym ${gymId}: retention run had ${attempted} attempted sends and 0 successes — releasing run lock`);
+      //
+      // Severity splits on `attempted`. A run with nothing to send is a normal
+      // outcome, not a failure: no at-risk members, or every candidate opted
+      // out. That is the demo gym's resting state between demos, so at error
+      // level it fires every day at 11:00 forever and buries a genuine failure
+      // for a real gym under guaranteed noise — the same trap as the 21610-on-
+      // every-STOP logging that caused the 7/30 misdiagnosis. Reserve error for
+      // a run that actually attempted a send and got nothing through.
+      const summary = `Gym ${gymId}: retention run had ${attempted} attempted sends and 0 successes — releasing run lock`;
+      if (attempted === 0 && !configError) {
+        console.log(summary);
+      } else {
+        console.error(summary);
+      }
       await ctx.runMutation(internal.sendRetentionTexts.releaseRetentionRunLock, { gymId });
     }
   },
@@ -319,13 +334,26 @@ export const sendManualRetentionTextsForGym = internalAction({
       console.log(`Gym ${gymId} is not eligible for texting — skipping manual retention texts`);
       return;
     }
-    const { attempted, succeeded } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym", message);
+    const { attempted, succeeded, configError } = await sendRetentionTextsCore(ctx, gymId, gym.name ?? "your gym", message);
     if (succeeded === 0) {
       // Mirrors sendRetentionTextsForGym's fix: triggerRetentionTexts claims
       // the run lock synchronously before scheduling this action, so a
       // systemic failure here would otherwise burn the manual-send cooldown
       // the same way it did on the automatic path.
-      console.error(`Gym ${gymId}: manual retention run had ${attempted} attempted sends and 0 successes — releasing run lock`);
+      //
+      // Severity splits on `attempted`. A run with nothing to send is a normal
+      // outcome, not a failure: no at-risk members, or every candidate opted
+      // out. That is the demo gym's resting state between demos, so at error
+      // level it fires every day at 11:00 forever and buries a genuine failure
+      // for a real gym under guaranteed noise — the same trap as the 21610-on-
+      // every-STOP logging that caused the 7/30 misdiagnosis. Reserve error for
+      // a run that actually attempted a send and got nothing through.
+      const summary = `Gym ${gymId}: manual retention run had ${attempted} attempted sends and 0 successes — releasing run lock`;
+      if (attempted === 0 && !configError) {
+        console.log(summary);
+      } else {
+        console.error(summary);
+      }
       await ctx.runMutation(internal.sendRetentionTexts.releaseRetentionRunLock, { gymId });
     }
   },
