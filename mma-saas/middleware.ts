@@ -8,6 +8,14 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/signup(.*)',
+  // The lead form's confirmation page. It is the LAST STEP OF /signup above,
+  // and leaving it out of this list meant every prospect who submitted the form
+  // was redirected to accounts.kombatdesk.com/sign-in and asked to log in to an
+  // account they do not have. The lead email still sent (the server action
+  // completes before the route change), so the failure was invisible from the
+  // inbox. Reproduced against production 2026-08-31. A page that a signed-out
+  // visitor is ROUTED TO must be public, not merely the page that routes to it.
+  '/thank-you',
   '/checkin(.*)',
   // The front-desk tablet's other half — new-member signup and waiver
   // signing. Unauthenticated for the same reason /checkin is: the device at
