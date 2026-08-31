@@ -50,3 +50,10 @@ next-env.d.ts
 .agents/
 .claude/skills/
 skills-lock.json
+
+# Codebase audit / product-overview docs. Same reasoning as .claude-docs/
+# above: THIS REPO IS PUBLIC, and these enumerate the product's gaps,
+# unbuilt features and demo weak points — a shortcut for a competitor and
+# worth more to one than any credential in the tree. The canonical copy
+# lives in the claude.ai project. Regenerate it there, never commit it here.
+docs/product-overview.md
