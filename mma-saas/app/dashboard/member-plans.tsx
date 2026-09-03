@@ -33,7 +33,13 @@ function errorText(err: unknown, fallback: string): string {
 
 export default function MemberPlans() {
   const status = useQuery(api.connect.getConnectStatus);
-  const plans = useQuery(api.gymPlans.listPlans);
+  // "skip" until there is a connected account. This query sits ABOVE the
+  // `status.connected` early return because hooks must run unconditionally,
+  // so without the sentinel every dashboard load in the fleet calls it —
+  // including the gyms that have no Connect account and never will render
+  // this card. It also means a deploy that lands the client before the
+  // Convex functions cannot call a function that is not there yet.
+  const plans = useQuery(api.gymPlans.listPlans, status?.connected ? {} : "skip");
   const createPlan = useAction(api.gymPlansStripe.createPlan);
   const retryPlanPrice = useAction(api.gymPlansStripe.retryPlanPrice);
   const archivePlan = useMutation(api.gymPlans.archivePlan);
