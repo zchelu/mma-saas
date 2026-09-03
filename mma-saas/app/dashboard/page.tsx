@@ -14,6 +14,7 @@ import SettlingGate from "./settling-gate";
 import WinbackPanel from "./winback-panel";
 import OwnerLinks from "./owner-links";
 import ConnectBilling from "./connect-billing";
+import MemberPlans from "./member-plans";
 
 export default async function DashboardPage({
   searchParams,
@@ -153,6 +154,7 @@ export default async function DashboardPage({
         <WinbackPanel gymId={subscription.gymId} gymCreatedAt={subscription.createdAt} />
         <OwnerLinks slug={subscription.slug} />
         <ConnectBilling />
+        <MemberPlans />
       </main>
     </div>
   );

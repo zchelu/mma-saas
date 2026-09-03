@@ -18,6 +18,10 @@ import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
 // connecting a Stripe account so the gym can bill its own members.
 //
 // NOTHING HERE CHARGES ANYTHING, and the copy is careful not to imply it does.
+// 2026-08-31: the CTA read "Set up member billing" and the pill read "Live",
+// which a founding gym reads as a capability they now have. Both are now
+// get-ready wording. Revert them to present tense in the SAME commit that lands
+// stage F, and not one commit earlier.
 // Defining plans and enrolling members are later stages, so an owner who
 // finishes this flow has a merchant account and no way to use it yet. Do not
 // promise more than that until stage F lands.
@@ -274,9 +278,15 @@ export default function ConnectBilling() {
       </div>
 
       <p className="text-xs mb-5 leading-relaxed" style={{ color: "#888888" }}>
-        Collect your members&apos; monthly dues by card. Stripe handles the payments and the
-        payouts land in your bank account — KombatDesk adds nothing on top of Stripe&apos;s
-        processing fee.
+        Getting ready to collect your members&apos; monthly dues by card. Stripe verification
+        takes a few days, so you can get approved now and be ready the day dues collection
+        turns on. Payouts land in your bank account — KombatDesk adds nothing on top of
+        Stripe&apos;s processing fee.
+      </p>
+
+      <p className="text-xs mb-5 leading-relaxed" style={{ color: "#888888" }}>
+        This step only verifies your gym with Stripe. No member is charged yet — we&apos;ll
+        tell you the day you can start billing.
       </p>
 
       {!publishableKey && (
@@ -295,8 +305,8 @@ export default function ConnectBilling() {
 
       {status.connected && status.chargesEnabled && !status.payoutsEnabled && !open && (
         <p className="text-xs mb-5 leading-relaxed" style={{ color: "#888888" }}>
-          You can take payments. Payouts to your bank aren&apos;t enabled yet — Stripe usually
-          resolves this on its own once your details are verified.
+          Your gym is approved to take payments. Payouts to your bank aren&apos;t enabled yet —
+          Stripe usually resolves this on its own once your details are verified.
         </p>
       )}
 
@@ -344,10 +354,10 @@ export default function ConnectBilling() {
             style={setupDisabled ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
             {!status.connected
-              ? "Set up member billing"
+              ? "Get ready for member billing"
               : status.chargesEnabled
-                ? "Manage billing details"
-                : "Finish setup"}
+                ? "Manage your Stripe details"
+                : "Finish verification"}
           </button>
 
           {status.connected && (
@@ -382,14 +392,14 @@ function StatusPill({
   status: { connected: boolean; chargesEnabled: boolean; chargesStatus: string | null };
   checking: boolean;
 }) {
-  let label = "Not set up";
+  let label = "Not started";
   let color = "#888888";
 
   if (checking) {
     label = "Checking";
   } else if (status.connected) {
     if (status.chargesEnabled) {
-      label = "Live";
+      label = "Approved";
       color = "#4ADE80";
     } else if (status.chargesStatus === "pending") {
       label = "Stripe is reviewing";

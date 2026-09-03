@@ -20,6 +20,8 @@ import type * as demoSmsMember from "../demoSmsMember.js";
 import type * as demoWaiverText from "../demoWaiverText.js";
 import type * as documents from "../documents.js";
 import type * as enrollments from "../enrollments.js";
+import type * as gymPlans from "../gymPlans.js";
+import type * as gymPlansStripe from "../gymPlansStripe.js";
 import type * as gyms from "../gyms.js";
 import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
@@ -62,6 +64,8 @@ declare const fullApi: ApiFromModules<{
   demoWaiverText: typeof demoWaiverText;
   documents: typeof documents;
   enrollments: typeof enrollments;
+  gymPlans: typeof gymPlans;
+  gymPlansStripe: typeof gymPlansStripe;
   gyms: typeof gyms;
   http: typeof http;
   invoices: typeof invoices;
