@@ -25,6 +25,8 @@ import type * as gymPlansStripe from "../gymPlansStripe.js";
 import type * as gyms from "../gyms.js";
 import type * as http from "../http.js";
 import type * as invoices from "../invoices.js";
+import type * as memberBilling from "../memberBilling.js";
+import type * as memberBillingStripe from "../memberBillingStripe.js";
 import type * as members from "../members.js";
 import type * as migrations from "../migrations.js";
 import type * as onboarding from "../onboarding.js";
@@ -69,6 +71,8 @@ declare const fullApi: ApiFromModules<{
   gyms: typeof gyms;
   http: typeof http;
   invoices: typeof invoices;
+  memberBilling: typeof memberBilling;
+  memberBillingStripe: typeof memberBillingStripe;
   members: typeof members;
   migrations: typeof migrations;
   onboarding: typeof onboarding;

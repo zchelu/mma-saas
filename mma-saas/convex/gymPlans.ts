@@ -198,8 +198,8 @@ export const setPlanStripeConnectPriceId = internalMutation({
 //
 // The Stripe Price is deliberately left alone — Prices are immutable and
 // deactivating one at Stripe would break any live subscription already billing
-// against it. Stage 4 is where cancelling those subscriptions gets handled; it
-// is not this mutation's job to do it silently.
+// against it. So instead of silently cancelling anyone, this refuses while a
+// member is still being billed on the plan; see the in-use guard below.
 export const archivePlan = mutation({
   args: { planId: v.id("gymPlans") },
   handler: async (ctx, { planId }) => {
@@ -212,6 +212,35 @@ export const archivePlan = mutation({
     if (!plan || plan.gymId !== gym._id) {
       throw new ConvexError("That plan no longer exists.");
     }
+
+    // THE IN-USE GUARD. Archiving hides the plan from the picker, but a member
+    // already subscribed keeps being billed against its Stripe Price — the
+    // Price is a separate object and archiving a row here does not touch it.
+    // An owner who "removed" a plan and then sees charges still landing has
+    // been lied to by the UI, and the member is the one paying for it.
+    //
+    // Deliberately counts only members with a LIVE subscription. A member who
+    // merely has planId set has nothing running, so blocking on them would
+    // make a plan unremovable for a reason the owner cannot see or fix.
+    //
+    // Scans by_gym rather than an index on planId: a gym has 40-300 members,
+    // and adding an index means touching schema.ts, which this stage does not
+    // need to. Revisit if a gym ever gets large enough for that to matter.
+    const membersOnPlan = await ctx.db
+      .query("members")
+      .withIndex("by_gym", (q) => q.eq("gymId", gym._id))
+      .collect();
+    const stillBilling = membersOnPlan.filter(
+      (member) => member.planId === planId && !!member.stripeConnectSubscriptionId
+    ).length;
+    if (stillBilling > 0) {
+      throw new ConvexError(
+        stillBilling === 1
+          ? "1 member is still being billed on this plan. Move or cancel their dues first."
+          : `${stillBilling} members are still being billed on this plan. Move or cancel their dues first.`
+      );
+    }
+
     await ctx.db.patch(planId, { active: false });
   },
 });

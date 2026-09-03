@@ -371,3 +371,70 @@ test("archivePlan hides the plan without deleting the row", async () => {
   expect(plan?.active).toBe(false);
   expect(await asOwner.query(api.gymPlans.listPlans, {})).toEqual([]);
 });
+
+// --- 7. The in-use guard ----------------------------------------------------
+
+test("REGRESSION archivePlan refuses while a member is still being billed on it", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId } = await seedGym(t, "active");
+
+  const planId = await t.mutation(internal.gymPlans.createPlanRow, {
+    gymId,
+    name: "Adult Unlimited",
+    amountCents: 15000,
+    interval: "month",
+  });
+
+  await t.run(async (ctx) => {
+    await ctx.db.insert("members", {
+      name: "Paying Member",
+      plan: "BJJ Monthly",
+      status: "active",
+      gymId,
+      planId,
+      stripeConnectSubscriptionId: "sub_live",
+      duesStatus: "active",
+    });
+  });
+
+  // Archiving hides the plan from the picker but does NOT touch its Stripe
+  // Price, so the member keeps being charged. An owner who "removed" a plan
+  // and then sees charges still landing has been lied to by the UI, and the
+  // member is the one paying for it.
+  await expect(
+    asOwner.mutation(api.gymPlans.archivePlan, { planId })
+  ).rejects.toThrow(/1 member is still being billed/);
+
+  const plan = await t.run(async (ctx) => ctx.db.get(planId));
+  expect(plan?.active).toBe(true);
+  expect(await asOwner.query(api.gymPlans.listPlans, {})).toHaveLength(1);
+});
+
+test("archivePlan succeeds when a member holds the plan but has no subscription", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId } = await seedGym(t, "active");
+
+  const planId = await t.mutation(internal.gymPlans.createPlanRow, {
+    gymId,
+    name: "Adult Unlimited",
+    amountCents: 15000,
+    interval: "month",
+  });
+
+  await t.run(async (ctx) => {
+    await ctx.db.insert("members", {
+      name: "Assigned But Unbilled",
+      plan: "BJJ Monthly",
+      status: "active",
+      gymId,
+      planId,
+    });
+  });
+
+  // planId alone bills nobody. Blocking on it would make a plan unremovable
+  // for a reason the owner can neither see nor fix.
+  await asOwner.mutation(api.gymPlans.archivePlan, { planId });
+
+  const plan = await t.run(async (ctx) => ctx.db.get(planId));
+  expect(plan?.active).toBe(false);
+});
