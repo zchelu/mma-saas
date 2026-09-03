@@ -361,10 +361,15 @@ export const changeMemberPlan = action({
       throw new ConvexError("Member billing is unavailable right now. Nothing was changed.");
     }
 
-    const current = await stripe.subscriptions.retrieve(member.stripeConnectSubscriptionId, {
-      stripeAccount: stripeConnectAccountId,
-      apiVersion: STRIPE_API_VERSION,
-    });
+    // Connect options go in the THIRD argument (RequestOptions), not the
+    // second (params) - same shape as the update call below. Passed as params
+    // they are silently ignored and the read hits the PLATFORM account, where
+    // this subscription does not exist.
+    const current = await stripe.subscriptions.retrieve(
+      member.stripeConnectSubscriptionId,
+      undefined,
+      { stripeAccount: stripeConnectAccountId, apiVersion: STRIPE_API_VERSION }
+    );
     const currentItemId = current.items.data[0]?.id;
     if (!currentItemId) {
       throw new ConvexError("Couldn't read this member's subscription at Stripe. Try again.");
