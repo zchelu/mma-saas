@@ -462,9 +462,29 @@ export default defineSchema({
   // A separate table, and NOT because ids could collide: Stripe's `evt_` ids
   // are globally unique, so one table would work. It is for operational
   // isolation. The platform stream is load-bearing for provisioning a gym that
-  // has already paid; the dues stream must be purgeable, replayable and
+  // has already paid; the ACCOUNT stream must be purgeable, replayable and
   // debuggable without any chance of disturbing it.
+  //
+  // "the dues stream" is what this comment used to say, and it was wrong: this
+  // table guards v2 ACCOUNT notifications. Member dues are a third stream with a
+  // third table — stripeDuesWebhookEvents, directly below.
   stripeConnectWebhookEvents: defineTable({
+    eventId: v.string(),
+    processedAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_processed_at", ["processedAt"]),
+  // Duplicate-delivery guard for the MEMBER DUES webhook, the third Stripe
+  // stream. Same 30-day retention and the same claim/release discipline as the
+  // two above; claimed and released by convex/stripeDuesEvents.ts.
+  //
+  // Separate from stripeConnectWebhookEvents for the operational-isolation
+  // reason that table's own comment gives, applied one level down. The two
+  // Connect streams are not one stream: that one carries v2 account
+  // notifications and is the only thing that ever learns a gym went live, this
+  // one carries members' money. Replaying either to debug it must not disturb
+  // the other.
+  stripeDuesWebhookEvents: defineTable({
     eventId: v.string(),
     processedAt: v.number(),
   })

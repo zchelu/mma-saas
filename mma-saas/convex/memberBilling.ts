@@ -284,6 +284,72 @@ export const getMemberByStripeConnectCustomerId = internalQuery({
   },
 });
 
+// Mirrors one Stripe invoice into duesInvoices. THE ONLY WRITER of that table.
+//
+// Upsert keyed on Stripe's invoice id, not an insert. Stripe redelivers as
+// normal operation and an invoice moves through several states (open -> paid,
+// or open -> payment_failed -> paid after a retry), so the same
+// stripeConnectInvoiceId arrives repeatedly and must converge on one row.
+//
+// AMOUNTS ARE INTEGER CENTS, straight off Stripe. `invoices.amount` one table
+// over is DOLLARS AS A FLOAT — see the schema comment there. Every field here
+// carries the `Cents` suffix precisely so the two can never be confused in a
+// diff, and nothing in this path may divide or multiply by 100.
+//
+// `status` uses Stripe's own five-value vocabulary rather than the paid/unpaid
+// pair `invoices` uses, so no value is ever translated on the way in and
+// silently flattened — uncollectible and void are not "unpaid".
+export const upsertDuesInvoice = internalMutation({
+  args: {
+    gymId: v.id("gyms"),
+    memberId: v.id("members"),
+    stripeConnectInvoiceId: v.string(),
+    amountDueCents: v.number(),
+    amountPaidCents: v.number(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("open"),
+      v.literal("paid"),
+      v.literal("uncollectible"),
+      v.literal("void")
+    ),
+    hostedInvoiceUrl: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { gymId, memberId, stripeConnectInvoiceId, ...fields } = args;
+
+    const member = await ctx.db.get(memberId);
+    if (!member || member.gymId !== gymId) {
+      throw new Error(`No member ${memberId} for gym ${gymId}`);
+    }
+
+    const existing = await ctx.db
+      .query("duesInvoices")
+      .withIndex("by_stripe_connect_invoice", (q) =>
+        q.eq("stripeConnectInvoiceId", stripeConnectInvoiceId)
+      )
+      .unique();
+
+    if (existing) {
+      // Tenant check on the EXISTING row too, not just the member. Stripe's
+      // invoice ids are unique per connected account, not globally, so two gyms
+      // could in principle present the same id — and patching another gym's row
+      // from this gym's webhook is exactly the cross-tenant write the whole spec
+      // exists to prevent.
+      if (existing.gymId !== gymId) {
+        throw new Error(
+          `Dues invoice ${stripeConnectInvoiceId} belongs to gym ${existing.gymId}, not ${gymId}`
+        );
+      }
+      await ctx.db.patch(existing._id, fields);
+      return;
+    }
+
+    await ctx.db.insert("duesInvoices", { gymId, memberId, stripeConnectInvoiceId, ...fields });
+  },
+});
+
 // How many live members hold a plan. Backs the archive guard in gymPlans.ts.
 export const countMembersOnPlan = internalQuery({
   args: { gymId: v.id("gyms"), planId: v.id("gymPlans") },

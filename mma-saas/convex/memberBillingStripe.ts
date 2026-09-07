@@ -262,6 +262,10 @@ export const createSubscriptionForMember = internalAction({
     stripeConnectCustomerId: v.string(),
     stripeConnectPriceId: v.string(),
     checkoutSessionId: v.string(),
+    // The card Checkout just attached, read off the session's SetupIntent by
+    // convex/connectDuesWebhookAction.ts. Optional only so this signature does
+    // not break a caller that predates it; the dues webhook always passes it.
+    defaultPaymentMethodId: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -272,6 +276,7 @@ export const createSubscriptionForMember = internalAction({
       stripeConnectCustomerId,
       stripeConnectPriceId,
       checkoutSessionId,
+      defaultPaymentMethodId,
     }
   ): Promise<{ created: boolean }> => {
     const member = await ctx.runQuery(internal.memberBilling.getMemberForBilling, {
@@ -294,6 +299,17 @@ export const createSubscriptionForMember = internalAction({
       {
         customer: stripeConnectCustomerId,
         items: [{ price: stripeConnectPriceId }],
+        // NAMED EXPLICITLY, not left to the customer's default.
+        //
+        // Setup-mode Checkout attaches the payment method to the Customer but
+        // does not reliably set invoice_settings.default_payment_method. A
+        // subscription created against a customer with an attached card and no
+        // default lands in `incomplete` and never collects — which reaches the
+        // gym as a member who "signed up" and reaches us as duesStatus "unpaid"
+        // with no failure event to explain it. The webhook reads the id off the
+        // session's SetupIntent, so this does not depend on Checkout's implicit
+        // behaviour.
+        ...(defaultPaymentMethodId ? { default_payment_method: defaultPaymentMethodId } : {}),
         // NO application_fee_percent and NO transfer_data. Processing is passed
         // through at cost — a deliberate revenue decision, not an omission
         // (spec §1). Adding a fee here silently changes the pricing story the

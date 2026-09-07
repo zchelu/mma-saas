@@ -88,6 +88,62 @@ http.route({
   }),
 });
 
+// Stripe MEMBER DUES webhook — v1 events from the gyms' CONNECTED accounts.
+// The third Stripe stream, and the second Connect one. See the header of
+// convex/connectDuesWebhookAction.ts for why it cannot share the route above.
+//
+// REGISTER THIS URL AT "CONNECTED ACCOUNTS" SCOPE. That is the OPPOSITE of the
+// instruction on /stripe/connect-webhook directly above, and both are correct:
+// v1 Connect events route to Connect-scoped destinations, while Accounts v2
+// events for the platform's own accounts route to platform-scoped ones. Getting
+// these two backwards is the single most likely way to break this feature, and
+// each mistake is silent in a different way — a platform-scoped endpoint here
+// receives events with no `account` field (the handler refuses them and says
+// so), and a Connect-scoped endpoint there receives nothing at all.
+//
+// Different signing secret again: STRIPE_CONNECT_DUES_WEBHOOK_SECRET, a Convex
+// environment variable, distinct from both STRIPE_WEBHOOK_SECRET and
+// STRIPE_CONNECT_WEBHOOK_SECRET.
+//
+// Events: checkout.session.completed, invoice.paid, invoice.payment_failed,
+// customer.subscription.updated, customer.subscription.deleted.
+//
+// URL: <deployment>.convex.site/stripe/dues-webhook
+http.route({
+  path: "/stripe/dues-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const signature = request.headers.get("stripe-signature");
+    if (!signature) {
+      return new Response(JSON.stringify({ error: "Missing stripe-signature header" }), {
+        status: 400,
+      });
+    }
+
+    const payload = await request.text();
+    const result = await ctx.runAction(api.connectDuesWebhookAction.verifyAndProcess, {
+      signature,
+      payload,
+    });
+
+    if (result.status === "invalid_signature") {
+      return new Response(JSON.stringify({ error: "Invalid webhook signature" }), { status: 400 });
+    }
+
+    // 500, not 400 — processing hit a transient failure and the dedupe claim has
+    // been released, so Stripe should redeliver. Stripe retries any non-2xx, so
+    // a 400 would also get retried, but it would record an outage as a rejected
+    // signature and send whoever is debugging to rotate a healthy secret.
+    if (result.status === "retry") {
+      return new Response(JSON.stringify({ error: "Temporarily unable to process" }), {
+        status: 500,
+      });
+    }
+
+    return new Response(JSON.stringify({ received: true }), { status: 200 });
+  }),
+});
+
 // Twilio inbound-SMS webhook (STOP/START opt-out handling). Lives here rather
 // than as a Next.js API route so the HMAC signature verification and the
 // internal-only member mutation it guards stay in the same trust boundary —
