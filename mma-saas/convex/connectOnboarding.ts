@@ -253,6 +253,26 @@ export const createConnectSession = action({
       const session = await stripe.accountSessions.create({
         account: stripeConnectAccountId,
         components: {
+          // NO `disable_stripe_user_authentication` HERE. Tried 2026-09-03 and
+          // Stripe returned 400 invalid_request_error, verbatim:
+          //
+          //   "The `disable_stripe_user_authentication` feature can only be set
+          //    to true for accounts where the platform owns requirements
+          //    collection, such as custom accounts."
+          //
+          // This account's `responsibilities.requirements_collector` derives to
+          // "stripe" — see ensureConnectedAccount above, where it is documented
+          // as NOT settable — because losses_collector and fees_collector are
+          // both "stripe". So STRIPE owns requirements collection here, and the
+          // flag is unavailable by construction, not by oversight.
+          //
+          // Setting it does not degrade gracefully: accountSessions.create
+          // rejects, fetchClientSecret throws, and the card renders "Something
+          // went wrong / There was an error during authentication" twice with no
+          // panel at all. Strictly worse than the stall it was trying to fix.
+          // Do not re-try this without changing the account's responsibilities
+          // first, which is a business decision about who bears negative
+          // balances — spec §1a and §8.2.
           account_onboarding: { enabled: true },
           account_management: { enabled: true },
           notification_banner: { enabled: true },

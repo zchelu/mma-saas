@@ -17,7 +17,14 @@ export async function sendLead(name: string, contact: string, challenge?: string
     `${contactLabel}: ${contact}`,
     challenge ? `Biggest challenge: ${challenge}` : null,
     ``,
-    `Submitted: ${timestamp} (MST)`,
+    // "Mountain", not "MST". The timestamp above is converted with
+    // timeZone: "America/Denver", which follows DST correctly - but the label
+    // was the literal string "MST", so from March to November it named the
+    // wrong zone beside a correct time. "Mountain" is true year round. If a
+    // real abbreviation is ever wanted, derive it with a second
+    // Intl.DateTimeFormat and formatToParts: timeZoneName cannot be added to
+    // the call above, because Intl rejects it alongside dateStyle/timeStyle.
+    `Submitted: ${timestamp} (Mountain)`,
   ].filter(Boolean).join("\n");
 
   try {
