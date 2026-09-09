@@ -51,9 +51,22 @@ next-env.d.ts
 .claude/skills/
 skills-lock.json
 
+# Per-machine Claude Code settings. NOT shared config — this is where the
+# tool-permission allowlist accumulates, and an allowlist entry records the
+# literal command it approved, so a one-off `stripe`/`convex` invocation that
+# carried a key on its command line lands a LIVE SECRET in this file. That has
+# already happened once in another repo on this machine, in a tracked file
+# with no remote to save it. THIS REPO IS PUBLIC and has one. Never commit it.
+.claude/settings.local.json
+
 # Codebase audit / product-overview docs. Same reasoning as .claude-docs/
 # above: THIS REPO IS PUBLIC, and these enumerate the product's gaps,
 # unbuilt features and demo weak points — a shortcut for a competitor and
 # worth more to one than any credential in the tree. The canonical copy
 # lives in the claude.ai project. Regenerate it there, never commit it here.
 docs/product-overview.md
+# Same category: session prompt docs written into docs/ on 2026-09-09. They
+# enumerate unbuilt stages, deploy failure modes and Stripe account ids.
+# Delete them — the canonical copy is in the claude.ai project.
+docs/claude-code-prompts-member-billing.md
+docs/prompt-4-guard-test.md
