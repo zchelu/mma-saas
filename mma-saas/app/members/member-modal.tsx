@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
@@ -13,6 +13,10 @@ type Member = {
   email?: string;
   phone?: string;
   beltRank?: string;
+  // The DUES plan (members.planId), not the free-text `plan` above. Optional
+  // because most rows have never been put on one — that is the gap this
+  // dropdown exists to close.
+  planId?: Id<"gymPlans">;
   dob?: string;
   dobUnverified?: boolean;
   address?: string;
@@ -22,16 +26,33 @@ type Member = {
 
 type Props = {
   member?: Member;
+  // Passed in from the roster rather than queried here. The modal already has
+  // the row, members.getAll ships the boolean, and a second per-member query
+  // fired from inside a modal is a round-trip for a fact the caller is holding.
+  hasDuesSubscription?: boolean;
   onClose: () => void;
 };
 
-export default function MemberModal({ member, onClose }: Props) {
+export default function MemberModal({ member, hasDuesSubscription = false, onClose }: Props) {
   const add = useMutation(api.members.add);
   const update = useMutation(api.members.update);
   const confirmDob = useMutation(api.members.confirmDob);
+  // planId has NO writer in members.add/update — deliberately, because
+  // memberFields is shared with documents.ts:createMemberFromKiosk and the
+  // unauthenticated tablet must not be able to put anyone on a billing plan.
+  // So the plan is a SECOND call, after the member itself saves.
+  const assignMemberPlan = useMutation(api.memberBilling.assignMemberPlan);
+  const plans = useQuery(api.gymPlans.listPlans);
 
   const [name, setName] = useState(member?.name ?? "");
+  // The free-text roster label. Left exactly as it was ON PURPOSE: it is what
+  // the /members table's Plan column renders, and it is NOT derived from planId
+  // and never synced to it. Two writers for one displayed string is how that
+  // string goes quietly stale — a gym that renames a plan at Stripe would have
+  // the roster disagree with the invoice and no way to tell which is right.
   const [plan, setPlan] = useState(member?.plan ?? "");
+  // null is a real, submittable choice — "— none —" takes a member off dues.
+  const [planId, setPlanId] = useState<Id<"gymPlans"> | null>(member?.planId ?? null);
   const [status, setStatus] = useState<"active" | "inactive">(member?.status ?? "active");
   const [email, setEmail] = useState(member?.email ?? "");
   const [phone, setPhone] = useState(member?.phone ?? "");
@@ -45,6 +66,11 @@ export default function MemberModal({ member, onClose }: Props) {
   const [consentError, setConsentError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Set when the CREATE path inserted a member and the plan call then failed.
+  // Without it the modal stays open in "add" mode over a member that already
+  // exists, and pressing Save again inserts a second one. Retrying targets the
+  // row that was actually created instead.
+  const [createdId, setCreatedId] = useState<Id<"members"> | null>(null);
   // Local, so the prompt disappears the instant it's confirmed rather than
   // after the members query round-trips. Also suppressed the moment the owner
   // edits the date at all — at that point they are clearly looking at it, and
@@ -99,10 +125,35 @@ export default function MemberModal({ member, onClose }: Props) {
         smsConsentConfirmed,
         smsConsentConfirmedAt,
       };
-      if (member) {
-        await update({ id: member._id, ...fields });
+      const existingId = member?._id ?? createdId;
+      let memberId: Id<"members">;
+      if (existingId) {
+        await update({ id: existingId, ...fields });
+        memberId = existingId;
       } else {
-        await add(fields);
+        // members.add returns the inserted id, which is the only way the
+        // create path has a member to assign a plan to.
+        memberId = await add(fields);
+        setCreatedId(memberId);
+      }
+
+      // ONLY when it actually changed. Sending the current value would make
+      // every save of a subscribed member hit assignMemberPlan's refusal and
+      // fail an edit that had nothing to do with billing.
+      if (planId !== (member?.planId ?? null)) {
+        try {
+          await assignMemberPlan({ memberId, planId });
+        } catch (err) {
+          // The member is already saved at this point. Saying only "couldn't
+          // save" would send the owner back to re-enter fields that are
+          // already stored — and, on the create path, to make a duplicate.
+          setSaveError(
+            `${member || createdId ? "Member saved" : "Member added"}, but the membership plan wasn't changed: ` +
+              getErrorMessage(err, "couldn't reach the server. Set it from the Billing panel.")
+          );
+          setSaving(false);
+          return;
+        }
       }
       onClose();
     } catch (err) {
@@ -175,6 +226,39 @@ export default function MemberModal({ member, onClose }: Props) {
               )}
             </div>
           )}
+          {/* The BILLING plan. Separate control from "Plan" below because they
+              are separate facts: this one is the money object every dues
+              function reads (members.planId), that one is the roster label. */}
+          <Field label="Membership plan">
+            <select
+              value={planId ?? ""}
+              disabled={hasDuesSubscription || plans === undefined}
+              onChange={(e) => setPlanId(e.target.value ? (e.target.value as Id<"gymPlans">) : null)}
+              className="input"
+            >
+              <option value="">— none —</option>
+              {(plans ?? []).map((p) => (
+                <option key={p._id} value={p._id}>
+                  {p.name}
+                  {p.billable ? "" : " (not ready at Stripe)"}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {hasDuesSubscription ? (
+            // assignMemberPlan refuses outright while a subscription is live,
+            // and it should — the move has to happen at Stripe first, with
+            // proration, which only memberBillingStripe.changeMemberPlan does.
+            // Say where that lives rather than offering a write that throws.
+            <p className="text-xs -mt-2" style={{ color: "#555555" }}>
+              This member has dues running. Change their plan from the Billing panel on the
+              members list so Stripe is updated too.
+            </p>
+          ) : plans !== undefined && (plans ?? []).length === 0 ? (
+            <p className="text-xs -mt-2" style={{ color: "#555555" }}>
+              No plans yet. Create one on the plans card on your dashboard to charge dues.
+            </p>
+          ) : null}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Plan">
               <input required value={plan} onChange={(e) => setPlan(e.target.value)} className="input" placeholder="BJJ Monthly" />

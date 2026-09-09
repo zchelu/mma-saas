@@ -7,6 +7,7 @@ import AppHeader from "../components/app-header";
 import MemberModal from "./member-modal";
 import CheckInHistoryDrawer from "./check-in-history-drawer";
 import DocumentsDrawer from "./documents-drawer";
+import MemberBillingDrawer from "./member-billing-drawer";
 import ConsentAttestationPanel from "./consent-attestation-panel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
 import { isTextEligibleMember } from "../../lib/memberEligibility";
@@ -20,6 +21,11 @@ type Member = {
   email?: string;
   phone?: string;
   beltRank?: string;
+  // The DUES plan and whether dues are actually running — both from
+  // members.getAll. `plan` above is the free-text roster label this table's
+  // Plan column renders; the two are unrelated on purpose.
+  planId?: Id<"gymPlans">;
+  hasDuesSubscription?: boolean;
   lastVisit?: string;
   dob?: string;
   dobUnverified?: boolean;
@@ -66,6 +72,7 @@ export default function MembersPage() {
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
   const [docsMember, setDocsMember] = useState<Member | null>(null);
+  const [billingMember, setBillingMember] = useState<Member | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   // "not_on" is everything except a fully textable member — the actionable
@@ -340,6 +347,13 @@ export default function MembersPage() {
                           Documents
                         </button>
                         <button
+                          onClick={() => setBillingMember(m)}
+                          className="text-xs transition-colors hover:text-white"
+                          style={{ color: "#888888" }}
+                        >
+                          Billing
+                        </button>
+                        <button
                           onClick={() => setModal(m)}
                           className="text-xs transition-colors hover:text-white"
                           style={{ color: "#888888" }}
@@ -375,6 +389,7 @@ export default function MembersPage() {
         <MemberModal
           key={modal === "add" ? "add" : modal._id}
           member={modal === "add" ? undefined : modal}
+          hasDuesSubscription={modal === "add" ? false : modal.hasDuesSubscription}
           onClose={() => setModal(null)}
         />
       )}
@@ -392,6 +407,14 @@ export default function MembersPage() {
           memberId={docsMember._id}
           memberName={docsMember.name}
           onClose={() => setDocsMember(null)}
+        />
+      )}
+
+      {billingMember !== null && (
+        <MemberBillingDrawer
+          memberId={billingMember._id}
+          memberName={billingMember.name}
+          onClose={() => setBillingMember(null)}
         />
       )}
     </div>

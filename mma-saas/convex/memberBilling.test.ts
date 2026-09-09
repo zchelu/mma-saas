@@ -21,6 +21,9 @@
 //      identifier may cross that line — the same discipline that keeps
 //      checkInToken out of members.getAtRiskMembers and the Price id out of
 //      gymPlans.listPlans.
+//   5. THE PUBLIC PLAN WRITE. assignMemberPlan is the only browser-reachable
+//      writer of members.planId, and its refusal under a live subscription is
+//      the last thing holding that invariant — see section 8.
 import { convexTest } from "convex-test";
 import { expect, test } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -464,4 +467,192 @@ test("getMemberBillingState returns null rather than throwing when nobody is sig
   expect(
     await t.query(api.memberBilling.getMemberBillingState, { memberId })
   ).toBeNull();
+});
+
+// --- 8. assignMemberPlan, the public plan write -----------------------------
+//
+// THE ONLY THING THAT ACTUALLY HOLDS. planId is now reachable from two UI
+// paths — the member modal disables its plan select on hasDuesSubscription,
+// and the billing drawer routes subscribed members to changeMemberPlan
+// instead. Both are client-side politeness. Delete either and nothing fails,
+// no test goes red, and no error is logged; the row simply starts claiming one
+// price while Stripe bills another. The first person to notice is a member
+// reading their card statement. So the server-side throw gets pinned here.
+//
+// Every refusal below asserts the STORED planId, not just that it threw. A
+// guard that patches and then throws satisfies a rejects.toThrow() assertion
+// while doing the exact damage the guard exists to prevent.
+
+test("REGRESSION assignMemberPlan refuses while a subscription is live and leaves planId alone", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId, memberId } = await seedGym(t);
+
+  const oldPlanId = await seedPlan(t, gymId, "Old Plan");
+  const newPlanId = await seedPlan(t, gymId, "New Plan");
+
+  await t.mutation(internal.memberBilling.setMemberPlanId, {
+    gymId,
+    memberId,
+    planId: oldPlanId,
+  });
+  await t.mutation(internal.memberBilling.setMemberDuesSubscription, {
+    gymId,
+    memberId,
+    stripeConnectSubscriptionId: "sub_live",
+    status: "active",
+  });
+
+  await expect(
+    asOwner.mutation(api.memberBilling.assignMemberPlan, {
+      memberId,
+      planId: newPlanId,
+    })
+  ).rejects.toThrow(/already has dues running/);
+
+  expect(await t.run(async (ctx) => (await ctx.db.get(memberId))?.planId)).toBe(
+    oldPlanId
+  );
+
+  // And no escape hatch: this mutation takes no allowWhileSubscribed. Moving a
+  // subscribed member is memberBillingStripe.changeMemberPlan's job, which
+  // moves Stripe first and prorates.
+  await expect(
+    asOwner.mutation(api.memberBilling.assignMemberPlan, { memberId, planId: null })
+  ).rejects.toThrow(/already has dues running/);
+
+  expect(await t.run(async (ctx) => (await ctx.db.get(memberId))?.planId)).toBe(
+    oldPlanId
+  );
+});
+
+test("assignMemberPlan assigns a plan when no subscription is running", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId, memberId } = await seedGym(t);
+  const planId = await seedPlan(t, gymId);
+
+  await asOwner.mutation(api.memberBilling.assignMemberPlan, { memberId, planId });
+
+  expect(await t.run(async (ctx) => (await ctx.db.get(memberId))?.planId)).toBe(planId);
+});
+
+test("assignMemberPlan clears planId when passed null", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId, memberId } = await seedGym(t);
+  const planId = await seedPlan(t, gymId);
+
+  await asOwner.mutation(api.memberBilling.assignMemberPlan, { memberId, planId });
+  // null is a real choice, not a no-op — it is the modal's "— none —" option,
+  // and it must actually remove the field rather than leaving the old id.
+  await asOwner.mutation(api.memberBilling.assignMemberPlan, { memberId, planId: null });
+
+  // Asserted INSIDE t.run, and on the key rather than the value. Two reasons:
+  // t.run's return value crosses the Convex value boundary, where `undefined`
+  // arrives as `null` and a .toBeUndefined() out here fails on a correct
+  // clear; and "key absent" is the state the schema means by an optional
+  // field, which a value comparison cannot tell apart from a stored null.
+  expect(
+    await t.run(async (ctx) => {
+      const row = await ctx.db.get(memberId);
+      return row !== null && !("planId" in row);
+    })
+  ).toBe(true);
+});
+
+test("REGRESSION assignMemberPlan refuses a plan belonging to another gym", async () => {
+  const t = convexTest(schema, modules);
+  const alice = await seedGym(t, "Alice BJJ");
+  const bob = await seedGym(t, "Bob MMA");
+
+  const alicePlanId = await seedPlan(t, alice.gymId, "Alice Unlimited");
+  const bobPlanId = await seedPlan(t, bob.gymId, "Bob Unlimited");
+  await bob.asOwner.mutation(api.memberBilling.assignMemberPlan, {
+    memberId: bob.memberId,
+    planId: bobPlanId,
+  });
+
+  // A plan id is not a capability. Without the gymId check Bob could put his
+  // own member on Alice's plan, and every dues charge would then run against a
+  // Price on Alice's connected account.
+  await expect(
+    bob.asOwner.mutation(api.memberBilling.assignMemberPlan, {
+      memberId: bob.memberId,
+      planId: alicePlanId,
+    })
+  ).rejects.toThrow(/That plan no longer exists/);
+
+  expect(
+    await t.run(async (ctx) => (await ctx.db.get(bob.memberId))?.planId)
+  ).toBe(bobPlanId);
+});
+
+test("assignMemberPlan refuses an archived plan and leaves planId alone", async () => {
+  const t = convexTest(schema, modules);
+  const { asOwner, gymId, memberId } = await seedGym(t);
+
+  const livePlanId = await seedPlan(t, gymId, "Adult Unlimited");
+  const archivedPlanId = await seedPlan(t, gymId, "Retired Plan");
+  await t.run(async (ctx) => ctx.db.patch(archivedPlanId, { active: false }));
+
+  await asOwner.mutation(api.memberBilling.assignMemberPlan, {
+    memberId,
+    planId: livePlanId,
+  });
+
+  // Archived plans are KEPT so past charges stay readable (gymPlans.archivePlan),
+  // which means their ids stay valid and reachable from a stale browser tab.
+  // Assigning one would put a member on a plan the picker no longer offers.
+  await expect(
+    asOwner.mutation(api.memberBilling.assignMemberPlan, {
+      memberId,
+      planId: archivedPlanId,
+    })
+  ).rejects.toThrow(/That plan no longer exists/);
+
+  expect(await t.run(async (ctx) => (await ctx.db.get(memberId))?.planId)).toBe(
+    livePlanId
+  );
+});
+
+test("REGRESSION assignMemberPlan refuses another gym's member with the missing-member message", async () => {
+  const t = convexTest(schema, modules);
+  const alice = await seedGym(t, "Alice BJJ");
+  const bob = await seedGym(t, "Bob MMA");
+
+  const bobPlanId = await seedPlan(t, bob.gymId, "Bob Unlimited");
+
+  await expect(
+    bob.asOwner.mutation(api.memberBilling.assignMemberPlan, {
+      memberId: alice.memberId,
+      planId: bobPlanId,
+    })
+  ).rejects.toThrow(/That member no longer exists/);
+
+  // Key absent, checked inside t.run — see the note in the clearing test above.
+  expect(
+    await t.run(async (ctx) => {
+      const row = await ctx.db.get(alice.memberId);
+      return row !== null && !("planId" in row);
+    })
+  ).toBe(true);
+
+  // THE SAME MESSAGE a genuinely missing member gets. A distinct error would
+  // confirm that Alice's member id is real, which is the thing the id must not
+  // be able to tell a stranger.
+  const goneMemberId = await t.run(async (ctx) => {
+    const id = await ctx.db.insert("members", {
+      name: "Deleted",
+      plan: "BJJ Monthly",
+      status: "active",
+      gymId: bob.gymId,
+    });
+    await ctx.db.delete(id);
+    return id;
+  });
+
+  await expect(
+    bob.asOwner.mutation(api.memberBilling.assignMemberPlan, {
+      memberId: goneMemberId,
+      planId: bobPlanId,
+    })
+  ).rejects.toThrow(/That member no longer exists/);
 });

@@ -17,9 +17,9 @@
 // NOTHING HERE TALKS TO STRIPE, and that is deliberate: every mutation below is
 // a mirror of a fact Stripe already confirmed, never the origin of one. The one
 // exception is planId, which is ours.
-import { query, internalQuery, internalMutation } from "./_generated/server";
+import { query, mutation, internalQuery, internalMutation } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
-import { requireGym, tryGetGym } from "./gyms";
+import { requireGym, requireWriteAccess, tryGetGym } from "./gyms";
 
 // Stripe's subscription vocabulary, narrowed to the states we act on. Must
 // agree with schema.ts:members.duesStatus.
@@ -142,6 +142,45 @@ export const setMemberPlanId = internalMutation({
     if (planId !== null) {
       const plan = await ctx.db.get(planId);
       if (!plan || plan.gymId !== gymId || !plan.active) {
+        throw new ConvexError("That plan no longer exists.");
+      }
+    }
+    await ctx.db.patch(memberId, { planId: planId ?? undefined });
+  },
+});
+
+// The owner-facing way to put a member on a plan, or take them off it.
+//
+// EXISTS BECAUSE setMemberPlanId ABOVE IS INTERNAL. The billing drawer needs to
+// assign a plan before any Stripe object exists, and an internalMutation is not
+// callable from a browser. This is the same write behind requireGym +
+// requireWriteAccess, with the member re-checked against the caller's own gym
+// for the reason getMemberForBilling states: a member id is not a capability.
+//
+// REFUSES WHILE A SUBSCRIPTION IS LIVE, exactly as setMemberPlanId does. A live
+// subscription has to move at Stripe first — memberBillingStripe.changeMemberPlan
+// is the only path that does that, and it prorates. Letting this write planId
+// under a running subscription would leave the row claiming one price while
+// Stripe bills another, which is the disagreement nothing on screen can show.
+export const assignMemberPlan = mutation({
+  args: { memberId: v.id("members"), planId: v.union(v.id("gymPlans"), v.null()) },
+  handler: async (ctx, { memberId, planId }) => {
+    const gym = await requireGym(ctx);
+    requireWriteAccess(gym);
+
+    const member = await ctx.db.get(memberId);
+    // Same message for "not yours" and "gone", as everywhere else in this file.
+    if (!member || member.gymId !== gym._id) {
+      throw new ConvexError("That member no longer exists.");
+    }
+    if (member.stripeConnectSubscriptionId) {
+      throw new ConvexError(
+        "This member already has dues running. Change the plan from the billing panel so Stripe is updated too."
+      );
+    }
+    if (planId !== null) {
+      const plan = await ctx.db.get(planId);
+      if (!plan || plan.gymId !== gym._id || !plan.active) {
         throw new ConvexError("That plan no longer exists.");
       }
     }

@@ -78,6 +78,18 @@ export const getAll = query({
       // getAtRiskMembers returns, so the Members table and the dashboard's At
       // Risk panel render that state from identical inputs.
       winbackAttempts: m.winbackAttempts,
+      // The DUES plan — the money object (schema comment on members.planId).
+      // `plan` above is the free-text roster label and the two are deliberately
+      // unrelated. Shipped so the member modal's "Membership plan" dropdown can
+      // seed itself; it is written through memberBilling.assignMemberPlan, never
+      // through this table's own add/update, which cannot touch planId at all.
+      planId: m.planId,
+      // WHETHER, not which. No stripeConnect* identifier goes to the browser —
+      // same narrowing as memberBilling.getMemberBillingState and
+      // gymPlans.listPlans. This is the one fact the modal needs: a member with
+      // dues running can only be moved through Stripe, so the dropdown is
+      // disabled rather than offering a write assignMemberPlan would refuse.
+      hasDuesSubscription: !!m.stripeConnectSubscriptionId,
     }));
   },
 });
