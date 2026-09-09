@@ -16,6 +16,13 @@ const isPublicRoute = createRouteMatcher([
   // inbox. Reproduced against production 2026-08-31. A page that a signed-out
   // visitor is ROUTED TO must be public, not merely the page that routes to it.
   '/thank-you',
+  // Where STRIPE routes a member after setup-mode Checkout
+  // (convex/memberBillingStripe.ts:createDuesSetupLink sets both URLs). Same
+  // failure as /thank-you above, one step further out: a member is not a
+  // KombatDesk user and never will be — there is no account for Clerk to send
+  // them to. They arrive from Stripe's domain carrying no session and no
+  // identifiers, which is why these pages read as they do.
+  '/dues(.*)',
   '/checkin(.*)',
   // The front-desk tablet's other half — new-member signup and waiver
   // signing. Unauthenticated for the same reason /checkin is: the device at
