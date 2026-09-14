@@ -20,7 +20,7 @@ import Stripe from "stripe";
 import { action, ActionCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { extractConnectStatus } from "../lib/connectStatus";
 
 // Pinned explicitly, never inherited from the SDK default. Variant 7 is
@@ -289,6 +289,109 @@ export const createConnectSession = action({
       console.error(`Connect: could not mint an account session for gym ${gym._id}:`, err);
       throw new ConvexError(
         "Couldn't open member billing setup just now. Nothing has changed on your account — try again shortly."
+      );
+    }
+  },
+});
+
+// The return targets for a hosted Account Link, and why there is an allowlist.
+//
+// REINSTATED WITH THE REDIRECT. createConnectSession's header above says the
+// origin allowlist "deleted itself" along with CONNECT_DEV_RETURN_ORIGIN — true
+// while there was no return target, wrong again the moment there is one. The
+// origin comes from the browser, and an unvalidated return_url handed to Stripe
+// is an open redirect that a gym owner walks through mid-onboarding.
+//
+// Falls back to production rather than throwing: a bad origin should land the
+// owner somewhere real, not strand them on an error AFTER they have already
+// finished Stripe's flow and can no longer reuse the link.
+const PRODUCTION_ORIGIN = "https://www.kombatdesk.com";
+const ALLOWED_RETURN_ORIGINS: ReadonlySet<string> = new Set([
+  PRODUCTION_ORIGIN,
+  "https://kombatdesk.com",
+  "http://localhost:3000",
+]);
+
+function resolveReturnOrigin(requested?: string): string {
+  if (requested && ALLOWED_RETURN_ORIGINS.has(requested)) return requested;
+  if (requested) {
+    console.warn(
+      `Connect: return origin ${requested} is not allowlisted; using ${PRODUCTION_ORIGIN}.`
+    );
+  }
+  return PRODUCTION_ORIGIN;
+}
+
+// Hosted onboarding — the ONE path a founding gym has to charges-enabled.
+//
+// PARTIAL REVERT OF STAGE C, ONBOARDING STEP ONLY. The rest of the embedded
+// Connect surface stays: account management and the notification banner both
+// work, and this does not touch them.
+//
+// Why the embedded onboarding component cannot be used here: this account's
+// `responsibilities.requirements_collector` derives to "stripe" (both
+// losses_collector and fees_collector are "stripe" — see ensureConnectedAccount,
+// where it is documented as NOT settable). Stripe therefore owns requirements
+// collection, and its embedded onboarding expects the owner to authenticate as a
+// Stripe user partway through, inside a cross-origin connect-js iframe. That
+// handshake never completes: the panel spins indefinitely, no error, no console
+// output. `disable_stripe_user_authentication` is the documented escape hatch
+// and it is rejected with a 400 on exactly this account shape — see the comment
+// in createConnectSession, and do not try it again.
+//
+// Zain can finish an account by hand through his own Stripe dashboard. A gym
+// cannot: dashboard is "none" and immutable, so there is no Stripe-hosted
+// surface for them and no "Complete onboarding" link on any platform page. If
+// this card stalls for them they never take a payment, and every later stage is
+// unreachable regardless of what is committed.
+//
+// Hosted onboarding was proven end to end on 2026-09-11: acct_1U5vUlQwB6H9L3jJ
+// went from Restricted with 12 past-due requirements to Enabled, card payments
+// and payouts Active. The live platform profile lists Onboarding as
+// "Stripe-hosted or embedded", so this is an approved configuration and not a
+// workaround. Full history in claude/connect-onboarding-stall-2026-09-03.md —
+// read the corrected banner, not the superseded body.
+//
+// ONE-SHOT, unlike createConnectSession. An Account Link is single-use and
+// short-lived, so it is minted by the click and redirected to immediately.
+// Never cache it, never mint it during a render.
+//
+// type "account_onboarding", not "account_update": `update` skips requirement
+// collection for an account that has not completed onboarding, which is
+// precisely the account this exists for.
+export const createAccountLink = action({
+  args: { origin: v.optional(v.string()) },
+  handler: async (ctx, { origin }): Promise<{ url: string }> => {
+    const stripe = readStripeClient();
+    if (!stripe) {
+      throw new ConvexError(
+        "Member billing setup is temporarily unavailable. Nothing has changed on your account — try again shortly."
+      );
+    }
+
+    const gym = await requireOwnerGym(ctx);
+    const stripeConnectAccountId = await ensureConnectedAccount(ctx, stripe, gym);
+    const base = resolveReturnOrigin(origin);
+
+    try {
+      // refresh_url is where Stripe sends an owner whose link expired before
+      // they finished — it must land somewhere that can mint a NEW one, which is
+      // this card. ?connect=refresh is what lets it say so instead of silently
+      // re-presenting the same button.
+      const link = await stripe.accountLinks.create({
+        account: stripeConnectAccountId,
+        type: "account_onboarding",
+        refresh_url: `${base}/dashboard?connect=refresh`,
+        return_url: `${base}/dashboard?connect=return`,
+      });
+      return { url: link.url };
+    } catch (err) {
+      if (isAccountGoneError(err)) {
+        throw await goneAccountError(ctx, gym._id, stripeConnectAccountId, err);
+      }
+      console.error(`Connect: could not create an account link for gym ${gym._id}:`, err);
+      throw new ConvexError(
+        "Couldn't open Stripe verification just now. Nothing has changed on your account — try again shortly."
       );
     }
   },

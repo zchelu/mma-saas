@@ -1,18 +1,18 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { loadConnectAndInitialize } from "@stripe/connect-js";
 import type { AppearanceOptions, StripeConnectInstance } from "@stripe/connect-js";
 import {
   ConnectAccountManagement,
-  ConnectAccountOnboarding,
   ConnectComponentsProvider,
   ConnectNotificationBanner,
 } from "@stripe/react-connect-js";
 import { api } from "../../convex/_generated/api";
 import { useDetectedTimezone } from "../components/use-detected-timezone";
 import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
+import { useOrigin } from "../components/use-origin";
 
 // Stage C of Connect member billing (spec §5.1): the owner-facing surface for
 // connecting a Stripe account so the gym can bill its own members.
@@ -150,16 +150,28 @@ function errorText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-export default function ConnectBilling() {
+// `connectParam` is the ?connect= value Stripe sent the owner back with, passed
+// down from the server page rather than read here with useSearchParams — that
+// hook opts the whole subtree into client-side bailout and needs a Suspense
+// boundary, for a value the page already has in hand.
+export default function ConnectBilling({ connectParam }: { connectParam?: string }) {
   const status = useQuery(api.connect.getConnectStatus);
   const createSession = useAction(api.connectOnboarding.createConnectSession);
+  const createLink = useAction(api.connectOnboarding.createAccountLink);
   const refreshStatus = useAction(api.connectOnboarding.refreshConnectStatus);
   const saveTimezone = useMutation(api.connect.setTimezone);
 
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [timezoneDraft, setTimezoneDraft] = useState<string | null>(null);
+
+  // "" during SSR and hydration, the real origin immediately after — see
+  // use-origin.ts. Only ever read inside a click handler, which cannot run
+  // before hydration, so the empty first value is never the one sent. The
+  // server allowlists it regardless.
+  const origin = useOrigin();
 
   // See use-detected-timezone.ts. Was a useState + effect pair here, which is
   // the react-hooks/set-state-in-effect shape use-hydrated.ts and
@@ -223,22 +235,69 @@ export default function ConnectBilling() {
     }
   }, [refreshStatus]);
 
+  // THE REDIRECT FLOW'S ONE ADVANTAGE OVER EMBEDDED, and worth taking.
+  //
+  // refreshConnectStatus's header explains that embedded components never
+  // navigate, so there is no arrival event and the card can read "Setup
+  // incomplete" for a gym Stripe has already approved. A hosted Account Link
+  // does navigate: Stripe hands the owner back to ?connect=return, which is a
+  // real arrival signal. Poll once on it.
+  //
+  // Still best-effort, not a replacement for the account.updated webhook — an
+  // owner who closes the tab instead of returning produces no arrival at all.
+  // That webhook is live in production as of 2026-09-11.
+  const returnHandled = useRef(false);
+  useEffect(() => {
+    if (connectParam !== "return" || returnHandled.current) return;
+    returnHandled.current = true;
+    void recheck();
+  }, [connectParam, recheck]);
+
   if (status === undefined || status === null) return null;
 
   const timezone = timezoneDraft ?? status.timezone ?? detectedTimezone ?? "";
 
   // Declared once each so `disabled` and the disabled STYLE cannot disagree.
-  const setupDisabled = checking || !publishableKey;
+  const setupDisabled = checking || redirecting || !publishableKey;
+
+  // Read out here rather than off `status` inside openPanel. The early return
+  // above narrows `status` away from null, but openPanel is a hoisted function
+  // declaration — TypeScript assumes it could be called before the narrowing
+  // and drops it, so `status.chargesEnabled` in there is an error. A plain
+  // const captured in the closure needs no narrowing to survive.
+  const chargesEnabled = status.chargesEnabled;
 
   async function openPanel() {
     setError(null);
     if (!publishableKey) return;
     try {
-      // Saved BEFORE the panel opens on purpose: an owner who abandons Stripe's
+      // Saved BEFORE anything else on purpose: an owner who abandons Stripe's
       // flow still leaves their timezone recorded instead of losing it with the
       // rest of the attempt.
       if (timezone) await saveTimezone({ timezone });
 
+      // NOT YET APPROVED -> hosted onboarding, and leave the page.
+      //
+      // This is the branch every founding gym takes, because they arrive here
+      // unverified by definition. The embedded onboarding component stalls
+      // forever on this account shape and they have no Stripe dashboard to fall
+      // back to; convex/connectOnboarding.ts:createAccountLink carries the full
+      // why. Do not "restore" ConnectAccountOnboarding here without re-reading
+      // it.
+      if (!chargesEnabled) {
+        setRedirecting(true);
+        const { url } = await createLink({ origin: origin || undefined });
+        // Assigned, not pushed: the Account Link is single-use, so a back
+        // button returning to a consumed link should re-enter this card and
+        // mint a fresh one rather than restore a dead Stripe page.
+        window.location.href = url;
+        return;
+      }
+
+      // ALREADY APPROVED -> embedded account management, which genuinely works.
+      // It collects no requirements, so it never reaches the Stripe-user
+      // authentication handshake that hangs during onboarding.
+      //
       // Exactly one instance per click. Both setStates batch into a single
       // render, so this costs no more passes than flipping `open` alone did.
       setInstance(
@@ -250,6 +309,7 @@ export default function ConnectBilling() {
       );
       setOpen(true);
     } catch (err) {
+      setRedirecting(false);
       setError(errorText(err, "Couldn't start member billing setup. Try again in a moment."));
     }
   }
@@ -299,6 +359,13 @@ export default function ConnectBilling() {
         <TimezoneField value={timezone} detected={detectedTimezone} onChange={setTimezoneDraft} />
       )}
 
+      {connectParam === "refresh" && !open && (
+        <p className="text-xs mb-5 leading-relaxed" style={{ color: "#FBBF24" }}>
+          That Stripe link expired before you finished. Nothing you entered was lost —
+          start again and Stripe will pick up where you left off.
+        </p>
+      )}
+
       {status.connected && !status.chargesEnabled && !open && (
         <StatusExplanation status={status} />
       )}
@@ -318,11 +385,10 @@ export default function ConnectBilling() {
           <div className="mb-4">
             <ConnectNotificationBanner />
           </div>
-          {status.chargesEnabled ? (
-            <ConnectAccountManagement />
-          ) : (
-            <ConnectAccountOnboarding onExit={onPanelExit} />
-          )}
+          {/* Onboarding is NOT here any more — it is a hosted redirect, see
+              openPanel. `instance` is therefore only ever minted for an
+              already-approved gym, and this is the only component it wraps. */}
+          <ConnectAccountManagement />
           <button
             type="button"
             onClick={onPanelExit}
@@ -353,11 +419,13 @@ export default function ConnectBilling() {
             className="text-xs font-semibold rounded-lg px-4 py-2 disabled:cursor-not-allowed"
             style={setupDisabled ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
           >
-            {!status.connected
-              ? "Get ready for member billing"
-              : status.chargesEnabled
-                ? "Manage your Stripe details"
-                : "Finish verification"}
+            {redirecting
+              ? "Opening Stripe…"
+              : !status.connected
+                ? "Get ready for member billing"
+                : status.chargesEnabled
+                  ? "Manage your Stripe details"
+                  : "Finish verification"}
           </button>
 
           {status.connected && (

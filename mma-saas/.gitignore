@@ -70,3 +70,11 @@ docs/product-overview.md
 # Delete them — the canonical copy is in the claude.ai project.
 docs/claude-code-prompts-member-billing.md
 docs/prompt-4-guard-test.md
+
+# Convex query dumps written to the repo root while debugging (attest.txt,
+# members.txt, subs.txt on 2026-09-11). THIS REPO IS PUBLIC and members.txt
+# was ~39KB of the members table — real names and phone numbers. A roster in
+# a public repo is a worse problem than anything these dumps were written to
+# diagnose. Redirect future dumps outside the tree rather than relying on
+# this pattern to catch them.
+*.txt

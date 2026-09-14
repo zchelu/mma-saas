@@ -148,7 +148,12 @@ const memberFields = {
   phone: v.optional(v.string()),
   beltRank: v.optional(v.string()),
   smsConsentConfirmed: v.optional(v.boolean()),
-  smsConsentConfirmedAt: v.optional(v.number()),
+  // NO smsConsentConfirmedAt. It used to be here, and the browser supplied it —
+  // which is how a member ended up with a consent timestamp 495ms BEFORE its own
+  // _creationTime. The comment at the archive guard below calls these fields the
+  // TCPA evidence that a number may be texted; evidence a client authors is not
+  // evidence. `add` and `update` stamp it from server time instead, and only
+  // when consent is genuinely established.
   // Calendar date, "YYYY-MM-DD" — see the schema comment on members.dob. Owner
   // -editable here so a gym can fill it in from their paper records ahead of a
   // kids' class; the kiosk signing step also collects it when it's missing,
@@ -307,7 +312,14 @@ export const add = mutation({
       // "we have never heard from this number" and "this number opted back in"
       // are different facts and the schema distinguishes them.
       ...(optedOut ? { smsOptedOut: true } : {}),
-      ...(args.smsConsentConfirmed ? { smsConsentSource: "member_modal" as const } : {}),
+      // Timestamp and provenance are written together, from server time, or not
+      // at all — a row can never carry one without the other.
+      ...(args.smsConsentConfirmed
+        ? {
+            smsConsentConfirmedAt: Date.now(),
+            smsConsentSource: "member_modal" as const,
+          }
+        : {}),
     });
   },
 });
@@ -365,16 +377,26 @@ export const update = mutation({
       phoneChanged && newPhoneDigits
         ? await numberHasOptOutOnRecord(ctx, newPhoneDigits, id)
         : false;
-    // member-modal.tsx only advances smsConsentConfirmedAt to Date.now() when
-    // it computes needsConsent (a genuinely new phone/consent event); it
-    // resends the existing timestamp unchanged when just re-saving an
-    // already-confirmed phone. A changed timestamp is therefore this dashboard
-    // modal establishing fresh consent, not a no-op resend — worth stamping
-    // the source for. Doing the comparison here (not accepting source as a
-    // client arg) keeps this in sync with the modal without touching it.
+    // "Is this save establishing consent that was not already on file?"
+    //
+    // DERIVED FROM STORED STATE, NOT FROM A CLIENT TIMESTAMP. The previous test
+    // compared the incoming smsConsentConfirmedAt against the stored one and
+    // treated any difference as fresh consent. That only worked because the
+    // browser was trusted to resend the old value unchanged on a no-op save —
+    // and it is the same trust that let a client author the evidence timestamp
+    // at all. Server-stamping the time without changing this test would have
+    // made every save "fresh" (Date.now() always differs), so editing a belt
+    // rank would have re-stamped the consent record. Both halves move together
+    // or neither does.
+    //
+    // Two cases count as fresh, and they are exactly the two the modal shows
+    // its checkbox for: no consent on file yet, or a genuinely different
+    // number. phoneChanged is computed on NORMALIZED DIGITS above, so
+    // reformatting "(720) 555-0100" as "720-555-0100" is not a new consent
+    // event — which is the same normalization rule that stops a reformat from
+    // laundering an opt-out.
     const isFreshModalConsent =
-      fields.smsConsentConfirmed &&
-      fields.smsConsentConfirmedAt !== existing.smsConsentConfirmedAt;
+      !!fields.smsConsentConfirmed && (!existing.smsConsentConfirmed || phoneChanged);
 
     // An owner who changes the date to a DIFFERENT value has demonstrably
     // looked at it, so the kiosk's "nobody checked this" flag no longer holds.
@@ -422,7 +444,21 @@ export const update = mutation({
       // which is also what the privacy policy's post-removal retention
       // commitment requires.
       ...(phoneChanged && newPhoneDigits ? { smsOptedOut: inheritedOptOut } : {}),
-      ...(isFreshModalConsent ? { smsConsentSource: "member_modal" as const } : {}),
+      // Time and provenance together, from server time — see `add`.
+      //
+      // Withdrawn consent (the owner clears the phone, so smsConsentConfirmed
+      // arrives false) deliberately leaves the old smsConsentConfirmedAt and
+      // smsConsentSource in place. They record that consent WAS obtained and
+      // when, which is the fact TCPA asks us to be able to show; erasing the
+      // record of a past consent is not the same as recording its withdrawal.
+      // The send gate reads smsConsentConfirmed, so nothing is textable on the
+      // strength of a leftover timestamp.
+      ...(isFreshModalConsent
+        ? {
+            smsConsentConfirmedAt: Date.now(),
+            smsConsentSource: "member_modal" as const,
+          }
+        : {}),
     });
   },
 });

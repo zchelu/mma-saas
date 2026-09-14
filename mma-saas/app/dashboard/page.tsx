@@ -19,12 +19,16 @@ import MemberPlans from "./member-plans";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkout?: string; session_id?: string }>;
+  // `connect` is how a gym comes back from Stripe's hosted onboarding —
+  // "return" when they finished, "refresh" when the link expired first. Read
+  // here and handed to ConnectBilling so that card need not pull in
+  // useSearchParams and a Suspense boundary for a value this page already has.
+  searchParams: Promise<{ checkout?: string; session_id?: string; connect?: string }>;
 }) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
 
-  const { checkout, session_id: sessionId } = await searchParams;
+  const { checkout, session_id: sessionId, connect } = await searchParams;
   const token = await getConvexToken();
 
   // First authenticated page a new sign-up ever reaches — provisions this
@@ -153,7 +157,7 @@ export default async function DashboardPage({
         <AtRiskPanel />
         <WinbackPanel gymId={subscription.gymId} gymCreatedAt={subscription.createdAt} />
         <OwnerLinks slug={subscription.slug} />
-        <ConnectBilling />
+        <ConnectBilling connectParam={connect} />
         <MemberPlans />
       </main>
     </div>

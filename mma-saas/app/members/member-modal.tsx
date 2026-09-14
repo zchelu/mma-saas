@@ -99,13 +99,23 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
     setSaving(true);
     setSaveError(null);
     try {
-      const smsConsentConfirmed = trimmedPhone === "" ? false : true;
-      const smsConsentConfirmedAt =
-        trimmedPhone === ""
-          ? undefined
-          : needsConsent
-          ? Date.now()
-          : member?.smsConsentConfirmedAt;
+      // THE CHECKBOX, not a restatement of "is there a phone number".
+      //
+      // This read `trimmedPhone === "" ? false : true`, which meant the value
+      // the server checks in assertSmsConsent was fabricated by the caller the
+      // check exists to police — a guard its only caller could not fail. The
+      // submit gate above makes the two agree in practice, so this is not a
+      // behaviour change; it is the difference between a field that happens to
+      // be right and one that is right by construction.
+      //
+      // alreadyConfirmedForThisPhone covers the re-save of a number that is
+      // already on file, where the checkbox is not rendered at all.
+      const smsConsentConfirmed =
+        trimmedPhone !== "" && (smsConsent || alreadyConfirmedForThisPhone);
+
+      // smsConsentConfirmedAt is NOT sent any more — convex/members.ts stamps it
+      // from server time. A browser-supplied timestamp is why one member carried
+      // a consent time earlier than its own creation time.
 
       const fields = {
         name,
@@ -123,7 +133,6 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
         dob,
         address,
         smsConsentConfirmed,
-        smsConsentConfirmedAt,
       };
       const existingId = member?._id ?? createdId;
       let memberId: Id<"members">;
@@ -192,8 +201,18 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
 
           {needsConsent && (
             <div className="flex flex-col gap-1.5 rounded-lg p-3" style={{ backgroundColor: "#1A1A1A", border: "0.5px solid #333333" }}>
-              <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: "#CCCCCC" }}>
+              {/* THE CLICK TARGET IS ONE SHORT LINE, and the explanatory text
+                  sits OUTSIDE the label. It used to wrap the whole two-line
+                  sentence, so every click anywhere in that paragraph toggled
+                  consent — and a triple-click, the ordinary way to select a
+                  sentence you want to read or copy, is three activations, an
+                  odd number, which lands the box CHECKED. A TCPA consent
+                  control that can be switched on by selecting its own text is
+                  not a control. select-none keeps a drag over the label itself
+                  from doing the same thing. */}
+              <div className="flex items-start gap-2">
                 <input
+                  id="sms-consent"
                   type="checkbox"
                   checked={smsConsent}
                   onChange={(e) => {
@@ -203,22 +222,27 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
                   className="mt-0.5 shrink-0"
                   style={{ accentColor: "#E02020" }}
                 />
-                <span>
-                  I confirm this member has consented to receive text messages regarding
-                  their membership and attendance, per KombatDesk&apos;s{" "}
-                  <a
-                    href="/terms#sms"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="underline"
-                    style={{ color: "#CCCCCC" }}
-                  >
-                    Terms of Service
-                  </a>
-                  .
-                </span>
-              </label>
+                <label
+                  htmlFor="sms-consent"
+                  className="text-sm cursor-pointer select-none"
+                  style={{ color: "#CCCCCC" }}
+                >
+                  I confirm this member has consented to receive text messages
+                </label>
+              </div>
+              <p className="text-xs pl-6 leading-relaxed" style={{ color: "#888888" }}>
+                Texts cover their membership and attendance, per KombatDesk&apos;s{" "}
+                <a
+                  href="/terms#sms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                  style={{ color: "#888888" }}
+                >
+                  Terms of Service
+                </a>
+                .
+              </p>
               {consentError && (
                 <p className="text-xs" style={{ color: "#E02020" }}>
                   You must confirm SMS consent before saving a phone number.
