@@ -1,0 +1,17 @@
+# Repo-root ignores. THIS REPO IS PUBLIC.
+#
+# Everything below mma-saas/ is covered by mma-saas/.gitignore. This file
+# exists because `git add -A` run from anywhere stages the WHOLE repo — the
+# git root is C:\dev\kombatdesk, not mma-saas — and on 2026-09-14 that swept
+# "Claude outputs/handoff-2026-09-11-prod-config.md" into a public commit.
+
+# Session handoff docs. Same reasoning as mma-saas/.gitignore's block on
+# docs/product-overview.md: these enumerate unbuilt stages, unfixed defects,
+# deploy failure modes, Stripe account ids and webhook endpoint ids. That is
+# a map of the product's gaps and is worth more to a competitor than any
+# credential in the tree. The canonical copies live in the claude.ai project.
+Claude outputs/
+
+# Query dumps and scratch text files. members.txt was ~39KB of real member
+# names and phone numbers.
+*.txt

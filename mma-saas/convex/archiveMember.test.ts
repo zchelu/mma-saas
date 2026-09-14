@@ -200,7 +200,11 @@ test("update rejects an archived member and leaves the opt-out record intact", a
       status: "active",
       phone: "(720) 555-0999",
       smsConsentConfirmed: true,
-      smsConsentConfirmedAt: Date.now(),
+      // No smsConsentConfirmedAt: it is no longer a client argument. The server
+      // stamps consent time and source itself (members.ts), so passing one here
+      // fails arg validation and the mutation never reaches the archived-member
+      // guard this test exists to cover — the assertion below would pass on a
+      // validator error and prove nothing.
     })
   ).rejects.toThrow(/Member not found/);
 
