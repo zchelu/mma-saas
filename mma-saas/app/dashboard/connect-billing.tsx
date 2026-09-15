@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { loadConnectAndInitialize } from "@stripe/connect-js";
 import type { AppearanceOptions, StripeConnectInstance } from "@stripe/connect-js";
 import {
@@ -246,12 +246,28 @@ export default function ConnectBilling({ connectParam }: { connectParam?: string
   // Still best-effort, not a replacement for the account.updated webhook — an
   // owner who closes the tab instead of returning produces no arrival at all.
   // That webhook is live in production as of 2026-09-11.
+  //
+  // The arrival render is NOT the authenticated render. ConvexProviderWithClerk
+  // holds queries until the Clerk token attaches, but an action fired from an
+  // effect is not held — on a cold arrival it reaches refreshConnectStatus
+  // before the token does and requireOwnerGym throws "You need to be signed in
+  // to set up member billing". recheck() catches that into setError, which this
+  // state does not render, so it failed silently and the owner saw a stale card.
+  //
+  // The ordering below is the fix: the isAuthenticated bail must come BEFORE
+  // returnHandled is set. Set the ref first and the single arrival event is
+  // burned on the render that can only throw, and the effect then returns early
+  // against its own consumed flag once auth settles. Bailing first lets the
+  // effect re-fire when isAuthenticated flips true — the first render at which
+  // the action can actually succeed.
+  const { isAuthenticated } = useConvexAuth();
   const returnHandled = useRef(false);
   useEffect(() => {
     if (connectParam !== "return" || returnHandled.current) return;
+    if (!isAuthenticated) return;
     returnHandled.current = true;
     void recheck();
-  }, [connectParam, recheck]);
+  }, [connectParam, isAuthenticated, recheck]);
 
   if (status === undefined || status === null) return null;
 
