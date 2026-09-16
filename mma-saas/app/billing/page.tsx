@@ -1,11 +1,56 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { fetchQuery } from "convex/nextjs";
 import Stripe from "stripe";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 import AppHeader from "../components/app-header";
 import ManageSubscriptionButton from "./manage-subscription-button";
+
+// FOUNDING (COMPED) TRIAL — see convex/schema.ts:foundingTrialEndsAt.
+//
+// This page's whole vocabulary assumes a Stripe customer: invoice history, a
+// cancellation date, a Manage Subscription button that opens the Stripe portal.
+// A founding gym has none of those, so without this block the owner of the
+// first gym opens /billing and reads "Status: trialing" over an empty invoice
+// list and no controls — which looks exactly like something has gone wrong with
+// their account. It has not; there is simply nothing in Stripe to show.
+function FoundingTrialCard({ endsAt, ended }: { endsAt: number; ended: boolean }) {
+  const endsOn = new Date(endsAt).toLocaleDateString();
+  return (
+    <div
+      className="mb-10 flex flex-col gap-3 rounded-lg px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+      style={
+        ended
+          ? { border: "1px solid #E02020", backgroundColor: "#1A0E0E" }
+          : { border: "1px solid #333333", backgroundColor: "#1A1A1A" }
+      }
+    >
+      <div className="flex flex-col gap-1 text-sm">
+        <span style={{ color: "#FFFFFF", fontWeight: 600 }}>
+          {ended ? `Free founding trial ended ${endsOn}` : `Free founding trial through ${endsOn}`}
+        </span>
+        <span style={{ color: "#888888" }}>
+          {ended
+            ? "No card was ever collected, so nothing was charged. Choose a plan to start making changes again — your data is untouched."
+            : "No card on file. Nothing will be charged when this date passes — we'll ask you to choose a plan instead."}
+        </span>
+      </div>
+      <Link
+        href="/pricing"
+        className="shrink-0 rounded-lg font-semibold px-6 py-3 text-sm text-center"
+        style={
+          ended
+            ? { backgroundColor: "#E02020", color: "#FFFFFF" }
+            : { backgroundColor: "#1A1A1A", color: "#CCCCCC", border: "1px solid #333333" }
+        }
+      >
+        {ended ? "Choose a plan" : "See plans"}
+      </Link>
+    </div>
+  );
+}
 
 function statusColor(status: string | null) {
   if (status === "active") return "#4ADE80";
@@ -80,6 +125,16 @@ export default async function BillingPage() {
             {subscription.planStatus ?? "—"}
           </span>
         </p>
+
+        {/* typeof === "number", not !== null — see the matching guard in
+            app/dashboard/page.tsx for the stale-deployment case this survives. */}
+        {typeof subscription.foundingTrialEndsAt === "number" &&
+          !subscription.stripeCustomerId && (
+            <FoundingTrialCard
+              endsAt={subscription.foundingTrialEndsAt}
+              ended={subscription.foundingTrialEnded}
+            />
+          )}
 
         {cancelAt && (
           <div

@@ -2,6 +2,7 @@ import { query, mutation, QueryCtx, MutationCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { ConvexError, v } from "convex/values";
 import { assertMaxLength } from "./validate";
+import { foundingTrialExpired } from "../lib/plans";
 
 // Statuses that unlock write access. Neither "inactive" (never subscribed)
 // nor a lapsed "canceled"/"past_due" qualifies. Also the definition of
@@ -11,7 +12,27 @@ import { assertMaxLength } from "./validate";
 // whether billing is live.
 const WRITE_ALLOWED_STATUSES = new Set(["active", "trialing"]);
 
-export function hasWriteAccess(gym: { planStatus?: string }): boolean {
+// The gym argument is a structural subset of Doc<"gyms">, widened beyond
+// planStatus for the founding-trial check below. Every caller already passes a
+// whole gym document, so nothing at the call sites changes.
+export function hasWriteAccess(gym: {
+  planStatus?: string;
+  foundingTrialEndsAt?: number;
+  stripeSubscriptionId?: string;
+}): boolean {
+  // WHERE THE COMPED TRIAL ACTUALLY ENDS.
+  //
+  // A founding gym's planStatus is the literal string "trialing", written once
+  // by convex/onboarding.ts and never touched again — there is no Stripe
+  // subscription behind it, so no webhook will ever move it off "trialing", not
+  // on day 31 and not in a year. Without this line the comped trial would be
+  // permanent, which is the exact failure the whole no-card grant has to avoid.
+  //
+  // Deliberately NOT mirrored into hasReadAccess below: an expired founding
+  // trial lands in the same place a canceled subscription does — read-only
+  // grace, so the owner can still see their roster and export it while they
+  // decide — and app/billing + app/dashboard prompt them to pick a plan.
+  if (foundingTrialExpired(gym)) return false;
   return !!gym.planStatus && WRITE_ALLOWED_STATUSES.has(gym.planStatus);
 }
 
@@ -70,8 +91,16 @@ export async function requireGym(
 export function requireWriteAccess(gym: Doc<"gyms">): void {
   if (!hasWriteAccess(gym)) {
     // ConvexError, not a plain Error — see assertReadAccess above.
+    //
+    // A founding gym gets its own sentence. "Reactivate billing" is wrong for
+    // someone who has never been billed and has no card on file to reactivate
+    // anything with — it reads as "your payment failed" to a gym that was
+    // explicitly promised it would not be charged, which is the worst possible
+    // message to send the first customer.
     throw new ConvexError(
-      "Your subscription isn't active — reactivate billing to make changes. You can still view your existing data."
+      foundingTrialExpired(gym)
+        ? "Your free founding trial has ended — choose a plan to keep making changes. You can still view and export everything you've added."
+        : "Your subscription isn't active — reactivate billing to make changes. You can still view your existing data."
     );
   }
 }

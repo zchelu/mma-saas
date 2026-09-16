@@ -144,14 +144,33 @@ export async function POST(request: NextRequest) {
   // Deliberately non-fatal: a Convex hiccup here must not take checkout down.
   // Falling through with null just restores the old behaviour for that one
   // request — a duplicate customer, which the guards now survive.
+  //
+  // The same read also answers "has this gym already had its free month?" —
+  // see usedFoundingTrial below.
   let reusedCustomerId: string | null = null;
+  // A FOUNDING GYM CONVERTING OFF THE COMPED TRIAL MUST NOT GET A SECOND ONE.
+  //
+  // The no-card founding trial (convex/schema.ts:foundingTrialEndsAt) already
+  // gave this gym TRIAL_DAYS free. buildCheckoutSessionParams grants TRIAL_DAYS
+  // unconditionally by default, so without this the gym that just finished 30
+  // free days would land on a subscription that bills 30 days later still —
+  // two free months, and a first-payment date neither side expected.
+  //
+  // Reads the flag rather than recomputing it: convex/subscriptions.ts's
+  // getSubscription is the single place the trial timestamp is interpreted.
+  let usedFoundingTrial = false;
   if (user) {
     try {
       const token = await getConvexToken();
       const subscription = await fetchQuery(api.subscriptions.getSubscription, {}, { token });
       reusedCustomerId = subscription.stripeCustomerId ?? null;
+      usedFoundingTrial = subscription.foundingTrialUsed;
     } catch (err) {
       console.error("Stripe checkout: could not read the existing Stripe customer, using a new one:", err);
+      // Deliberately non-fatal, same as reusedCustomerId above — a Convex
+      // hiccup must not take checkout down. The cost of falling through here is
+      // one founding gym getting a second free month, which is a discount we
+      // can live with; refusing the sale is not.
     }
   }
 
@@ -166,6 +185,10 @@ export async function POST(request: NextRequest) {
         : null,
       existingCustomerId: reusedCustomerId,
       couponId: applyDiscount && foundingOffer ? foundingOffer.couponId : null,
+      // undefined = the normal TRIAL_DAYS trial (the default lives in
+      // lib/checkoutSession.ts). null = no Stripe trial at all, for a gym that
+      // already had the comped one.
+      trialDays: usedFoundingTrial ? null : undefined,
     });
   }
 

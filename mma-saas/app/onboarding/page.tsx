@@ -11,7 +11,7 @@ const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt"]);
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ plan?: string }>;
+  searchParams: Promise<{ plan?: string; code?: string }>;
 }) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
@@ -56,8 +56,18 @@ export default async function OnboardingPage({
     redirect("/dashboard");
   }
 
-  const { plan } = await searchParams;
+  const { plan, code } = await searchParams;
   const initialPlan = plan && VALID_PLANS.has(plan) ? plan : "academy";
+
+  // FOUNDING (COMPED) TRIAL. ?code= prefills the founding-access field so Zain
+  // can send one link and the gym owner types nothing extra — the whole point
+  // of this path is that the first gym enters no card and as little else as
+  // possible. Never validated here: the code is checked server-side inside
+  // convex/onboarding.ts:completeOnboarding, which is also where the rate limit
+  // and the redemption cap live. Anything this page decided about it would be
+  // decoration, and a client-visible "valid/invalid" answer would turn the
+  // wizard into a code oracle.
+  const initialFoundingCode = typeof code === "string" ? code.slice(0, 100) : "";
 
   // Resolved server-side so raw Stripe price IDs never need a NEXT_PUBLIC_
   // env var / never ship to the client bundle — the wizard only ever holds
@@ -80,6 +90,7 @@ export default async function OnboardingPage({
         initialGymName={subscription.gymName ?? ""}
         initialCity={subscription.city ?? ""}
         initialState={subscription.state ?? ""}
+        initialFoundingCode={initialFoundingCode}
       />
     </div>
   );

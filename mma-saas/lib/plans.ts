@@ -107,3 +107,109 @@ export function allowedPriceIds(): string[] {
     process.env[STANDARD_PRICE_ENV.blackbelt],
   ].filter((id): id is string => id !== undefined);
 }
+
+// ---------------------------------------------------------------------------
+// Founding (comped) trial
+// ---------------------------------------------------------------------------
+//
+// TWO DIFFERENT TRIALS LIVE IN THIS CODEBASE. Do not merge them.
+//
+//   1. THE STRIPE TRIAL — every normal customer. Checkout collects a card,
+//      subscription_data.trial_period_days (lib/checkoutSession.ts) delays the
+//      first invoice by TRIAL_DAYS, planStatus "trialing" arrives from the
+//      customer.subscription.created webhook, and on day TRIAL_DAYS + 1 Stripe
+//      charges the card automatically. Unchanged by anything below.
+//
+//   2. THE FOUNDING TRIAL — the comped, no-card trial granted to the first
+//      gym(s) by convex/onboarding.ts:completeOnboarding. There is NO Stripe
+//      customer, NO subscription and NO card. planStatus "trialing" is written
+//      straight onto the gyms row and gyms.foundingTrialEndsAt is the entire
+//      expiry mechanism. Nothing can ever charge this gym, because Stripe has
+//      never heard of it.
+//
+// The helpers below are the only place the second kind is interpreted. They are
+// pure (no I/O, no Date coupling beyond an injectable `now`) because BOTH halves
+// of the app need them: convex/gyms.ts enforces access with them, and
+// app/dashboard + app/billing render from them. lib/plans.ts is already the
+// shared module Convex is allowed to bundle — keep these here rather than in a
+// file that imports Stripe or Next (see lib/foundingOffer.ts's header for what
+// happens otherwise).
+//
+// NOTE the shape: a structural subset of Doc<"gyms">, deliberately NOT an
+// import of it. lib/* must not import convex/_generated — Convex bundles this
+// file, and that would be a cycle.
+export type FoundingTrialFields = {
+  foundingTrialEndsAt?: number;
+  stripeSubscriptionId?: string;
+};
+
+// A REAL STRIPE SUBSCRIPTION ALWAYS OUTRANKS THE COMPED TRIAL, and that single
+// rule is why every helper here takes the whole gym instead of just the
+// timestamp. foundingTrialEndsAt is never cleared once written (it is also the
+// "already had its free month" record — see hasUsedFoundingTrial), so a gym
+// that converted three months ago still carries a timestamp deep in the past.
+// Without this check that stale timestamp would read as an expired trial and
+// revoke write access from a paying customer.
+export function hasFoundingTrial(gym: FoundingTrialFields): boolean {
+  return gym.foundingTrialEndsAt !== undefined && !gym.stripeSubscriptionId;
+}
+
+export function isOnFoundingTrial(gym: FoundingTrialFields, now: number = Date.now()): boolean {
+  return hasFoundingTrial(gym) && gym.foundingTrialEndsAt! > now;
+}
+
+// THE EXPIRY. There is no cron and no scheduled job anywhere behind the
+// founding trial: this function is evaluated inside convex/gyms.ts's
+// hasWriteAccess on every gym-scoped write and inside getSubscription on every
+// read, so the trial ends at the exact millisecond foundingTrialEndsAt names,
+// whether or not any background process ran. A cron would have added a second
+// source of truth and a window (up to a day wide) where the two disagreed.
+export function foundingTrialExpired(gym: FoundingTrialFields, now: number = Date.now()): boolean {
+  return hasFoundingTrial(gym) && gym.foundingTrialEndsAt! <= now;
+}
+
+// Whether this gym has EVER been granted a comped trial — converted or not,
+// expired or not. Deliberately ignores stripeSubscriptionId, unlike every
+// helper above: this is the record that stops app/api/stripe/checkout/route.ts
+// handing a converting founding gym a SECOND free month on the Stripe side, and
+// that gym is converting precisely because it is about to have a subscription.
+export function hasUsedFoundingTrial(gym: { foundingTrialEndsAt?: number }): boolean {
+  return gym.foundingTrialEndsAt !== undefined;
+}
+
+// Whole days remaining, rounded UP and floored at 0. Rounded up because the
+// last 23 hours of a trial must read "1 day left", not "0 days left" — a
+// countdown that reaches zero while access still works reads as a bug to the
+// owner and as a lie to us.
+export function foundingTrialDaysLeft(gym: FoundingTrialFields, now: number = Date.now()): number {
+  if (!hasFoundingTrial(gym)) return 0;
+  return Math.max(0, Math.ceil((gym.foundingTrialEndsAt! - now) / 86_400_000));
+}
+
+// Length of the FOUNDING trial, in days. Deliberately its own constant rather
+// than a reuse of TRIAL_DAYS, which is 30 and must stay 30:
+//
+//   - TRIAL_DAYS is what Stripe grants every normal paying customer
+//     (lib/checkoutSession.ts). Changing it changes what every future signup
+//     gets, which is not what a founding-gym decision should do.
+//   - content/terms.html says "30-day free trial" as literal text and cannot
+//     interpolate (Termly static export — see TRIAL_DAYS' comment). Moving
+//     TRIAL_DAYS without editing that file by hand makes the Terms a false
+//     statement about billing.
+//
+// The founding trial has neither constraint: no card, no Stripe subscription,
+// no auto-renewal, so nothing in the Terms' "Free Trial" clause describes it.
+// It is a comped grant Zain hands out by hand, and its length is a sales
+// decision, not a billing one.
+//
+// Every founding-facing consumer imports THIS, not TRIAL_DAYS:
+//   lib/plans.ts                          foundingTrialEndFrom (the actual grant)
+//   app/onboarding/onboarding-wizard.tsx  x3 — the green access line, the
+//                                         disclosure, the submit button label
+export const FOUNDING_TRIAL_DAYS = 60;
+
+// The grant itself, in one place, so the length promised in the wizard and the
+// length written to the row can never be two numbers.
+export function foundingTrialEndFrom(startedAt: number): number {
+  return startedAt + FOUNDING_TRIAL_DAYS * 86_400_000;
+}

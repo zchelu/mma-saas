@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
+import { FOUNDING_TRIAL_DAYS, PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS } from "@/lib/plans";
 import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
 
 const GENERIC_ERROR = "Something went wrong — please try again or contact us.";
@@ -28,6 +28,20 @@ function RenewalDisclosure({ plan }: { plan: string }) {
   return (
     <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
       {`${TRIAL_DAYS}-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
+    </p>
+  );
+}
+
+// The founding (comped) trial is NOT an automatic-renewal enrollment: no card
+// is collected, nothing is charged, and nothing renews. Showing
+// RenewalDisclosure over that button would state terms that are not the ones
+// taking effect — the same reasoning repairMode already uses below, and the
+// same C.R.S. 6-1-732 "clear and conspicuous, immediately adjacent" standard
+// pointed the other way. Say what the button actually does.
+function FoundingTrialDisclosure() {
+  return (
+    <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
+      {`Founding gym access: ${FOUNDING_TRIAL_DAYS} days free, no credit or debit card required. Nothing is charged and nothing renews automatically — when the ${FOUNDING_TRIAL_DAYS} days are up we'll ask you to choose a plan to keep going.`}
     </p>
   );
 }
@@ -74,6 +88,7 @@ export default function OnboardingWizard({
   initialGymName = "",
   initialCity = "",
   initialState = "",
+  initialFoundingCode = "",
 }: {
   initialPlan: string;
   priceIdByPlan: Record<string, string | undefined>;
@@ -92,6 +107,9 @@ export default function OnboardingWizard({
   // to life. THEY MUST NOT BE SENT TO STRIPE AGAIN — doing so creates a second
   // subscription on the same customer.
   repairMode?: boolean;
+  // Prefilled from /onboarding?code=... . Empty for every normal customer,
+  // which is what routes them to Stripe Checkout exactly as before.
+  initialFoundingCode?: string;
 }) {
   const plan = initialPlan;
   // No renamed tier skips the consent step: every academy/fightteam/blackbelt
@@ -110,8 +128,15 @@ export default function OnboardingWizard({
   const [state, setState] = useState(initialState);
 
   const [consent, setConsent] = useState(false);
+  const [foundingCode, setFoundingCode] = useState(initialFoundingCode);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Drives the copy and the button label only. Whether the code is REAL is
+  // decided server-side by convex/onboarding.ts and comes back in the
+  // mutation's result — this is just "the owner is claiming founding access",
+  // so the page stops promising a card charge while they are typing it.
+  const claimingFoundingTrial = !repairMode && foundingCode.trim().length > 0;
 
   // Declared once each, because `disabled` and the disabled STYLE now read the
   // same boolean. Inlining the expression twice per button is how a control
@@ -124,13 +149,35 @@ export default function OnboardingWizard({
     setSubmitting(true);
     setError(null);
     try {
-      await completeOnboarding({
+      const result = await completeOnboarding({
         gymName: gymName.trim(),
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         smsConsentConfirmed: consent,
         ownerEmail: user?.primaryEmailAddress?.emailAddress,
+        plan,
+        foundingCode: foundingCode.trim() || undefined,
       });
+
+      // FOUNDING (COMPED) TRIAL — the no-card path. The gym row already carries
+      // planStatus "trialing" and a foundingTrialEndsAt by the time this
+      // resolves, so /dashboard lets them straight in. Stripe is never called.
+      if (result.foundingTrial.granted) {
+        window.location.href = "/dashboard";
+        return;
+      }
+
+      // A code was typed and rejected (wrong, already claimed, rate limited).
+      // STOP — do not fall through to Checkout. Someone who has been promised a
+      // free founding month and mistypes one character must not find themselves
+      // on a card-entry page instead; that is the exact moment the first
+      // customer walks. The gym name/city/state they just entered are already
+      // saved, so retrying costs them nothing.
+      if (result.foundingTrial.error) {
+        setError(result.foundingTrial.error);
+        setSubmitting(false);
+        return;
+      }
 
       // Repair path: the subscription already exists and is active. The only
       // thing that was missing is the gym name, and completeOnboarding above
@@ -208,6 +255,32 @@ export default function OnboardingWizard({
             />
           </div>
 
+          {/* FOUNDING (COMPED) TRIAL. Optional and last, so it reads as what it
+              is — an extra, not a gate. Blank for every normal customer, who
+              continues to Stripe Checkout unchanged. Usually already filled in
+              from /onboarding?code=..., in which case the owner never touches
+              it. Validated server-side only (convex/onboarding.ts); nothing
+              here knows or may know whether it is real. */}
+          {!repairMode && (
+            <div className="flex flex-col gap-2 mt-2">
+              <input
+                value={foundingCode}
+                onChange={(e) => setFoundingCode(e.target.value)}
+                placeholder="Founding access code (optional)"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="rounded-lg px-4 py-3 text-sm focus:outline-none"
+                style={inputStyle}
+              />
+              {claimingFoundingTrial && (
+                <p className="text-xs" style={{ color: "#4ADE80" }}>
+                  {`Founding access — ${FOUNDING_TRIAL_DAYS} days free, no card required.`}
+                </p>
+              )}
+            </div>
+          )}
+
           {skipConsent && error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
 
           {skipConsent && <RenewalDisclosure plan={plan} />}
@@ -270,6 +343,8 @@ export default function OnboardingWizard({
               This finishes your setup. Your existing subscription is unchanged and you
               will not be charged again here.
             </p>
+          ) : claimingFoundingTrial ? (
+            <FoundingTrialDisclosure />
           ) : (
             <RenewalDisclosure plan={plan} />
           )}
@@ -296,7 +371,13 @@ export default function OnboardingWizard({
               className="flex-1 rounded-lg font-semibold px-6 py-3 text-sm disabled:cursor-not-allowed"
               style={step1Blocked ? DISABLED_BUTTON_STYLE : { backgroundColor: "#E02020", color: "#FFFFFF" }}
             >
-              {submitting ? "Setting up…" : repairMode ? "Finish setup" : "Continue to payment"}
+              {submitting
+                ? "Setting up…"
+                : repairMode
+                  ? "Finish setup"
+                  : claimingFoundingTrial
+                    ? `Start my ${FOUNDING_TRIAL_DAYS} free days`
+                    : "Continue to payment"}
             </button>
           </div>
         </div>

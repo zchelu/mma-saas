@@ -107,6 +107,29 @@ describe("trial and discount", () => {
     expect(params({ buyer: null }).subscription_data?.trial_period_days).toBe(TRIAL_DAYS);
   });
 
+  // The founding (comped) trial path. A gym that already had 30 free days with
+  // no card must not be handed a second 30 on the Stripe side when it converts
+  // — that is two free months and a first-payment date nobody agreed to.
+  test("REGRESSION trialDays null grants NO Stripe trial at all", () => {
+    const p = params({ trialDays: null });
+    expect(p.subscription_data?.trial_period_days).toBeUndefined();
+    // Stripe rejects trial_period_days: 0 outright, so the key must be absent
+    // rather than present-and-falsy.
+    expect("trial_period_days" in (p.subscription_data ?? {})).toBe(false);
+  });
+
+  test("omitting trialDays still means TRIAL_DAYS — the default lives here", () => {
+    expect(params({ trialDays: undefined }).subscription_data?.trial_period_days).toBe(
+      TRIAL_DAYS
+    );
+  });
+
+  test("dropping the trial leaves the rest of subscription_data intact", () => {
+    expect(params({ trialDays: null }).subscription_data?.metadata).toEqual({
+      clerkUserId: BUYER.clerkUserId,
+    });
+  });
+
   test("a coupon is attached only when one is passed", () => {
     expect(params({ couponId: "founding50" }).discounts).toEqual([{ coupon: "founding50" }]);
     expect(params().discounts).toBeUndefined();

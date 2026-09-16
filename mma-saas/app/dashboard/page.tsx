@@ -14,6 +14,7 @@ import SettlingGate from "./settling-gate";
 import WinbackPanel from "./winback-panel";
 import OwnerLinks from "./owner-links";
 import ConnectBilling from "./connect-billing";
+import FoundingTrialBanner from "./founding-trial-banner";
 import MemberPlans from "./member-plans";
 
 export default async function DashboardPage({
@@ -139,10 +140,37 @@ export default async function DashboardPage({
               legacy "starter" gym, which never had texting under the old
               pricing and shouldn't gain it just because the tier split was
               replaced with a billing-status-only check. */}
+          {/* foundingTrialEnded is the third condition for a reason: an expired
+              comped trial keeps planStatus "trialing" forever (nothing in
+              Stripe will ever move it — there is no subscription), so the first
+              test still passes while convex/gyms.ts:hasWriteAccess now refuses
+              the send. Without this the button would render, be clicked, and
+              throw. */}
           {(subscription.planStatus === "active" || subscription.planStatus === "trialing") &&
+            !subscription.foundingTrialEnded &&
             planHasTexting(subscription.plan ?? undefined) && <RetentionButton />}
         </div>
         <p className="mb-12" style={{ color: "#888888" }}>Here&apos;s your gym at a glance.</p>
+        {/* FOUNDING (COMPED) TRIAL — see convex/schema.ts:foundingTrialEndsAt.
+            Absent for every normal customer: a Stripe trial has a card behind
+            it and ends by converting itself, so it needs no countdown and no
+            prompt. This one ends by doing nothing at all, which is exactly why
+            it has to be said out loud. */}
+        {/* typeof === "number", NOT !== null. getSubscription returns null for a
+            gym with no founding trial — but an OLDER deployed version of that
+            query has no such key at all, so the value arrives as `undefined`,
+            and `undefined !== null` is true. Observed 2026-09-15 against a dev
+            deployment that hadn't been pushed yet: a normal gym rendered this
+            banner reading "0 days left" and "charged on Invalid Date". Convex
+            and Vercel deploy separately (AGENTS.md §5), so the app WILL run
+            against a stale query during every rollout — the guard has to
+            survive that window, not just the steady state. */}
+        {typeof subscription.foundingTrialEndsAt === "number" && (
+          <FoundingTrialBanner
+            endsAt={subscription.foundingTrialEndsAt}
+            ended={subscription.foundingTrialEnded}
+          />
+        )}
         {memberCount === 0 && (
           <Link
             href="/members"

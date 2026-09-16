@@ -27,8 +27,23 @@ export function buildCheckoutSessionParams(input: {
   existingCustomerId: string | null;
   /** null = sell at list price. */
   couponId: string | null;
+  /**
+   * Length of the Stripe trial to grant, in days.
+   *
+   * OMITTED (undefined) IS THE NORMAL CASE and means TRIAL_DAYS — every
+   * customer who has not already had a free month gets the same trial, and the
+   * default lives here so no caller has to remember the number.
+   *
+   * null means grant NO trial and bill immediately. Exactly one caller passes
+   * it: app/api/stripe/checkout/route.ts, for a founding gym converting off the
+   * comped no-card trial (convex/schema.ts:foundingTrialEndsAt). That gym has
+   * already had its 30 free days; stacking a second Stripe trial on top would
+   * hand it two months free and quietly move the date it starts paying.
+   */
+  trialDays?: number | null;
 }): Stripe.Checkout.SessionCreateParams {
   const { priceId, origin, buyer, existingCustomerId, couponId } = input;
+  const trialDays = input.trialDays === undefined ? TRIAL_DAYS : input.trialDays;
 
   return {
     mode: "subscription",
@@ -78,9 +93,14 @@ export function buildCheckoutSessionParams(input: {
 
     // Same trial on all plans, guest or signed-in alike — don't special-case by
     // priceId. Length comes from lib/plans.ts so the number Stripe grants and
-    // the number the UI promises stay identical.
+    // the number the UI promises stay identical. The ONE case that gets no
+    // Stripe trial is a founding gym converting off the comped trial, and it is
+    // decided by the caller (trialDays: null above), never by the plan.
     subscription_data: {
-      trial_period_days: TRIAL_DAYS,
+      // Absent, not zero, when there is no trial: Stripe rejects
+      // trial_period_days: 0 outright, so the field has to disappear entirely
+      // rather than be sent with a falsy value.
+      ...(trialDays !== null && trialDays > 0 ? { trial_period_days: trialDays } : {}),
       // Signed-in: tag the subscription so the webhook can also link it
       // (redundant with claimGymBySessionId, harmless). Guest: leave
       // clerkUserId unset — Stripe's hosted page collects the email itself, and

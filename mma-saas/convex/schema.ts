@@ -515,6 +515,31 @@ export default defineSchema({
     plan: v.optional(v.string()),
     planStatus: v.optional(v.string()),
     createdAt: v.optional(v.number()),
+    // FOUNDING (COMPED) TRIAL — a free trial with NO Stripe object behind it:
+    // no customer, no subscription, no card, nothing that can ever produce a
+    // charge. See lib/plans.ts's "Founding (comped) trial" header for why this
+    // is a second, separate mechanism rather than a flag on the Stripe one.
+    //
+    // Written in exactly one place — convex/onboarding.ts:completeOnboarding,
+    // when the owner presents FOUNDING_TRIAL_CODE — which sets planStatus
+    // "trialing" directly at the same time. Stored rather than inferred,
+    // because "trialing with a card on file" and "trialing with no card" end in
+    // opposite ways: the first converts itself into a charge, the second must
+    // never charge at all, and planStatus alone cannot tell them apart.
+    //
+    // foundingTrialEndsAt IS THE EXPIRY. No cron watches it: lib/plans.ts's
+    // foundingTrialExpired() is evaluated inside gyms.ts:hasWriteAccess on
+    // every write and inside subscriptions.ts:getSubscription on every read, so
+    // the trial ends at the millisecond this names with no background job in
+    // the loop.
+    //
+    // NEITHER FIELD IS EVER CLEARED, including after the gym converts to a paid
+    // subscription. They are also the record that this gym has already had its
+    // free month, which is what stops app/api/stripe/checkout/route.ts granting
+    // it a second Stripe-side trial on the way in. A real stripeSubscriptionId
+    // outranks them everywhere (see hasFoundingTrial).
+    foundingTrialStartedAt: v.optional(v.number()),
+    foundingTrialEndsAt: v.optional(v.number()),
     // Set by convex/sendRetentionTexts.ts:claimRetentionRunLock. Shared by
     // both the automated cron path and the manual Elite button — a single
     // per-gym cooldown floor beneath both, independent of the per-member

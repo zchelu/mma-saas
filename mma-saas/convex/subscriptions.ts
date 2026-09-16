@@ -4,7 +4,13 @@ import { v } from "convex/values";
 import { assertMaxLength } from "./validate";
 import { consumeRateLimit } from "./rateLimit";
 import { hasWriteAccess } from "./gyms";
-import { planHasTexting, resolvePlanFromPriceId } from "../lib/plans";
+import {
+  foundingTrialExpired,
+  hasUsedFoundingTrial,
+  isOnFoundingTrial,
+  planHasTexting,
+  resolvePlanFromPriceId,
+} from "../lib/plans";
 import { alertUnresolvedPrice } from "../lib/alerts";
 
 // Statuses that mean "this subscription is the one currently entitling the
@@ -484,6 +490,10 @@ export const getSubscription = query({
         gymName: null,
         city: null,
         state: null,
+        foundingTrialEndsAt: null,
+        foundingTrialActive: false,
+        foundingTrialEnded: false,
+        foundingTrialUsed: false,
       };
     }
     const gym = await ctx.db
@@ -537,6 +547,25 @@ export const getSubscription = query({
       gymName: gym?.name ?? null,
       city: gym?.city ?? null,
       state: gym?.state ?? null,
+      // FOUNDING (COMPED) TRIAL — see convex/schema.ts:foundingTrialEndsAt.
+      //
+      // Derived here, not stored, and deliberately derived in ONE place: three
+      // separate consumers ask three different questions of the same timestamp
+      // and each of them gets a wrong answer if it reimplements the rule.
+      //   foundingTrialActive -> app/dashboard countdown banner
+      //   foundingTrialEnded  -> the "choose a plan" prompt on /dashboard and
+      //                          /billing, and hiding the retention-text button
+      //                          whose mutation would now refuse
+      //   foundingTrialUsed   -> app/api/stripe/checkout/route.ts, so a
+      //                          converting founding gym is NOT handed a second
+      //                          free month on the Stripe side
+      //
+      // Not sensitive: it is this owner's own trial, and the query is already
+      // identity-scoped to their own gym.
+      foundingTrialEndsAt: gym?.foundingTrialEndsAt ?? null,
+      foundingTrialActive: gym ? isOnFoundingTrial(gym) : false,
+      foundingTrialEnded: gym ? foundingTrialExpired(gym) : false,
+      foundingTrialUsed: gym ? hasUsedFoundingTrial(gym) : false,
     };
   },
 });
