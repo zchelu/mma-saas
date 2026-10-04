@@ -11,7 +11,7 @@ import {
 } from "@/lib/documents";
 import {
   firstBlankRange,
-  STARTER_DOCUMENTS,
+  STARTER_LIBRARY,
   STARTER_NOTICE,
   unfilledBlanks,
   type StarterDocument,
@@ -120,7 +120,7 @@ export default function TemplateModal({
   // isWaiver is fixed for this editor (see above), so only starters of the
   // same kind can be loaded into it — the waiver starter into the waiver, the
   // rest into an ordinary document.
-  const availableStarters = STARTER_DOCUMENTS.filter((s) => s.isWaiver === isWaiver);
+  const availableStarters = STARTER_LIBRARY.filter((s) => s.isWaiver === isWaiver);
 
   function loadStarter(starter: StarterDocument) {
     const hasOwnText = content.trim().length > 0 && content !== starter.content;

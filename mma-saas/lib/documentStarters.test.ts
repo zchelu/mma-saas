@@ -14,7 +14,9 @@ import {
   fillBlanks,
   findStarter,
   firstBlankRange,
+  STARTER_ALL_IN_ONE,
   STARTER_DOCUMENTS,
+  STARTER_LIBRARY,
   STARTER_NOTICE,
   STARTER_WAIVER,
   unfilledBlanks,
@@ -38,30 +40,48 @@ const US_STATES = [
 
 describe("the library as a whole", () => {
   test("keys and titles are unique", () => {
-    const keys = STARTER_DOCUMENTS.map((s) => s.key);
-    const titles = STARTER_DOCUMENTS.map((s) => s.title.toLowerCase());
+    const keys = STARTER_LIBRARY.map((s) => s.key);
+    const titles = STARTER_LIBRARY.map((s) => s.title.toLowerCase());
     expect(new Set(keys).size).toBe(keys.length);
     expect(new Set(titles).size).toBe(titles.length);
   });
 
-  test("exactly one starter is the waiver, and it gates the door with a guardian rule", () => {
+  test("the SEEDED set has exactly one waiver, and it gates the door with a guardian rule", () => {
+    // convex/seedDemoGym.ts inserts every STARTER_DOCUMENTS entry, and a gym
+    // can hold only one waiver row — a second one is unremovable through the
+    // product. So the all-in-one contract must stay out of this array.
     const waivers = STARTER_DOCUMENTS.filter((s) => s.isWaiver);
     expect(waivers).toHaveLength(1);
     expect(waivers[0]).toBe(STARTER_WAIVER);
     expect(STARTER_WAIVER.requiredAtSignup).toBe(true);
     expect(STARTER_WAIVER.requiresGuardianForMinors).toBe(true);
+    expect(STARTER_DOCUMENTS).not.toContain(STARTER_ALL_IN_ONE);
+  });
+
+  test("the library is the seeded set plus the all-in-one, which loads as a waiver", () => {
+    expect(STARTER_LIBRARY).toEqual([...STARTER_DOCUMENTS, STARTER_ALL_IN_ONE]);
+    expect(STARTER_ALL_IN_ONE.isWaiver).toBe(true);
+    expect(STARTER_ALL_IN_ONE.requiredAtSignup).toBe(true);
+    expect(STARTER_ALL_IN_ONE.requiresGuardianForMinors).toBe(true);
+    // It replaces three documents, so it has to carry what each of them does.
+    expect(STARTER_ALL_IN_ONE.content).toMatch(/ORDINARY NEGLIGENCE/);
+    expect(STARTER_ALL_IN_ONE.content).toMatch(/renews automatically/);
+    expect(STARTER_ALL_IN_ONE.content).toMatch(/photograph and record me/);
+    // And two things it must never do.
+    expect(STARTER_ALL_IN_ONE.content).toMatch(/does not apply to gross negligence/);
+    expect(STARTER_ALL_IN_ONE.content).not.toMatch(/review/i);
   });
 
   test("nothing but the waiver blocks check-in by default", () => {
     // A pre-ticked "required" box on a photo release stops paying members at
     // the door — the failure convex/documents.ts:isRequired exists to prevent.
-    for (const s of STARTER_DOCUMENTS.filter((d) => !d.isWaiver)) {
+    for (const s of STARTER_LIBRARY.filter((d) => !d.isWaiver)) {
       expect(s.requiredAtSignup, s.key).toBe(false);
     }
   });
 
   test("findStarter resolves every key and nothing else", () => {
-    for (const s of STARTER_DOCUMENTS) expect(findStarter(s.key)).toBe(s);
+    for (const s of STARTER_LIBRARY) expect(findStarter(s.key)).toBe(s);
     expect(findStarter("nope")).toBeUndefined();
   });
 
@@ -71,7 +91,7 @@ describe("the library as a whole", () => {
   });
 });
 
-describe.each(STARTER_DOCUMENTS.map((s) => [s.key, s] as const))("%s", (_key, starter) => {
+describe.each(STARTER_LIBRARY.map((s) => [s.key, s] as const))("%s", (_key, starter) => {
   test("fits the limits createTemplate enforces", () => {
     expect(starter.title.trim().length).toBeGreaterThan(0);
     expect(starter.title.length).toBeLessThanOrEqual(MAX_TEMPLATE_TITLE);
@@ -130,11 +150,15 @@ describe.each(STARTER_DOCUMENTS.map((s) => [s.key, s] as const))("%s", (_key, st
 });
 
 describe("blanks", () => {
-  test("only the membership agreement has them, and it has three", () => {
-    for (const s of STARTER_DOCUMENTS) {
+  test("only the two documents with membership terms have them, and each has the same three", () => {
+    const expected = unfilledBlanks(findStarter("membership_agreement")!.content);
+    expect(expected).toHaveLength(3);
+    for (const s of STARTER_LIBRARY) {
       const blanks = unfilledBlanks(s.content);
-      if (s.key === "membership_agreement") expect(blanks).toHaveLength(3);
-      else expect(blanks, s.key).toEqual([]);
+      if (s.key === "membership_agreement" || s.key === "membership_contract") {
+        // Same labels on purpose: one set of answers fills either document.
+        expect(blanks, s.key).toEqual(expected);
+      } else expect(blanks, s.key).toEqual([]);
     }
   });
 
@@ -166,7 +190,7 @@ describe("blanks", () => {
     // convex/seedDemoGym.ts fills the demo gym's documents from these, and
     // throws if one is missing — so a blank added without an example breaks
     // here first, not on a production seed.
-    for (const s of STARTER_DOCUMENTS) {
+    for (const s of STARTER_LIBRARY) {
       const labels = unfilledBlanks(s.content);
       const values: Record<string, string> = {};
       for (const label of labels) {

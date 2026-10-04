@@ -8,7 +8,7 @@ import { ErrorToast, getErrorMessage } from "../../components/error-toast";
 import TemplateModal, { type TemplateDraft } from "./template-modal";
 import SelectField from "../../components/select-field";
 import {
-  STARTER_DOCUMENTS,
+  STARTER_LIBRARY,
   STARTER_NOTICE,
   STARTER_WAIVER,
   type StarterDocument,
@@ -273,7 +273,7 @@ export default function DocumentsSettingsPage() {
               {STARTER_NOTICE}
             </p>
             <div className="grid gap-4 mt-5 sm:grid-cols-2">
-              {STARTER_DOCUMENTS.map((s) => {
+              {STARTER_LIBRARY.map((s) => {
                 const added = alreadyAdded(s);
                 const replacesWaiver = s.isWaiver && !!waiver;
                 return (

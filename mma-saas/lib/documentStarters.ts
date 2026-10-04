@@ -33,6 +33,7 @@
 // Convex functions and the tests all read the same text.
 
 export type StarterKey =
+  | "membership_contract"
   | "liability_waiver"
   | "membership_agreement"
   | "code_of_conduct"
@@ -257,6 +258,91 @@ Date: {{today}}
 
 I have read this release and I agree to it.`;
 
+// The all-in-one. Some gyms run on ONE contract a new member signs once —
+// membership terms, payment authorization, waiver and photo permission in a
+// single document — rather than three or four separate ones. This is that
+// shape, written from the same original text as the separate starters above.
+//
+// It loads as the gym's WAIVER (isWaiver), because it contains the release and
+// so has to be the document that gates check-in. A gym uses EITHER this OR the
+// separate Liability Waiver + Membership and Billing Agreement + Photo and
+// Video Release, never both — the review notes say so.
+//
+// NOT derived from any customer's contract. A gym that already has its own
+// all-in-one contract pastes that into its own account; see the header.
+const MEMBERSHIP_CONTRACT = `MEMBERSHIP CONTRACT, WAIVER AND RELEASE
+
+PLEASE READ CAREFULLY. THIS IS A LEGAL DOCUMENT. BY SIGNING IT YOU AGREE TO RECURRING PAYMENTS AND YOU GIVE UP LEGAL RIGHTS, INCLUDING THE RIGHT TO SUE.
+
+Member: {{member_name}}
+Date of birth: {{member_dob}}
+Academy: {{gym_name}}
+Date: {{today}}
+
+PART 1. MEMBERSHIP AND PAYMENT
+
+1. MY MEMBERSHIP. This contract sets the terms of my membership at {{gym_name}} (the "Academy"). The plan I chose, its price, how often I am billed and any minimum commitment were shown to me when I signed up, and they are part of this contract.
+
+2. RECURRING PAYMENTS. My membership renews automatically at the end of each billing period. I authorize the Academy to charge the payment method I have on file for my membership dues on each billing date, at the price of my plan, until my membership is cancelled as described in section 7. It is my job to keep my payment method up to date.
+
+3. PRICE CHANGES. The Academy may change the price of my plan. It will tell me before a new price applies to me, and the new price will not apply to a period I have already paid for.
+
+4. FAILED PAYMENTS. If a payment fails, the Academy may try the charge again and will ask me to update my payment method. The Academy may pause my access to classes until my account is paid up. I still owe any dues that came due before my membership was cancelled.
+
+5. WHAT MY DUES DO NOT COVER. Unless my plan says otherwise, uniforms, protective equipment, seminars, competitions and rank promotion fees are not included in my dues. The Academy will tell me the price before I am charged for any of them.
+
+6. FREEZING MY MEMBERSHIP. I may freeze my membership [FILL IN: freeze terms - e.g. for up to 3 months in any 12-month period for injury, travel or military duty]. To freeze, I will ask the Academy before my next billing date. Dues already charged are not refunded for a freeze requested after the billing date.
+
+7. CANCELLING. I may cancel my membership by [FILL IN: how to cancel - e.g. telling the front desk in writing or emailing the Academy]. My cancellation takes effect [FILL IN: when cancellation takes effect - e.g. at the end of the billing period in which I give notice]. I will not be charged after that date. Not showing up to class does not cancel my membership.
+
+8. REFUNDS. Dues are not refunded for classes I do not attend or for the unused part of a billing period, unless the law requires it.
+
+9. SCHEDULE AND CLOSURES. The Academy may change its class schedule, instructors and hours, and may close for holidays, events and maintenance. Short closures do not change my dues.
+
+10. ENDING MY MEMBERSHIP FOR CONDUCT. The Academy may suspend or end my membership if I break its rules, put other members at risk or leave my account unpaid. If the Academy ends my membership, I will not be charged for any billing period that starts after that.
+
+PART 2. ASSUMPTION OF RISK AND RELEASE
+
+11. WHAT THIS PART COVERS. This part covers everything I do at or with the Academy, including classes, private lessons, open mats, drilling, sparring, strength and conditioning, seminars, belt testing and in-house competitions, and my use of the Academy's premises and equipment, whether on or off the Academy's premises (the "Activities").
+
+12. THE RISKS. Brazilian Jiu-Jitsu, grappling, wrestling, Muay Thai, kickboxing, boxing, mixed martial arts and the conditioning that goes with them are contact activities. They involve strikes, throws, takedowns, joint locks and chokes, and they carry a real risk of injury. That risk includes, among other things: bruises, cuts and abrasions; muscle strains and tears; sprained, dislocated or hyperextended joints; broken bones; damage to teeth and eyes; cauliflower ear; skin infections passed on by mat or partner contact; concussion and other head, neck and spinal injuries; loss of consciousness; heat illness; cardiac events; permanent disability; and death. These risks exist even when instruction, supervision, matting and equipment are all appropriate, and they come in part from the actions of the other people training with me.
+
+13. I ACCEPT THE RISKS. I am taking part voluntarily. I understand the risks above, I understand there are others I cannot foresee, and I accept and assume all of them.
+
+14. MY HEALTH. I am physically able to take part. I know of no medical condition, injury, medication or pregnancy that makes the Activities unsafe for me, and I understand I should talk to a doctor before starting if I am unsure. If that changes, I will tell the Academy before I train again. I will not train while I am ill, while I have an open wound, rash or contagious skin condition, or while I am under the influence of alcohol or any drug that affects my judgment or coordination.
+
+15. SAFETY RULES. I will follow the instructions of the Academy's instructors and staff and the Academy's rules. I will tap early, release a submission the moment my partner taps or says stop, use the protective equipment I am told to use, use only techniques I have been taught and am permitted to use, and tell an instructor right away if I or anyone else is hurt.
+
+16. RELEASE. In exchange for being allowed to take part, and to the fullest extent permitted by law, I release and agree not to sue the Academy and its owners, officers, instructors, employees, volunteers, landlords and other members (the "Released Parties") for any claim, loss, damage or injury, including death, arising out of or related to the Activities or my presence on the Academy's premises, INCLUDING CLAIMS BASED ON THE ORDINARY NEGLIGENCE OF THE RELEASED PARTIES. This release does not apply to gross negligence, to reckless or intentional misconduct, or to any claim that cannot be released under applicable law.
+
+17. INDEMNITY. If I, or anyone acting for me, bring a claim that this contract releases, or if someone else brings a claim against the Released Parties because of something I did, I will reimburse the Released Parties for their resulting losses and costs, including reasonable attorney's fees, to the fullest extent permitted by law.
+
+18. EMERGENCY CARE. If I am hurt and cannot give consent, I authorize the Academy's staff to give first aid and to call emergency medical services for me. I am responsible for the cost of any treatment or transport.
+
+19. PERSONAL PROPERTY. I am responsible for my own belongings. The Academy is not responsible for property that is lost, stolen or damaged on its premises.
+
+PART 3. PHOTOS AND VIDEO
+
+20. PERMISSION. The Academy photographs and films classes, belt promotions, seminars and events. I give the Academy permission to photograph and record me during these activities and to use those photos and recordings, including my image, my voice, my first name and my rank, to promote the Academy on its website, on its social media accounts, in advertising, and in emails and printed materials. I will not be paid for this use.
+
+21. CHANGING MY MIND. I can withdraw the permission in section 20 at any time by telling the Academy in writing, and doing so does not affect my membership. The Academy will stop making new use of my image within a reasonable time and will remove a post from its own website or social media accounts if I ask.
+
+PART 4. GENERAL
+
+22. MINORS. If the member is under the age of majority, the parent or legal guardian who signs below has the legal authority to sign for them, has explained the risks in Part 2 to them, consents to their taking part, agrees to every term of this contract on the member's behalf and on their own behalf, and is responsible for paying the member's dues.
+
+23. MY LEGAL RIGHTS. Nothing in this contract takes away any right to cancel or to a refund that the consumer protection laws of my state give me.
+
+24. HOW LONG THIS LASTS. Part 2 applies every time I take part in the Activities, for as long as I train at the Academy. It binds me, my spouse, my heirs, my estate and anyone else who could bring a claim on my behalf.
+
+25. GOVERNING LAW. This contract is governed by the laws of the state where the Academy is located. If any part of it is found unenforceable, that part is to be enforced as far as the law allows and the rest stays in effect.
+
+26. ACKNOWLEDGMENT. I have read this contract and I understand it. I understand that my membership renews and is billed automatically until I cancel, and that I am giving up legal rights by signing. I am signing freely, and nobody has promised me anything to get me to sign.`;
+
+// THE SEEDED SET. convex/seedDemoGym.ts inserts every entry of this array into
+// a new demo gym, so it must contain exactly one waiver (a gym can only have
+// one) — tested. The all-in-one contract is therefore NOT in here; it is added
+// in STARTER_LIBRARY below, which is what the settings screen offers.
 export const STARTER_DOCUMENTS: readonly StarterDocument[] = [
   {
     key: "liability_waiver",
@@ -317,9 +403,34 @@ export const STARTER_DOCUMENTS: readonly StarterDocument[] = [
   },
 ];
 
+/** The all-in-one alternative to the waiver + membership agreement + photo release. */
+export const STARTER_ALL_IN_ONE: StarterDocument = {
+  key: "membership_contract",
+  title: "Membership Contract and Waiver",
+  summary:
+    "One contract instead of three: membership and billing terms, liability waiver and photo permission, signed once. Three blanks for your own terms.",
+  isWaiver: true,
+  requiresGuardianForMinors: true,
+  requiredAtSignup: true,
+  reviewNotes: [
+    "Use this INSTEAD of the separate Liability Waiver, Membership and Billing Agreement and Photo and Video Release, not alongside them.",
+    "Fill in the three blanks with your own freeze and cancellation terms. The document can't be saved until you do.",
+    "How far a release of negligence claims is enforced, and whether a parent can sign away a child's claims, differs by state.",
+    "Many states have automatic-renewal and health-club laws that set how you must disclose renewals and how members can cancel. Have your attorney check your terms against yours.",
+    "Photo permission is part of a contract every member must sign. Section 21 lets a member withdraw it; honor that when asked.",
+  ],
+  content: MEMBERSHIP_CONTRACT,
+};
+
+/**
+ * Everything the settings screen offers: the seeded set plus the all-in-one.
+ * UI code reads THIS; convex/seedDemoGym.ts reads STARTER_DOCUMENTS.
+ */
+export const STARTER_LIBRARY: readonly StarterDocument[] = [...STARTER_DOCUMENTS, STARTER_ALL_IN_ONE];
+
 export function findStarter(key: string): StarterDocument | undefined {
-  return STARTER_DOCUMENTS.find((s) => s.key === key);
+  return STARTER_LIBRARY.find((s) => s.key === key);
 }
 
-/** The one starter that loads as a gym's waiver. */
+/** The plain waiver — what "Start from a template" loads for a gym with no waiver yet. */
 export const STARTER_WAIVER: StarterDocument = STARTER_DOCUMENTS.find((s) => s.isWaiver)!;
