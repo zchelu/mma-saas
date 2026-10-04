@@ -57,7 +57,14 @@ export function TierCard({
           to right. The faded number is still the anchor — it is what makes
           $50 read as a deal rather than as a cheap product — so it stays
           legible, just clearly dead. */}
-      <div className={`flex items-baseline gap-1 ${isFounding ? "mb-2" : "mb-6"}`}>
+      {/* flex-wrap, and the price is grouped with its "/mo": on a narrow card
+          (three columns start at 640px, so an iPad held upright) the crossed-out
+          price and the founding price do not fit on one line. Without the wrap
+          the row ran out past the card's edge — measured at 768px on
+          2026-10-04, Fight Team 248px of content in a 215px card. Wrapped, the
+          list price sits on its own line above and the founding price drops
+          below it, still "was, now". */}
+      <div className={`flex flex-wrap items-baseline gap-x-1 ${isFounding ? "mb-2" : "mb-6"}`}>
         {isFounding && (
           <span
             className="text-2xl font-semibold line-through mr-2"
@@ -66,14 +73,16 @@ export function TierCard({
             {`$${tier.price}`}
           </span>
         )}
-        <span
-          className={isFounding ? "text-5xl font-black" : "text-4xl font-extrabold"}
-          style={{ color: "#FFFFFF" }}
-        >
-          {`$${isFounding ? foundingPrice : tier.price}`}
-        </span>
-        <span className="text-sm" style={{ color: "#888888" }}>
-          /mo
+        <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+          <span
+            className={isFounding ? "text-5xl sm:text-4xl md:text-5xl font-black" : "text-4xl font-extrabold"}
+            style={{ color: "#FFFFFF" }}
+          >
+            {`$${isFounding ? foundingPrice : tier.price}`}
+          </span>
+          <span className="text-sm" style={{ color: "#888888" }}>
+            /mo
+          </span>
         </span>
       </div>
 
