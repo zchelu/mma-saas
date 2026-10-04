@@ -4,6 +4,7 @@ import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
+import SelectField from "../components/select-field";
 
 type GymClass = {
   _id: Id<"classes">;
@@ -19,6 +20,7 @@ type Props = {
 };
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_OPTIONS = DAYS.map((d) => ({ value: d, label: d }));
 
 export default function ClassModal({ gymClass, onClose }: Props) {
   const add = useMutation(api.classes.add);
@@ -63,9 +65,12 @@ export default function ClassModal({ gymClass, onClose }: Props) {
             <input required value={instructor} onChange={(e) => setInstructor(e.target.value)} className="input" placeholder="Coach Zain" />
           </Field>
           <Field label="Day of Week">
-            <select value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)} className="input">
-              {DAYS.map((d) => <option key={d}>{d}</option>)}
-            </select>
+            <SelectField
+              value={dayOfWeek}
+              onChange={setDayOfWeek}
+              options={DAY_OPTIONS}
+              title="Day of Week"
+            />
           </Field>
           <Field label="Time">
             <input required value={time} onChange={(e) => setTime(e.target.value)} className="input" placeholder="6:00 PM" />

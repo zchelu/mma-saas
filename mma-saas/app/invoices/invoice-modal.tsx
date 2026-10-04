@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
+import SelectField from "../components/select-field";
 
 type Invoice = {
   _id: Id<"invoices">;
@@ -22,6 +23,10 @@ export default function InvoiceModal({ invoice, onClose }: Props) {
   const add = useMutation(api.invoices.add);
   const update = useMutation(api.invoices.update);
   const members = useQuery(api.members.getAll);
+  const memberOptions = useMemo(
+    () => (members ?? []).map((m) => ({ value: m._id, label: m.name })),
+    [members]
+  );
 
   const [memberId, setMemberId] = useState<string>(invoice?.memberId ?? "");
   const [amount, setAmount] = useState(String(invoice?.amount ?? ""));
@@ -57,21 +62,27 @@ export default function InvoiceModal({ invoice, onClose }: Props) {
         </h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Field label="Member">
-            <select required value={memberId} onChange={(e) => setMemberId(e.target.value)} className="input">
-              <option value="">Select a member...</option>
-              {(members ?? []).map((m) => (
-                <option key={m._id} value={m._id}>{m.name}</option>
-              ))}
-            </select>
+            <SelectField
+              value={memberId}
+              onChange={setMemberId}
+              options={memberOptions}
+              placeholder="Select a member…"
+              title="Member"
+            />
           </Field>
           <Field label="Amount ($)">
             <input required type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="input" placeholder="150.00" />
           </Field>
           <Field label="Status">
-            <select value={status} onChange={(e) => setStatus(e.target.value as "paid" | "unpaid")} className="input">
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
-            </select>
+            <SelectField
+              value={status}
+              onChange={(v) => setStatus(v as "paid" | "unpaid")}
+              options={[
+                { value: "unpaid", label: "Unpaid" },
+                { value: "paid", label: "Paid" },
+              ]}
+              title="Status"
+            />
           </Field>
           <Field label="Due Date">
             <input required type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />

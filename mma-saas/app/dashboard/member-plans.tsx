@@ -18,6 +18,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
+import SelectField from "../components/select-field";
 import { formatPlanPrice, parseDollarsToCents } from "../../lib/money";
 
 // Same shape as connect-billing.tsx's errorText. A ConvexError's payload is the
@@ -30,6 +31,11 @@ function errorText(err: unknown, fallback: string): string {
   }
   return err instanceof Error && err.message ? err.message : fallback;
 }
+
+const INTERVAL_OPTIONS = [
+  { value: "month", label: "per month" },
+  { value: "year", label: "per year" },
+];
 
 export default function MemberPlans() {
   const status = useQuery(api.connect.getConnectStatus);
@@ -213,16 +219,13 @@ export default function MemberPlans() {
           className="text-xs rounded-lg px-3 py-2 w-32"
           style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333", color: "#FFFFFF" }}
         />
-        <select
+        <SelectField
           value={interval}
-          onChange={(event) => setInterval(event.target.value === "year" ? "year" : "month")}
-          aria-label="Billing interval"
-          className="text-xs rounded-lg px-3 py-2"
-          style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333", color: "#FFFFFF" }}
-        >
-          <option value="month">per month</option>
-          <option value="year">per year</option>
-        </select>
+          onChange={(v) => setInterval(v === "year" ? "year" : "month")}
+          options={INTERVAL_OPTIONS}
+          ariaLabel="Billing interval"
+          className="text-xs"
+        />
         <button
           type="submit"
           disabled={!canSubmit}

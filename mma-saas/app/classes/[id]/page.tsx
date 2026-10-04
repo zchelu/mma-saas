@@ -8,6 +8,7 @@ import AppHeader from "../../components/app-header";
 import { ErrorToast, getErrorMessage } from "../../components/error-toast";
 
 import { getInitials, getAvatarColor } from "../../lib/avatar";
+import SelectField from "../../components/select-field";
 
 // Local calendar date, NOT toISOString(). toISOString() is UTC, so for a
 // Colorado gym every class after 6pm resolved to TOMORROW: a Monday 6:00 PM
@@ -97,6 +98,11 @@ export default function ClassDetailPage() {
   const unenrolledMembers = useMemo(
     () => (allMembers ?? []).filter((m) => !enrolledIds.has(m._id)),
     [allMembers, enrolledIds]
+  );
+
+  const unenrolledMemberOptions = useMemo(
+    () => unenrolledMembers.map((m) => ({ value: m._id, label: m.name })),
+    [unenrolledMembers]
   );
 
   // Enrolled members still awaiting a log for this date.
@@ -266,16 +272,13 @@ export default function ClassDetailPage() {
 
           {unenrolledMembers.length > 0 && (
             <div className="flex gap-2 mt-4 pt-4" style={{ borderTop: "1px solid #333333" }}>
-              <select
+              <SelectField
                 value={addMemberId}
-                onChange={(e) => setAddMemberId(e.target.value)}
-                className="input flex-1 text-sm"
-              >
-                <option value="">Select a member to add...</option>
-                {unenrolledMembers.map((m) => (
-                  <option key={m._id} value={m._id}>{m.name}</option>
-                ))}
-              </select>
+                onChange={setAddMemberId}
+                options={unenrolledMemberOptions}
+                placeholder="Select a member to add…"
+                className="flex-1 text-sm"
+              />
               <button
                 onClick={handleEnroll}
                 disabled={!addMemberId}
