@@ -38,7 +38,7 @@ export function TierCard({
     >
       {badge && (
         <span
-          className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-bold tracking-widest uppercase px-3 py-1 rounded-full"
+          className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-bold tracking-widest uppercase px-3 py-1 rounded-full whitespace-nowrap"
           style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
         >
           {badge}
