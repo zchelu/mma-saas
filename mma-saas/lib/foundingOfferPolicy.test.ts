@@ -20,12 +20,24 @@ import { shouldDeliverOutageAlert } from "./alerts";
 import {
   classifyCoupon,
   classifyCouponError,
+  classifyFoundingProgram,
+  FOUNDING_COUPON_ENV,
+  FOUNDING_PLANS,
+  FOUNDING_PRICE_USD,
+  FOUNDING_SPOTS,
+  LIST_PRICE_CHECKOUT,
   missingApiKeyResult,
   MISSING_API_KEY,
   offerFromResult,
+  offerResultForPlan,
   planCheckout,
+  programFromResult,
+  type FoundingCouponLookup,
   type FoundingOfferResult,
+  type FoundingProgramResult,
 } from "./foundingOfferPolicy";
+import { PLAN_PRICE_USD, type PlanSlug } from "./plans";
+import { PRICING_TIERS } from "../app/pricing/tiers";
 
 // Minimal Stripe.Coupon good enough for classifyCoupon. Amounts stay derived
 // from whatever the test passes in — nothing here hardcodes the live $50.
@@ -344,5 +356,250 @@ describe("INVARIANT: /pricing and checkout agree about the founding offer", () =
   test.each(everyState)("$status: a refused sale is never silent", (result) => {
     const plan = planCheckout(result);
     if (!plan.proceed) expect(plan.alert).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE FOUNDING PROGRAM (2026-10-03): flat founding prices, locked for life.
+//
+// One coupon per tier instead of one coupon for everything, because
+// $50 / $130 / $200 against $99 / $179 / $299 is not one uniform discount.
+// What these pin down is the promise /founding prints: the price on the card
+// is the price Stripe charges, it never expires, and there are five spots in
+// total no matter how they are split across tiers.
+// ---------------------------------------------------------------------------
+
+// A coupon that keeps the promise: fixed amount, usd, forever, room for all
+// five. Tests override one field at a time to break exactly one rule.
+function lifeCoupon(amountOff: number, over: Partial<Stripe.Coupon> = {}): Stripe.Coupon {
+  return coupon({
+    amount_off: amountOff,
+    duration: "forever",
+    duration_in_months: null,
+    max_redemptions: FOUNDING_SPOTS,
+    ...over,
+  });
+}
+
+// The recommended live setup: Academy and Fight Team share the $49 coupon,
+// Black Belt has its own $99 one.
+function lookups(
+  over: Partial<Record<PlanSlug, FoundingCouponLookup>> = {}
+): Record<PlanSlug, FoundingCouponLookup> {
+  return {
+    academy: { couponId: "life-49", coupon: lifeCoupon(4900) },
+    fightteam: { couponId: "life-49", coupon: lifeCoupon(4900) },
+    blackbelt: { couponId: "life-99", coupon: lifeCoupon(9900) },
+    ...over,
+  };
+}
+
+describe("classifyFoundingProgram", () => {
+  test("the live setup is available, and every tier lands on its founding price", () => {
+    const program = programFromResult(classifyFoundingProgram(lookups()));
+    expect(program).not.toBeNull();
+    expect(program!.slotsLeft).toBe(FOUNDING_SPOTS);
+    for (const plan of FOUNDING_PLANS) {
+      const charged = PLAN_PRICE_USD[plan] - program!.offers[plan].amountOffCents / 100;
+      expect(charged).toBe(FOUNDING_PRICE_USD[plan]);
+    }
+    expect(FOUNDING_PRICE_USD).toEqual({ academy: 50, fightteam: 130, blackbelt: 200 });
+  });
+
+  test("each tier attaches its OWN coupon", () => {
+    const program = programFromResult(classifyFoundingProgram(lookups()))!;
+    expect(program.offers.academy.couponId).toBe("life-49");
+    expect(program.offers.fightteam.couponId).toBe("life-49");
+    expect(program.offers.blackbelt.couponId).toBe("life-99");
+  });
+
+  test("spots are counted across coupons, and a shared coupon is counted once", () => {
+    const shared = lifeCoupon(4900, { times_redeemed: 2 });
+    const result = classifyFoundingProgram(
+      lookups({
+        academy: { couponId: "life-49", coupon: shared },
+        fightteam: { couponId: "life-49", coupon: shared },
+        blackbelt: { couponId: "life-99", coupon: lifeCoupon(9900, { times_redeemed: 1 }) },
+      })
+    );
+    // 2 + 1, not 2 + 2 + 1.
+    expect(programFromResult(result)?.slotsLeft).toBe(2);
+    // Every tier reports the PROGRAM's remaining spots, not its coupon's.
+    expect(programFromResult(result)?.offers.blackbelt.slotsLeft).toBe(2);
+  });
+
+  test("five gyms split across tiers is sold out, though no single coupon is full", () => {
+    const result = classifyFoundingProgram(
+      lookups({
+        academy: { couponId: "life-49", coupon: lifeCoupon(4900, { times_redeemed: 3 }) },
+        fightteam: { couponId: "life-49", coupon: lifeCoupon(4900, { times_redeemed: 3 }) },
+        blackbelt: { couponId: "life-99", coupon: lifeCoupon(9900, { times_redeemed: 2 }) },
+      })
+    );
+    expect(result).toEqual({ status: "exhausted" });
+  });
+
+  // The same Stripe behaviour the original regression was about: a full coupon
+  // arrives with valid=false, and that must read as sold out, not broken.
+  test("REGRESSION: a full coupon with valid=false is exhausted, not misconfigured", () => {
+    const full = lifeCoupon(4900, { times_redeemed: 5, valid: false });
+    const result = classifyFoundingProgram(
+      lookups({
+        academy: { couponId: "life-49", coupon: full },
+        fightteam: { couponId: "life-49", coupon: full },
+      })
+    );
+    expect(result).toEqual({ status: "exhausted" });
+  });
+
+  // "Locked for life" is the headline of /founding. The retired program's
+  // coupon ran 25 months; pointing a var at it must not print "for life".
+  test("a coupon that ends is misconfigured — 'locked for life' needs duration=forever", () => {
+    const result = classifyFoundingProgram(
+      lookups({
+        blackbelt: {
+          couponId: "ends",
+          coupon: lifeCoupon(9900, { duration: "repeating", duration_in_months: 25 }),
+        },
+      })
+    );
+    expect(result.status).toBe("misconfigured");
+    expect(result).toMatchObject({ couponId: "ends" });
+    expect((result as { reason: string }).reason).toContain("forever");
+  });
+
+  test("a coupon whose amount misses the founding price is misconfigured", () => {
+    // The OLD founding coupon amount: $50 off Academy would be $49, not $50.
+    const result = classifyFoundingProgram(
+      lookups({ academy: { couponId: "old-50", coupon: lifeCoupon(5000) } })
+    );
+    expect(result.status).toBe("misconfigured");
+    expect((result as { reason: string }).reason).toContain("$50/mo");
+  });
+
+  test("a coupon too small to hold every spot is misconfigured", () => {
+    const result = classifyFoundingProgram(
+      lookups({ blackbelt: { couponId: "small", coupon: lifeCoupon(9900, { max_redemptions: 2 }) } })
+    );
+    expect(result.status).toBe("misconfigured");
+  });
+
+  test("one tier's env var unset hides the WHOLE program and names the variable", () => {
+    const result = classifyFoundingProgram(lookups({ fightteam: { couponId: null } }));
+    expect(result).toMatchObject({ status: "misconfigured", couponId: null });
+    expect((result as { reason: string }).reason).toContain(FOUNDING_COUPON_ENV.fightteam);
+  });
+
+  // The state the code ships in: no coupons created yet. /founding must not
+  // exist and nothing may be attached.
+  test("nothing configured -> misconfigured, so /founding is hidden", () => {
+    const none = { couponId: null } as const;
+    const result = classifyFoundingProgram({ academy: none, fightteam: none, blackbelt: none });
+    expect(result.status).toBe("misconfigured");
+    expect(programFromResult(result)).toBeNull();
+  });
+
+  test("a deleted or percent-off coupon is misconfigured", () => {
+    const deleted = { id: "gone", object: "coupon", deleted: true } as Stripe.DeletedCoupon;
+    expect(
+      classifyFoundingProgram(lookups({ academy: { couponId: "gone", coupon: deleted } })).status
+    ).toBe("misconfigured");
+    expect(
+      classifyFoundingProgram(
+        lookups({
+          academy: { couponId: "pct", coupon: lifeCoupon(4900, { amount_off: null, percent_off: 50 }) },
+        })
+      ).status
+    ).toBe("misconfigured");
+  });
+
+  test("a typo'd coupon id (404) is misconfigured; an unreachable Stripe is unknown", () => {
+    const notFound = Object.assign(new Error("No such coupon"), {
+      code: "resource_missing",
+      statusCode: 404,
+    });
+    expect(
+      classifyFoundingProgram(lookups({ academy: { couponId: "typo", error: notFound } })).status
+    ).toBe("misconfigured");
+    expect(
+      classifyFoundingProgram(lookups({ academy: { couponId: "life-49", error: new Error("ECONNRESET") } }))
+        .status
+    ).toBe("unknown");
+  });
+
+  // With one tier deterministically broken the program cannot be shown whatever
+  // the unreachable coupon turns out to be — so we DO know what /founding is
+  // showing, and that is the state that keeps selling at list price.
+  test("a deterministic break outranks an unreachable coupon", () => {
+    const result = classifyFoundingProgram(
+      lookups({
+        academy: { couponId: "life-49", error: new Error("ECONNRESET") },
+        blackbelt: { couponId: null },
+      })
+    );
+    expect(result.status).toBe("misconfigured");
+  });
+});
+
+describe("INVARIANT: /founding and checkout agree, tier by tier", () => {
+  const notFound = Object.assign(new Error("No such coupon"), { code: "resource_missing", statusCode: 404 });
+  const everyProgramState: [string, FoundingProgramResult][] = [
+    ["available", classifyFoundingProgram(lookups())],
+    [
+      "exhausted",
+      classifyFoundingProgram(
+        lookups({ blackbelt: { couponId: "life-99", coupon: lifeCoupon(9900, { times_redeemed: 5 }) } })
+      ),
+    ],
+    ["misconfigured (unset)", classifyFoundingProgram(lookups({ academy: { couponId: null } }))],
+    ["misconfigured (404)", classifyFoundingProgram(lookups({ academy: { couponId: "typo", error: notFound } }))],
+    ["unknown", classifyFoundingProgram(lookups({ academy: { couponId: "life-49", error: new Error("ECONNRESET") } }))],
+  ];
+
+  test("the fixture really covers all four states", () => {
+    expect(new Set(everyProgramState.map(([, r]) => r.status))).toEqual(
+      new Set(["available", "exhausted", "misconfigured", "unknown"])
+    );
+  });
+
+  describe.each(everyProgramState)("%s", (_label, result) => {
+    test.each([...FOUNDING_PLANS])("%s: coupon attached iff /founding is showing", (plan) => {
+      const shownOnFounding = programFromResult(result) !== null;
+      const checkout = planCheckout(offerResultForPlan(result, plan));
+      expect(checkout.couponId !== null).toBe(shownOnFounding);
+      expect(checkout.couponId).toBe(programFromResult(result)?.offers[plan].couponId ?? null);
+    });
+
+    test.each([...FOUNDING_PLANS])("%s: only 'unknown' may refuse the sale", (plan) => {
+      const checkout = planCheckout(offerResultForPlan(result, plan));
+      expect(checkout.proceed).toBe(result.status !== "unknown");
+      if (!checkout.proceed) expect(checkout.alert).not.toBeNull();
+    });
+  });
+
+  // A buyer who came in through /pricing never asked for a founding price.
+  // Nothing is looked up for them, so no coupon state can discount, refuse or
+  // alert on their sale.
+  test("a list-price buyer proceeds with no coupon and no alert, whatever the coupons are doing", () => {
+    expect(LIST_PRICE_CHECKOUT).toEqual({ proceed: true, couponId: null, alert: null });
+  });
+});
+
+// app/pricing/tiers.ts (what /pricing and /founding print) and
+// lib/plans.ts:PLAN_PRICE_USD (what the wizard discloses and the founding
+// price is computed from) are two separate price tables. The wizard's own
+// comment admits they are "kept in step by nothing but attention". /founding
+// now strikes one through next to a price derived from the other, so a
+// mismatch would put two different list prices on one card.
+describe("the two list-price tables agree", () => {
+  test.each(PRICING_TIERS.map((t) => [t.slug, t.price] as const))(
+    "%s: tiers.ts price matches PLAN_PRICE_USD",
+    (slug, price) => {
+      expect(PLAN_PRICE_USD[slug]).toBe(price);
+    }
+  );
+
+  test("every founding plan has a card, and every card has a founding price", () => {
+    expect(PRICING_TIERS.map((t) => t.slug).sort()).toEqual([...FOUNDING_PLANS].sort());
   });
 });

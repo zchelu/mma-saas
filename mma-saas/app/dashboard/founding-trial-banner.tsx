@@ -47,8 +47,11 @@ export default function FoundingTrialBanner({
           still here and still readable; choose a plan to start making changes again.
         </span>
       </div>
+      {/* /founding, not /pricing: a gym on the comped founding trial is a
+          founding gym and is owed the founding price. /founding sends them on
+          to /pricing by itself if the program is no longer open. */}
       <Link
-        href="/pricing"
+        href="/founding"
         className="shrink-0 rounded-lg font-semibold px-6 py-3 text-sm text-center"
         style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
       >

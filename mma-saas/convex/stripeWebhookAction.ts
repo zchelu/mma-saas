@@ -5,7 +5,13 @@ import { Resend } from "resend";
 import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { PLAN_LABEL, PLAN_PRICE_USD, TRIAL_DAYS, resolvePlanFromPriceId } from "../lib/plans";
+import {
+  PLAN_LABEL,
+  PLAN_PRICE_USD,
+  TRIAL_DAYS,
+  discountConfirmationLine,
+  resolvePlanFromPriceId,
+} from "../lib/plans";
 import { alertMissingTrialConfirmation, alertUnresolvedPrice } from "../lib/alerts";
 
 const MANAGE_SUBSCRIPTION_URL = "https://kombatdesk.com/billing";
@@ -28,9 +34,14 @@ const BUSINESS_TIME_ZONE = "America/Denver";
 const money = (usd: number) => `$${usd.toFixed(2)}`;
 
 // The amount the customer will ACTUALLY be billed each period: list price minus
-// any fixed-amount discount on the subscription. Founding gyms pay list minus
-// $50, and quoting them list price in the C.R.S. 6-1-732 confirmation states a
-// charge that will never happen.
+// any fixed-amount discount on the subscription. Founding gyms pay less than
+// list, and quoting them list price in the C.R.S. 6-1-732 confirmation states
+// a charge that will never happen.
+//
+// Also reports whether that discount is PERMANENT (every coupon behind it is
+// duration=forever). The flat founding prices introduced 2026-10-03 are, and
+// the email must not tell those gyms their price reverts — see
+// lib/plans.ts:discountConfirmationLine.
 //
 // Never throws, and degrades to list price on any failure — which is exactly
 // what this email said before this function existed. A number that is too HIGH
@@ -43,11 +54,11 @@ const money = (usd: number) => `$${usd.toFixed(2)}`;
 // there, the throw would take out the whole webhook and no billing state would
 // be written for a customer who just paid. Here the blast radius is one wrong
 // number in one email.
-async function resolveMonthlyChargeUsd(
+async function resolveMonthlyCharge(
   stripe: Stripe,
   subscriptionId: string,
   listPriceUsd: number
-): Promise<number> {
+): Promise<{ chargeUsd: number; lockedForLife: boolean }> {
   try {
     const sub = await stripe.subscriptions.retrieve(subscriptionId, {
       // Nested path, and it has to be. `discounts` alone turns the array of ids
@@ -62,6 +73,9 @@ async function resolveMonthlyChargeUsd(
       ? sub.discounts
       : [];
     let amountOffCents = 0;
+    // Starts true and is knocked down by any coupon that ends. Only read when
+    // amountOffCents > 0, so "no discounts at all" never reports as permanent.
+    let everyCouponIsForever = true;
     for (const discount of discounts) {
       // A bare string means it came back unexpanded and there is nothing to
       // read. Skip rather than guess.
@@ -72,18 +86,21 @@ async function resolveMonthlyChargeUsd(
       // the expand above didn't reach it.
       const coupon = discount.source?.coupon;
       if (!coupon || typeof coupon === "string") continue;
-      if (typeof coupon.amount_off === "number") amountOffCents += coupon.amount_off;
+      if (typeof coupon.amount_off === "number") {
+        amountOffCents += coupon.amount_off;
+        if (coupon.duration !== "forever") everyCouponIsForever = false;
+      }
     }
-    if (amountOffCents <= 0) return listPriceUsd;
+    if (amountOffCents <= 0) return { chargeUsd: listPriceUsd, lockedForLife: false };
     const charged = listPriceUsd - amountOffCents / 100;
     // A discount exceeding list price means nothing is due, not a negative bill.
-    return charged > 0 ? charged : 0;
+    return { chargeUsd: charged > 0 ? charged : 0, lockedForLife: everyCouponIsForever };
   } catch (err) {
     console.error(
       `Could not resolve the discounted charge for subscription ${subscriptionId}; quoting list price in the confirmation email instead:`,
       err
     );
-    return listPriceUsd;
+    return { chargeUsd: listPriceUsd, lockedForLife: false };
   }
 }
 
@@ -187,12 +204,16 @@ async function sendTrialConfirmationEmail(
 
     // What they will actually be charged, which is not `price` for a founding
     // gym. Falls back to `price` if the discount can't be read.
-    const charge = await resolveMonthlyChargeUsd(stripe, subscriptionId, price);
-    const discountPerMonth = price - charge;
-    const foundingLine =
-      discountPerMonth > 0
-        ? `Founding rate applied: ${money(discountPerMonth)} off per month for at least your next 24 bills, then ${money(price)}/month.`
-        : null;
+    const { chargeUsd: charge, lockedForLife } = await resolveMonthlyCharge(
+      stripe,
+      subscriptionId,
+      price
+    );
+    const foundingLine = discountConfirmationLine({
+      listUsd: price,
+      chargeUsd: charge,
+      lockedForLife,
+    });
 
     const resend = new Resend(process.env.RESEND_API_KEY);
 

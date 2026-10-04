@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
-import { resolvePriceId, PlanSlug } from "@/lib/plans";
+import { getFoundingProgram } from "@/lib/foundingOffer";
+import { PLAN_PRICE_USD, resolvePriceId, PlanSlug } from "@/lib/plans";
 import OnboardingWizard from "./onboarding-wizard";
 
 const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt"]);
@@ -11,7 +12,7 @@ const VALID_PLANS = new Set(["academy", "fightteam", "blackbelt"]);
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ plan?: string; code?: string }>;
+  searchParams: Promise<{ plan?: string; code?: string; founding?: string }>;
 }) {
   const user = await currentUser();
   if (!user) redirect("/sign-in");
@@ -56,8 +57,24 @@ export default async function OnboardingPage({
     redirect("/dashboard");
   }
 
-  const { plan, code } = await searchParams;
+  const { plan, code, founding } = await searchParams;
   const initialPlan = plan && VALID_PLANS.has(plan) ? plan : "academy";
+
+  // FOUNDING PRICE (not the founding TRIAL below — different thing). ?founding=1
+  // is set by /founding's CTAs and means "this owner was shown the founding
+  // price". The number is resolved HERE, from the Stripe coupons, so the wizard
+  // can disclose the price that will really be charged right above the
+  // enrollment button (C.R.S. 6-1-732) and ask checkout for it.
+  //
+  // null in every other case: no flag, or the program is sold out / broken /
+  // unreachable. The wizard then discloses list price and does not ask — which
+  // is also what checkout would charge, so the two cannot disagree.
+  let foundingPriceUsd: number | null = null;
+  if (founding === "1") {
+    const program = await getFoundingProgram();
+    const offer = program?.offers[initialPlan as PlanSlug];
+    if (offer) foundingPriceUsd = PLAN_PRICE_USD[initialPlan] - offer.amountOffCents / 100;
+  }
 
   // FOUNDING (COMPED) TRIAL. ?code= prefills the founding-access field so Zain
   // can send one link and the gym owner types nothing extra — the whole point
@@ -91,6 +108,7 @@ export default async function OnboardingPage({
         initialCity={subscription.city ?? ""}
         initialState={subscription.state ?? ""}
         initialFoundingCode={initialFoundingCode}
+        foundingPriceUsd={foundingPriceUsd}
       />
     </div>
   );

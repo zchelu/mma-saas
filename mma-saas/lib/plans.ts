@@ -11,8 +11,9 @@
 //   lib/checkoutSession.ts            trial_period_days (the actual grant —
 //                                     moved out of app/api/stripe/checkout/
 //                                     route.ts 2026-08-24 so it could be tested)
-//   app/pricing/page.tsx              x3 — tier footnote, guarantee block,
-//                                     founding block
+//   app/pricing/page.tsx              x2 — tier footnote, guarantee block
+//   app/founding/page.tsx             tier footnote (added 2026-10-03, when
+//                                     the founding block left /pricing)
 //   app/page.tsx                      homepage guarantee block
 //   app/onboarding/onboarding-wizard.tsx  renewal disclosure
 //   convex/stripeWebhookAction.ts     trial confirmation email
@@ -68,6 +69,33 @@ export function planHasTexting(plan: string | undefined): boolean {
 }
 
 export type PlanSlug = "academy" | "fightteam" | "blackbelt";
+
+// The one line of the C.R.S. 6-1-732 confirmation email that explains a
+// discounted charge (convex/stripeWebhookAction.ts). Pure and here, rather
+// than inline in that action, so it can be unit-tested: this email is the
+// written record of what the customer agreed to pay, and nothing else in that
+// file is reachable from a test.
+//
+// TWO SHAPES, AND THE DIFFERENCE IS A LEGAL ONE. A founding gym signed up
+// since 2026-10-03 holds a duration=forever coupon — its price never reverts,
+// and telling it "then $99.00/month" would put a price increase in writing
+// that is never going to happen. A coupon that DOES end (the retired $50-off
+// program ran 25 months) must keep saying when and to what. `lockedForLife`
+// is read off the coupon itself by the caller, never assumed from the plan.
+//
+// Returns null when nothing is discounted, so the caller prints no line.
+export function discountConfirmationLine(input: {
+  listUsd: number;
+  chargeUsd: number;
+  lockedForLife: boolean;
+}): string | null {
+  const { listUsd, chargeUsd, lockedForLife } = input;
+  const money = (usd: number) => `$${usd.toFixed(2)}`;
+  if (!(listUsd - chargeUsd > 0)) return null;
+  return lockedForLife
+    ? `Founding price: ${money(chargeUsd)}/month, locked for as long as you stay subscribed. The standard price is ${money(listUsd)}/month.`
+    : `Founding rate applied: ${money(listUsd - chargeUsd)} off per month for at least your next 24 bills, then ${money(listUsd)}/month.`;
+}
 
 // Env var names deliberately NOT renamed to match the academy/fightteam/
 // blackbelt slugs — see PLAN_PRICE_USD's comment above.

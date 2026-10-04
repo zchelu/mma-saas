@@ -23,11 +23,26 @@ const GENERIC_ERROR = "Something went wrong — please try again or contact us."
 // only looks wrong now. If they ever diverge the customer reads one price on
 // /pricing and is disclosed another immediately above the enrollment button,
 // which is precisely the mismatch C.R.S. 6-1-732 makes legally material.
-function RenewalDisclosure({ plan }: { plan: string }) {
+//
+// FOUNDING PRICE. A buyer who came in through /founding is charged the founding
+// price, not PLAN_PRICE_USD — and it never reverts. Disclosing list price over
+// that button would state a charge that is not the one taking effect, so the
+// founding price (resolved from the Stripe coupon by app/onboarding/page.tsx)
+// replaces it here, with the standard price named alongside so the owner can
+// see what they are being spared. null = an ordinary list-price buyer.
+function RenewalDisclosure({
+  plan,
+  foundingPriceUsd,
+}: {
+  plan: string;
+  foundingPriceUsd: number | null;
+}) {
   const price = PLAN_PRICE_USD[plan];
   return (
     <p className="text-xs leading-relaxed" style={{ color: "#777777" }}>
-      {`${TRIAL_DAYS}-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
+      {foundingPriceUsd !== null
+        ? `${TRIAL_DAYS}-day free trial, then $${foundingPriceUsd}/month, billed monthly. This is your founding price: it stays $${foundingPriceUsd}/month for as long as your subscription stays active (standard price $${price}/month). Cancel anytime before your trial ends to avoid being charged.`
+        : `${TRIAL_DAYS}-day free trial, then $${price}/month, billed monthly. Cancel anytime before your trial ends to avoid being charged.`}
     </p>
   );
 }
@@ -89,6 +104,7 @@ export default function OnboardingWizard({
   initialCity = "",
   initialState = "",
   initialFoundingCode = "",
+  foundingPriceUsd = null,
 }: {
   initialPlan: string;
   priceIdByPlan: Record<string, string | undefined>;
@@ -110,6 +126,11 @@ export default function OnboardingWizard({
   // Prefilled from /onboarding?code=... . Empty for every normal customer,
   // which is what routes them to Stripe Checkout exactly as before.
   initialFoundingCode?: string;
+  // The founding PRICE for this plan, when the owner came in through /founding
+  // and the program is open (app/onboarding/page.tsx). Not the same thing as
+  // the founding access code above: that one is the comped no-card trial. This
+  // one changes what Stripe charges. null for everyone else.
+  foundingPriceUsd?: number | null;
 }) {
   const plan = initialPlan;
   // No renamed tier skips the consent step: every academy/fightteam/blackbelt
@@ -195,7 +216,9 @@ export default function OnboardingWizard({
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
+        // `founding` only ASKS for the founding price. Whether one exists, and
+        // which coupon carries it, is decided server-side from Stripe.
+        body: JSON.stringify({ priceId, ...(foundingPriceUsd !== null ? { founding: true } : {}) }),
       });
       const data = (await res.json().catch(() => null)) as { url?: string; error?: string } | null;
       if (!res.ok || !data?.url) {
@@ -283,7 +306,7 @@ export default function OnboardingWizard({
 
           {skipConsent && error && <p className="text-sm" style={{ color: "#FF6B6B" }}>{error}</p>}
 
-          {skipConsent && <RenewalDisclosure plan={plan} />}
+          {skipConsent && <RenewalDisclosure plan={plan} foundingPriceUsd={foundingPriceUsd} />}
 
           <button
             type="button"
@@ -346,7 +369,7 @@ export default function OnboardingWizard({
           ) : claimingFoundingTrial ? (
             <FoundingTrialDisclosure />
           ) : (
-            <RenewalDisclosure plan={plan} />
+            <RenewalDisclosure plan={plan} foundingPriceUsd={foundingPriceUsd} />
           )}
 
           <div className="flex gap-3 mt-2">

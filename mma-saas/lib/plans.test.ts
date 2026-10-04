@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 import {
   FOUNDING_TRIAL_DAYS,
   TRIAL_DAYS,
+  discountConfirmationLine,
   foundingTrialDaysLeft,
   foundingTrialEndFrom,
   foundingTrialExpired,
@@ -99,5 +100,32 @@ describe("the grant length", () => {
   test("REGRESSION the founding grant is independent of the Stripe TRIAL_DAYS", () => {
     expect(TRIAL_DAYS).toBe(30);
     expect(FOUNDING_TRIAL_DAYS).not.toBe(TRIAL_DAYS);
+  });
+});
+
+// The discount line of the C.R.S. 6-1-732 confirmation email. It is the written
+// record of the price the customer agreed to, so the wording is asserted, not
+// just the branch taken.
+describe("discountConfirmationLine", () => {
+  test("no discount -> no line at all", () => {
+    expect(discountConfirmationLine({ listUsd: 99, chargeUsd: 99, lockedForLife: false })).toBeNull();
+    expect(discountConfirmationLine({ listUsd: 99, chargeUsd: 99, lockedForLife: true })).toBeNull();
+  });
+
+  // The flat founding prices never revert. Telling this gym "then $99.00/month"
+  // would put a price increase in writing that is never going to happen.
+  test("a founding price locked for life never names a date or a reverting price", () => {
+    const line = discountConfirmationLine({ listUsd: 99, chargeUsd: 50, lockedForLife: true })!;
+    expect(line).toBe(
+      "Founding price: $50.00/month, locked for as long as you stay subscribed. The standard price is $99.00/month."
+    );
+    expect(line).not.toContain("24");
+    expect(line).not.toContain("then");
+  });
+
+  test("a discount that ends still says when, and what it reverts to", () => {
+    expect(discountConfirmationLine({ listUsd: 179, chargeUsd: 129, lockedForLife: false })).toBe(
+      "Founding rate applied: $50.00 off per month for at least your next 24 bills, then $179.00/month."
+    );
   });
 });

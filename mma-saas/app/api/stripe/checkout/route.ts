@@ -6,12 +6,20 @@ import { api } from "@/convex/_generated/api";
 import { getConvexToken } from "@/lib/convex-auth";
 import { clientIp } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/http";
-import { allowedPriceIds } from "@/lib/plans";
+import { allowedPriceIds, resolvePlanFromPriceId } from "@/lib/plans";
 import { buildCheckoutSessionParams } from "@/lib/checkoutSession";
-import { getFoundingOfferResult } from "@/lib/foundingOffer";
-import { missingApiKeyResult, planCheckout } from "@/lib/foundingOfferPolicy";
+import { getFoundingProgramResult } from "@/lib/foundingOffer";
+import {
+  FOUNDING_COUPON_ENV,
+  LIST_PRICE_CHECKOUT,
+  missingApiKeyResult,
+  offerResultForPlan,
+  planCheckout,
+  type FoundingOfferResult,
+} from "@/lib/foundingOfferPolicy";
 import {
   alertCheckoutDown,
+  alertCheckoutSessionFailed,
   alertFoundingCouponMisconfigured,
   sendAlertEmail,
   shouldDeliverOutageAlert,
@@ -41,11 +49,14 @@ export async function POST(request: NextRequest) {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   const user = await currentUser();
 
-  const body = await readJsonBody<{ priceId?: string }>(request);
+  const body = await readJsonBody<{ priceId?: string; founding?: unknown }>(request);
   if (!body || typeof body.priceId !== "string") {
     return NextResponse.json({ error: "Malformed request." }, { status: 400 });
   }
   const { priceId } = body;
+  // Strictly `true`. Set by the onboarding wizard only for a buyer who came in
+  // through /founding — see the long comment below for what it can and cannot do.
+  const wantsFounding = body.founding === true;
 
   if (!allowedPriceIds().includes(priceId)) {
     return NextResponse.json(
@@ -56,29 +67,47 @@ export async function POST(request: NextRequest) {
 
   const origin = new URL(request.url).origin;
 
-  // Founding pricing is never read from client input — the coupon's own
-  // redemption count (via getFoundingOfferResult) is the only thing that
-  // decides whether a discount applies, same as the pricing page.
+  // FOUNDING PRICING IS ASKED FOR BY THE CLIENT AND GRANTED BY STRIPE.
   //
-  // planCheckout (lib/foundingOfferPolicy.ts) turns that state into the one
-  // decision this route needs, and it is the single place the /pricing-vs-
-  // checkout invariant is enforced: a discount is attached if and only if
-  // /pricing was advertising one. Sold out and misconfigured both mean
-  // /pricing is showing no founding block, so nobody was promised anything
-  // and the sale proceeds at list price. Only "unknown" — Stripe unreachable,
-  // where a retry may still resolve it and we cannot tell what other visitors
-  // are being shown — refuses, because falling through there would silently
-  // charge list price to someone who was just promised a discount.
+  // `founding: true` only says "this buyer came in through /founding". It
+  // carries no price and no coupon id. Whether a founding price exists, which
+  // coupon it is and how many spots are left all come from the coupons' own
+  // state (getFoundingProgramResult), same as /founding itself — so the most a
+  // forged flag can do is claim a founding spot that is genuinely still open,
+  // which is the same thing visiting /founding does.
+  //
+  // WHY IT IS ASKED FOR AT ALL. Until 2026-10-03 the founding coupon attached
+  // to EVERY checkout while spots remained, because /pricing advertised it to
+  // everyone. /pricing now shows list prices only and /founding is a link Zain
+  // sends by hand, so a /pricing buyer who was quoted $99 must be charged $99
+  // and must not quietly take one of the five founding spots.
+  //
+  // A buyer who did not ask gets LIST_PRICE_CHECKOUT: nothing is looked up, so
+  // a broken or unreachable founding coupon can neither alert on nor refuse a
+  // list-price sale.
+  //
+  // For a buyer who did ask, planCheckout (lib/foundingOfferPolicy.ts) turns
+  // the coupon state into the one decision this route needs, and it is the
+  // single place the /founding-vs-checkout invariant is enforced: a discount
+  // is attached if and only if /founding was advertising one. Sold out and
+  // misconfigured both mean /founding is hidden, so nobody is being promised
+  // anything and the sale proceeds at list price. Only "unknown" — Stripe
+  // unreachable, where a retry may still resolve it and we cannot tell what
+  // other visitors are being shown — refuses, because falling through there
+  // would silently charge list price to someone who was just promised a
+  // founding price.
+  //
   // An absent key short-circuits to the same `unknown` state a rejected key
-  // reaches, so both get the identical 503 + alert treatment rather than one
-  // being handled and the other crashing. getFoundingOfferResult would in fact
-  // also land on `unknown` here (its Stripe construction is inside a try), but
-  // it is not called at all without a key — there is nothing it could tell us,
-  // and the explicit result carries far better remediation copy.
-  const foundingOfferResult = stripeSecretKey
-    ? await getFoundingOfferResult()
-    : missingApiKeyResult(process.env.STRIPE_FOUNDING_COUPON_ID);
-  const checkoutPlan = planCheckout(foundingOfferResult);
+  // reaches — for EVERY buyer, founding or not, since without a key no sale
+  // of any kind can be created — so both get the identical 503 + alert
+  // treatment rather than one being handled and the other crashing.
+  const plan = resolvePlanFromPriceId(priceId);
+  const foundingOfferResult: FoundingOfferResult | null = !stripeSecretKey
+    ? missingApiKeyResult(plan ? process.env[FOUNDING_COUPON_ENV[plan]] : undefined)
+    : wantsFounding && plan
+      ? offerResultForPlan(await getFoundingProgramResult(), plan)
+      : null;
+  const checkoutPlan = foundingOfferResult ? planCheckout(foundingOfferResult) : LIST_PRICE_CHECKOUT;
 
   // Awaited, not fire-and-forget, so a response can't outrun its alert and
   // leave the failure completely silent. Both kinds are sent before responding.
@@ -124,7 +153,7 @@ export async function POST(request: NextRequest) {
 
   const stripe = new Stripe(stripeSecretKey);
 
-  const foundingOffer = foundingOfferResult.status === "available" ? foundingOfferResult.offer : null;
+  const foundingOffer = foundingOfferResult?.status === "available" ? foundingOfferResult.offer : null;
 
   // REUSE THIS BUYER'S EXISTING STRIPE CUSTOMER.
   //
@@ -189,6 +218,8 @@ export async function POST(request: NextRequest) {
       // lib/checkoutSession.ts). null = no Stripe trial at all, for a gym that
       // already had the comped one.
       trialDays: usedFoundingTrial ? null : undefined,
+      // Back out of Stripe to the page whose prices this buyer was shown.
+      cancelPath: wantsFounding ? "/founding" : "/pricing",
     });
   }
 
@@ -204,7 +235,7 @@ export async function POST(request: NextRequest) {
       // and charge full price — those rethrow below and hit the normal
       // error response instead.
       if (foundingOffer && isCouponSpecificError(err)) {
-        // The coupon can be exhausted/invalidated between getFoundingOffer()
+        // The coupon can be exhausted/invalidated between getFoundingProgramResult()
         // resolving and this call reaching Stripe (another gym closes in the
         // gap). A gym owner mid-demo must never see an error screen because
         // of that race — retry once at standard price instead of failing —
@@ -224,7 +255,7 @@ export async function POST(request: NextRequest) {
             ``,
             `Stripe error: ${err instanceof Error ? err.message : String(err)}`,
             ``,
-            `The /pricing page may have shown this customer a founding price before they clicked through — they may expect it. Check whether the coupon is exhausted, expired, or deleted, and whether the founding block on /pricing needs to come down.`,
+            `/founding showed this customer a founding price before they clicked through — they will expect it. Check whether the coupon is exhausted, expired, or deleted. /founding hides itself once the coupons say the program is full, so if it is still showing, the coupon state and the page disagree.`,
           ].join("\n")
         );
         return await stripe.checkout.sessions.create(buildSessionParams(false));
@@ -258,6 +289,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (err) {
     console.error("Stripe checkout session creation failed:", err);
+    // Not silent any more — see alertCheckoutSessionFailed for why a list-price
+    // buyer's failure here used to reach nobody. Awaited for the same reason the
+    // alerts above are: a response must not outrun its own alert.
+    if (shouldDeliverOutageAlert(process.env.VERCEL_ENV)) {
+      const meta = (typeof err === "object" && err !== null ? err : {}) as {
+        type?: unknown;
+        statusCode?: unknown;
+      };
+      await alertCheckoutSessionFailed({
+        priceId,
+        founding: wantsFounding,
+        errorType:
+          typeof meta.type === "string"
+            ? meta.type
+            : err instanceof Error
+              ? err.constructor.name
+              : typeof err,
+        ...(typeof meta.statusCode === "number" ? { statusCode: meta.statusCode } : {}),
+        message: err instanceof Error ? err.message : String(err),
+        vercelEnv: process.env.VERCEL_ENV,
+        deploymentUrl: process.env.VERCEL_URL,
+      });
+    }
     return NextResponse.json(
       { error: "Something went wrong — please try again or contact us." },
       { status: 500 }

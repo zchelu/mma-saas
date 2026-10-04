@@ -4,6 +4,8 @@ const ALERT_TO = "kombatdesk@outlook.com";
 const ALERT_FROM = "KombatDesk <billing@kombatdesk.com>";
 const PRICE_ENV_VAR_NAMES =
   "STRIPE_STARTER_PRICE_ID, STRIPE_PRO_PRICE_ID, STRIPE_ELITE_PRICE_ID";
+const FOUNDING_COUPON_ENV_VAR_NAMES =
+  "STRIPE_FOUNDING_COUPON_ACADEMY, STRIPE_FOUNDING_COUPON_FIGHTTEAM, STRIPE_FOUNDING_COUPON_BLACKBELT";
 const ALERT_SEND_TIMEOUT_MS = 5000;
 
 // Raw fetch to Resend's REST API, not the SDK — so this same function works
@@ -35,13 +37,14 @@ export async function sendAlertEmail(subject: string, text: string): Promise<voi
   }
 }
 
-// Fires from app/api/stripe/checkout when the founding coupon is
-// deterministically broken rather than sold out — a wrong/deleted coupon id, a
-// test/live key mismatch, an unset env var, or a coupon that isn't a
-// fixed-amount discount. Checkout keeps selling at list price through all of
+// Fires from app/api/stripe/checkout when a founding buyer reaches checkout
+// and the founding coupons are deterministically broken rather than sold out —
+// a wrong/deleted coupon id, a test/live key mismatch, an unset env var, or a
+// coupon that breaks the program's rules (not duration=forever, wrong amount,
+// too few redemptions). Checkout keeps selling at list price through all of
 // those (a typo must not take revenue to zero), so without this email the
-// failure is completely silent: /pricing simply stops showing the founding
-// block and every founding buyer quietly pays full price.
+// failure is completely silent: /founding simply hides itself and a founding
+// buyer holding an old link quietly pays full price.
 //
 // Deliberately NOT fired for a fully-redeemed coupon — that's the program
 // working as designed, not something to page about.
@@ -53,19 +56,21 @@ export async function alertFoundingCouponMisconfigured(params: {
   await sendAlertEmail(
     "KombatDesk: founding coupon is misconfigured — checkout is selling at LIST PRICE",
     [
-      `The founding coupon could not be resolved, and the failure is deterministic — a retry will NOT fix it.`,
+      `The founding coupons could not be resolved, and the failure is deterministic — a retry will NOT fix it.`,
       ``,
       `Reason: ${reason}`,
-      `Coupon ID read from STRIPE_FOUNDING_COUPON_ID: ${couponId ?? "(env var not set)"}`,
+      `Coupon ID involved: ${couponId ?? "(env var not set)"}`,
+      `The three founding coupon env vars: ${FOUNDING_COUPON_ENV_VAR_NAMES}`,
       ``,
-      `Current behaviour: /pricing has dropped the founding block entirely, and checkout is completing at LIST PRICE with no discount attached. Sales are still going through — this is not an outage — but nobody can get the founding rate until it's fixed, and anyone buying right now is paying full price.`,
+      `Current behaviour: /founding is hidden (it redirects to /pricing), and a buyer who asked for founding pricing just completed checkout setup at LIST PRICE with no discount attached. Sales are still going through — this is not an outage — but nobody can get the founding price until it's fixed, and a founding gym buying right now is paying full price.`,
       ``,
       `Most likely causes, in order:`,
-      `  1. STRIPE_FOUNDING_COUPON_ID has a typo, or points at a coupon that was deleted.`,
-      `  2. STRIPE_FOUNDING_COUPON_ID names a live-mode coupon while STRIPE_SECRET_KEY is a test key, or vice versa. Stripe reports both as a 404.`,
-      `  3. The var is missing from Vercel Production. It is scoped to Production ONLY by design — do NOT add it to Preview.`,
+      `  1. One of the three vars has a typo, or points at a coupon that was deleted.`,
+      `  2. A var names a live-mode coupon while STRIPE_SECRET_KEY is a test key, or vice versa. Stripe reports both as a 404.`,
+      `  3. A var is missing from Vercel Production. They are scoped to Production ONLY by design — do NOT add them to Preview.`,
+      `  4. A coupon breaks the program's rules. Each must be amount_off in usd, duration=forever, max_redemptions=5, and take exactly enough off to land on the founding price: $49 off Academy ($50), $49 off Fight Team ($130), $99 off Black Belt ($200). Academy and Fight Team may share one coupon.`,
       ``,
-      `Stripe coupons are immutable except for name/metadata/currency_options — max_redemptions cannot be edited. If the coupon needs different terms, create a NEW coupon and repoint STRIPE_FOUNDING_COUPON_ID at it in Vercel PRODUCTION ONLY, then redeploy. Never set any Stripe var on Preview: a preview deploy with a live key can charge a real card and permanently burn a founding slot.`,
+      `Stripe coupons are immutable except for name/metadata/currency_options — amount, duration and max_redemptions cannot be edited. If a coupon needs different terms, create a NEW coupon and repoint its var at it in Vercel PRODUCTION ONLY, then redeploy. Never set any Stripe var on Preview: a preview deploy with a live key can charge a real card and permanently burn a founding slot.`,
     ].join("\n")
   );
 }
@@ -108,15 +113,24 @@ export async function alertCheckoutDown(params: {
   deploymentUrl?: string;
 }): Promise<void> {
   const { source, couponId, reason, errorType, statusCode, vercelEnv, deploymentUrl } = params;
+  // Since 2026-10-03 the founding coupons are only read for a buyer who came
+  // in through /founding, so an unreadable coupon refuses THOSE sales and
+  // leaves list-price checkout alone. A missing key is still everyone: with no
+  // key there is no Stripe client to create any session with.
+  const everyone = errorType === MISSING_API_KEY;
   await sendAlertEmail(
-    "KombatDesk: CHECKOUT IS DOWN — every sale is being refused",
+    everyone
+      ? "KombatDesk: CHECKOUT IS DOWN — every sale is being refused"
+      : "KombatDesk: FOUNDING CHECKOUT IS DOWN — founding sales are being refused",
     [
-      `Checkout is returning 503 to EVERY visitor right now, including buyers who would have paid full price. No one can complete a purchase until this clears.`,
+      everyone
+        ? `Checkout is returning 503 to EVERY visitor right now, including buyers who would have paid full price. No one can complete a purchase until this clears.`
+        : `Checkout is returning 503 to every buyer coming in through /founding. If the cause is a rejected Stripe key (401 below), list-price checkout is failing too — with a plain error instead of this one. No founding gym can complete a purchase until this clears.`,
       ``,
       errorType === MISSING_API_KEY
         ? `KombatDesk could not determine the founding coupon's state because there is no Stripe key to ask with. This will NOT resolve on its own and no retry will help — it stays broken until the env var is set and the app redeployed.`
         : `KombatDesk could not determine the founding coupon's state, and the failure is the kind that may resolve on retry.`,
-      `It is NOT a wrong or deleted coupon id — that case is handled separately and keeps selling at list price. Because the state is genuinely unknown here, checkout refuses rather than risk charging list price to someone /pricing may have just promised a discount. That guard is correct. The outage behind it is not.`,
+      `It is NOT a wrong or deleted coupon id — that case is handled separately and keeps selling at list price. Because the state is genuinely unknown here, checkout refuses rather than risk charging list price to someone /founding may have just promised a founding price. That guard is correct. The outage behind it is not.`,
       ``,
       `Fired from: ${source}`,
       // Delivery is gated to production (see shouldDeliverOutageAlert), so this
@@ -124,7 +138,7 @@ export async function alertCheckoutDown(params: {
       // and that is itself the bug to chase.
       `Environment: ${vercelEnv ?? "(VERCEL_ENV not set — local dev)"}`,
       `Deployment: ${deploymentUrl ?? "(VERCEL_URL not set)"}`,
-      `Coupon ID read from STRIPE_FOUNDING_COUPON_ID: ${couponId}`,
+      `Founding coupon ID involved: ${couponId}`,
       `Stripe error class: ${errorType}`,
       `Stripe HTTP status: ${
         statusCode ??
@@ -150,7 +164,57 @@ export async function alertCheckoutDown(params: {
       `  5xx  Stripe-side outage. Check https://status.stripe.com — self-resolving.`,
       `  none No response at all: network/DNS failure reaching Stripe from Vercel.`,
       ``,
-      `/pricing is still up and has already hidden the founding block, so nobody is being shown an offer they can't buy. The damage is confined to checkout.`,
+      `/pricing is still up, and /founding has already hidden itself, so nobody is being shown an offer they can't buy. The damage is confined to checkout.`,
+    ].join("\n")
+  );
+}
+
+// Fires from app/api/stripe/checkout when creating the Checkout Session itself
+// throws, after every retry that route knows how to make.
+//
+// WHY THIS EXISTS (2026-10-03). The founding coupon used to be read on EVERY
+// checkout, so a revoked or rolled STRIPE_SECRET_KEY surfaced there first and
+// alertCheckoutDown paged about it. The coupons are now read only for a buyer
+// who came in through /founding, which means a list-price buyer's first Stripe
+// call is the session create — and a failure there was logged and nothing
+// else. Without this, a rejected key takes down every list-price sale and the
+// only report is a customer saying the button did not work.
+//
+// Same delivery gate as alertCheckoutDown (shouldDeliverOutageAlert): Preview
+// has no Stripe key by design and must not page about it.
+export async function alertCheckoutSessionFailed(params: {
+  priceId: string;
+  founding: boolean;
+  errorType: string;
+  statusCode?: number;
+  message: string;
+  vercelEnv?: string;
+  deploymentUrl?: string;
+}): Promise<void> {
+  const { priceId, founding, errorType, statusCode, message, vercelEnv, deploymentUrl } = params;
+  await sendAlertEmail(
+    "KombatDesk: a checkout FAILED — a buyer could not reach Stripe's payment page",
+    [
+      `A buyer clicked through to pay and creating the Stripe Checkout Session failed. They were shown a generic error and no payment page.`,
+      ``,
+      `Price ID: ${priceId}`,
+      `Founding pricing requested: ${founding ? "yes" : "no"}`,
+      `Environment: ${vercelEnv ?? "(VERCEL_ENV not set — local dev)"}`,
+      `Deployment: ${deploymentUrl ?? "(VERCEL_URL not set)"}`,
+      `Stripe error class: ${errorType}`,
+      `Stripe HTTP status: ${statusCode ?? "(no response — request never completed)"}`,
+      `Detail: ${message}`,
+      ``,
+      `WHAT TO DO, by status:`,
+      `  401  STRIPE_SECRET_KEY is invalid, revoked, or was rolled. EVERY checkout`,
+      `       is failing and will keep failing. Set a working key in Vercel`,
+      `       PRODUCTION ONLY, then redeploy.`,
+      `  400  Stripe rejected the request itself. Most likely one of`,
+      `       ${PRICE_ENV_VAR_NAMES}`,
+      `       points at an archived or other-mode Price. Affects that plan only.`,
+      `  429  Stripe rate limit. Usually clears within minutes on its own.`,
+      `  5xx  Stripe-side outage. Check https://status.stripe.com — self-resolving.`,
+      `  none No response at all: network/DNS failure reaching Stripe from Vercel.`,
     ].join("\n")
   );
 }

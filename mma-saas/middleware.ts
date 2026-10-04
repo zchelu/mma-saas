@@ -3,6 +3,9 @@
 const isPublicRoute = createRouteMatcher([
   '/',
   '/pricing',
+  // The founding-price page Zain sends by hand after a demo. Public for the
+  // same reason /pricing is: the gym owner opening that link has no account yet.
+  '/founding',
   '/checkout',
   '/welcome(.*)',
   '/sign-in(.*)',

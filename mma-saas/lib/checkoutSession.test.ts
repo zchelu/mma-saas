@@ -48,6 +48,12 @@ describe("success_url carries the checkout session id", () => {
   test("cancel_url returns to pricing", () => {
     expect(params().cancel_url).toBe(`${ORIGIN}/pricing`);
   });
+
+  // A founding buyer who backs out of Stripe must land on the page that still
+  // shows their price, not on list pricing.
+  test("a founding checkout cancels back to /founding", () => {
+    expect(params({ cancelPath: "/founding" }).cancel_url).toBe(`${ORIGIN}/founding`);
+  });
 });
 
 describe("customer and customer_email are mutually exclusive", () => {

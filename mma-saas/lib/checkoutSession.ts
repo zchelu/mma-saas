@@ -41,8 +41,16 @@ export function buildCheckoutSessionParams(input: {
    * hand it two months free and quietly move the date it starts paying.
    */
   trialDays?: number | null;
+  /**
+   * Where Stripe's "back" arrow sends the buyer. Omitted means /pricing. A
+   * founding buyer came from /founding and must go back THERE: /pricing shows
+   * list prices only, so landing on it mid-purchase reads as the founding
+   * price having been withdrawn.
+   */
+  cancelPath?: "/pricing" | "/founding";
 }): Stripe.Checkout.SessionCreateParams {
   const { priceId, origin, buyer, existingCustomerId, couponId } = input;
+  const cancelPath = input.cancelPath ?? "/pricing";
   const trialDays = input.trialDays === undefined ? TRIAL_DAYS : input.trialDays;
 
   return {
@@ -72,7 +80,7 @@ export function buildCheckoutSessionParams(input: {
     success_url: buyer
       ? `${origin}/dashboard?checkout=success&session_id={CHECKOUT_SESSION_ID}`
       : `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/pricing`,
+    cancel_url: `${origin}${cancelPath}`,
 
     // Reusing the buyer's existing customer is what stops a retried checkout
     // minting a second Stripe customer for the same person — see

@@ -37,8 +37,11 @@ function FoundingTrialCard({ endsAt, ended }: { endsAt: number; ended: boolean }
             : "No card on file. Nothing will be charged when this date passes — we'll ask you to choose a plan instead."}
         </span>
       </div>
+      {/* /founding, not /pricing: a gym on the comped founding trial is a
+          founding gym and is owed the founding price. /founding sends them on
+          to /pricing by itself if the program is no longer open. */}
       <Link
-        href="/pricing"
+        href="/founding"
         className="shrink-0 rounded-lg font-semibold px-6 py-3 text-sm text-center"
         style={
           ended
