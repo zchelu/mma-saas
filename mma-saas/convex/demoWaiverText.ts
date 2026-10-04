@@ -1,114 +1,27 @@
-// ⚠️ DEMO TEXT ONLY. NOT LEGAL ADVICE. NOT FOR A REAL GYM. ⚠️
+// What makes a FABRICATED signature record identifiable as one.
 //
-// READ THIS BEFORE USING ANYTHING IN THIS FILE.
+// convex/seedDemoGym.ts stands up a demo gym with a handful of already-signed
+// waivers, so a member's Documents tab isn't empty on a sales call. A
+// signedDocuments row asserts that a named person accepted a liability
+// release — so a seeded one has to say, in the DATA, that nobody did:
 //
-// The entire premise of the Documents & Waivers feature is that the GYM OWNER
-// supplies their own waiver, reviewed by their own attorney, and that
-// KombatDesk builds the signing rail and never the legal language. This file
-// exists solely so a demo gym's Documents tab isn't empty on a sales call. It
-// is:
+//   - its frozen text is topped and tailed with DEMO_WAIVER_MARKER;
+//   - its signature images (below) literally read "DEMO" when rendered.
 //
-//   - seeded ONLY by convex/seedDemoGym.ts, which refuses to run against a gym
-//     that already has members;
-//   - never created for a real signup, never suggested in the product, and
-//     never offered as a starting point in the /settings/documents editor —
-//     that screen ships with an empty textarea and says so;
-//   - deliberately topped and tailed with an unmistakable marker, so that a
-//     row that somehow escapes into a production database is identifiable by
-//     reading the DATA, not by finding this comment.
+// A row that somehow escapes into a real gym is then recognisable by reading
+// it, not by finding this comment.
 //
-// If anyone ever proposes shipping this as a default template for real gyms:
-// no. That is practising law, it varies by state, and the product's one
-// promise here is that we don't do it.
+// HISTORY. Until 2026-10-03 this file also held the demo gym's entire waiver
+// text, under a header saying no text may ever be offered to a real gym. That
+// rule was replaced by the starter library in lib/documentStarters.ts — read
+// its header for the decision and its limits. The demo gym's templates now
+// come from that same library, so a demo shows exactly what a new gym gets,
+// and only the marker and the signature images remain here. The live demo
+// gym's four seeded signatures still carry the older text, frozen, which is
+// what a signed record is supposed to do when its template is edited.
 
 export const DEMO_WAIVER_MARKER =
   "*** DEMO DOCUMENT — SAMPLE TEXT FOR PRODUCT DEMONSTRATION ONLY. NOT A VALID LEGAL AGREEMENT. ***";
-
-export const DEMO_WAIVER_TITLE = "Liability Waiver (DEMO)";
-
-export const DEMO_WAIVER_CONTENT = `${DEMO_WAIVER_MARKER}
-
-ASSUMPTION OF RISK, RELEASE OF LIABILITY, AND INDEMNITY AGREEMENT
-
-Participant: {{member_name}}
-Date of birth: {{member_dob}}
-Address: {{member_address}}
-Academy: {{gym_name}}
-Date: {{today}}
-
-1. ACKNOWLEDGMENT OF RISK. I understand that Brazilian Jiu-Jitsu, submission
-grappling, Muay Thai, kickboxing, wrestling, mixed martial arts and all related
-conditioning activities are physically demanding contact activities that carry
-an inherent risk of injury. Those risks include, without limitation: muscle
-strains and tears; joint sprains, dislocations and hyperextension; broken bones
-and fractures; cuts, bruises and abrasions; damage to teeth and eyes;
-cauliflower ear; skin infections transmitted by mat contact; concussion and
-other head injury; heat exhaustion; cardiac events; permanent disability; and
-death. I understand these risks are present even when instruction, supervision,
-equipment, matting and facilities are entirely appropriate, and that they arise
-in part from the conduct of other participants training alongside me.
-
-2. SPARRING AND LIVE TRAINING. I understand that live sparring, positional
-rolling and clinch work involve deliberate physical contact with training
-partners who differ from me in size, strength, skill and experience, and that
-injury can occur during such training even where every participant is acting in
-good faith and following instruction.
-
-3. FITNESS TO PARTICIPATE. I affirm that I am in sufficient physical condition
-to participate, that I know of no medical condition, injury, medication or
-pregnancy that would make participation unsafe for me, and that I have been
-advised to consult a physician before beginning any new physical activity. I
-will notify {{gym_name}} in writing before returning to training if my condition
-changes in any way that affects the truth of this paragraph.
-
-4. AGREEMENT TO FOLLOW SAFETY RULES. I agree to follow all instructions,
-academy rules and safety directions given by the instructors and staff of
-{{gym_name}} at all times. This includes tapping early and without hesitation,
-releasing a submission the instant my partner taps or says stop, using the
-protective equipment I am told to use, not applying techniques I have not been
-taught, not training while injured or ill, keeping my fingernails and toenails
-trimmed, training in clean attire, and staying off the mats with any open wound,
-rash or contagious skin condition.
-
-5. RELEASE AND HOLD HARMLESS. In consideration of being permitted to train at
-{{gym_name}}, I release, waive, discharge and covenant not to sue {{gym_name}},
-its owners, officers, instructors, employees, volunteers, landlords and other
-members from any and all liability, claims, demands and causes of action arising
-out of or related to any loss, damage or injury, including death, that I may
-sustain while participating in academy activities or while on academy premises,
-whether caused by the ordinary negligence of the released parties or otherwise,
-to the fullest extent permitted by law. I further agree to indemnify and hold
-the released parties harmless from any claim brought by a third party arising
-out of my own conduct. I intend this release to bind me, my spouse, my heirs,
-my executors, my administrators and my assigns.
-
-6. AUTHORIZATION FOR MEDICAL TREATMENT. I authorize {{gym_name}} and its staff
-to arrange or administer first aid and to summon emergency medical services on
-my behalf if I am injured and unable to give consent at the time, and I accept
-financial responsibility for any medical treatment or transport so arranged.
-
-7. GOVERNING LAW AND SEVERABILITY. This agreement is governed by the laws of
-the State of Colorado, without regard to its conflict-of-laws provisions. If any
-provision of this agreement is held invalid or unenforceable, that provision
-shall be severed and the remainder shall continue in full force and effect.
-
-8. ENTIRE AGREEMENT AND ACKNOWLEDGMENT. I have read this document in full. I
-understand that it is a release of legal rights and a binding contract, that I
-am giving up substantial rights by signing it, and that I sign it freely and
-voluntarily without inducement.
-
-Participant signature: ______________________
-
-If the participant named above has not reached the age of majority, a parent or
-legal guardian must also sign below. By signing, that parent or guardian agrees
-to every term of this agreement on the participant's behalf and personally, and
-represents that they have the legal authority to do so.
-
-Parent / guardian printed name: ______________________
-
-Parent / guardian signature: ______________________
-
-${DEMO_WAIVER_MARKER}`;
 
 // Fixed, deterministic signature images for seeded records.
 //

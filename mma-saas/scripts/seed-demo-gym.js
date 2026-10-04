@@ -206,7 +206,7 @@ function printSummary(payload, prod) {
   const seeded = WAIVER_SIGNERS.filter((s) => names.has(s.name));
   const missing = WAIVER_SIGNERS.filter((s) => !names.has(s.name)).map((s) => s.name);
   const minors = seeded.filter((s) => s.guardian).length;
-  console.log(`  1 DEMO waiver template + ${seeded.length} signed copies (${minors} minor w/ guardian)`);
+  console.log(`  Starter document templates (waiver + the rest of lib/documentStarters.ts) + ${seeded.length} DEMO-marked signed waivers (${minors} minor w/ guardian)`);
   if (missing.length) console.log(`  ⚠ no such member for: ${missing.join(", ")} — those copies will be skipped`);
   console.log(`  ${withDob} member(s) with a date of birth — the rest exercise the kiosk's "we need a DOB" step`);
 }

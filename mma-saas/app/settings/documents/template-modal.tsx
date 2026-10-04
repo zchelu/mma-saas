@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
@@ -9,11 +9,29 @@ import {
   PLACEHOLDER_KEYS,
   placeholdersUsed,
 } from "@/lib/documents";
+import {
+  firstBlankRange,
+  STARTER_DOCUMENTS,
+  STARTER_NOTICE,
+  unfilledBlanks,
+  type StarterDocument,
+} from "@/lib/documentStarters";
 
+// `starter`, on either mode, opens the editor with that starter template
+// already loaded — the library cards on the settings page use it. In edit mode
+// it REPLACES the text shown for an existing document (how a gym swaps its
+// waiver for the starter one), and like every other edit nothing is written
+// until the owner presses Save.
 export type TemplateDraft =
-  | { mode: "create"; isWaiver: boolean; requiresGuardianForMinors: boolean }
+  | {
+      mode: "create";
+      isWaiver: boolean;
+      requiresGuardianForMinors: boolean;
+      starter?: StarterDocument;
+    }
   | {
       mode: "edit";
+      starter?: StarterDocument;
       template: {
         _id: Id<"documentTemplates">;
         title: string;
@@ -24,7 +42,11 @@ export type TemplateDraft =
       };
     };
 
-// The editor. A plain textarea, on purpose — a rich-text editor would mean
+// The editor. The owner pastes their own text or loads a starter template and
+// edits it; either way what they save is THEIR document. See the header of
+// lib/documentStarters.ts for what a starter is and is not.
+//
+// A plain textarea, on purpose — a rich-text editor would mean
 // storing markup, and the signing screen renders the owner's text as plain
 // text so gym-supplied content can never inject anything into the page a
 // member signs on.
@@ -46,31 +68,97 @@ export default function TemplateModal({
 
   const isWaiver = draft.mode === "create" ? draft.isWaiver : draft.template.isWaiver;
 
+  const initialStarter = draft.starter ?? null;
+
   const [title, setTitle] = useState(
-    draft.mode === "edit" ? draft.template.title : isWaiver ? "Liability Waiver" : ""
+    initialStarter
+      ? initialStarter.title
+      : draft.mode === "edit"
+        ? draft.template.title
+        : isWaiver
+          ? "Liability Waiver"
+          : ""
   );
-  const [content, setContent] = useState(draft.mode === "edit" ? draft.template.content : "");
+  const [content, setContent] = useState(
+    initialStarter ? initialStarter.content : draft.mode === "edit" ? draft.template.content : ""
+  );
+  // Which starter the text in the editor came from, if any. Drives the notice
+  // and the "check these before members sign" list; it is display state only
+  // and is never sent to the server.
+  const [loadedStarter, setLoadedStarter] = useState<StarterDocument | null>(initialStarter);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Defaults to isWaiver, NOT to true. The waiver gates the door by definition
   // (and its toggle isn't offered — createTemplate/updateTemplate force it
   // server-side so an owner can't switch the gate off). Anything else defaults
   // to NOT blocking: a pre-ticked box would mean an owner adding a photo
   // release quietly makes it mandatory at check-in, which is the exact failure
   // convex/documents.ts:isRequired exists to prevent.
+  //
+  // A starter never overrides that in edit mode: the owner already decided
+  // whether this document stops people at the door.
   const [requiredAtSignup, setRequiredAtSignup] = useState(
-    draft.mode === "edit" ? draft.template.requiredAtSignup : isWaiver
+    draft.mode === "edit"
+      ? draft.template.requiredAtSignup
+      : initialStarter
+        ? initialStarter.requiredAtSignup || isWaiver
+        : isWaiver
   );
   const [requiresGuardian, setRequiresGuardian] = useState(
-    draft.mode === "edit"
-      ? draft.template.requiresGuardianForMinors
-      : draft.requiresGuardianForMinors
+    initialStarter
+      ? initialStarter.requiresGuardianForMinors
+      : draft.mode === "edit"
+        ? draft.template.requiresGuardianForMinors
+        : draft.requiresGuardianForMinors
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const used = placeholdersUsed(content);
+  // [FILL IN: ...] blanks the owner hasn't answered yet. Save stays disabled
+  // while any remain; convex/documents.ts refuses them too.
+  const blanks = unfilledBlanks(content);
+  // isWaiver is fixed for this editor (see above), so only starters of the
+  // same kind can be loaded into it — the waiver starter into the waiver, the
+  // rest into an ordinary document.
+  const availableStarters = STARTER_DOCUMENTS.filter((s) => s.isWaiver === isWaiver);
+
+  function loadStarter(starter: StarterDocument) {
+    const hasOwnText = content.trim().length > 0 && content !== starter.content;
+    if (
+      hasOwnText &&
+      !confirm(
+        `Replace the text in the editor with the "${starter.title}" template? Nothing is saved until you press Save.`
+      )
+    ) {
+      return;
+    }
+    setTitle(starter.title);
+    setContent(starter.content);
+    setRequiresGuardian(starter.requiresGuardianForMinors);
+    if (draft.mode === "create") setRequiredAtSignup(starter.requiredAtSignup || isWaiver);
+    setLoadedStarter(starter);
+    setError(null);
+  }
+
+  // Select the next blank in the textarea so typing replaces it. The scroll is
+  // set by hand: focusing a textarea with a selection far down the text does
+  // not reliably bring it into view.
+  function jumpToNextBlank() {
+    const el = textareaRef.current;
+    const range = firstBlankRange(content);
+    if (!el || !range) return;
+    el.focus();
+    el.setSelectionRange(range.start, range.end);
+    const ratio = content.length > 0 ? range.start / content.length : 0;
+    el.scrollTop = Math.max(0, ratio * el.scrollHeight - el.clientHeight / 2);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (blanks.length > 0) {
+      jumpToNextBlank();
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -115,11 +203,57 @@ export default function TemplateModal({
           {draft.mode === "edit" ? "Edit Document" : isWaiver ? "Add Your Waiver" : "Add Document"}
         </h2>
         <p className="text-xs mb-6" style={{ color: "#555555" }}>
-          Paste your own text. KombatDesk doesn&apos;t write or review legal language — we
-          record the signature.
+          Paste your own text, or start from a template and make it yours. KombatDesk
+          records the signature — it doesn&apos;t give legal advice.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          {availableStarters.length > 0 && (
+            <div
+              className="rounded-lg p-4"
+              style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333" }}
+            >
+              <p className="text-xs uppercase tracking-wider mb-3" style={{ color: "#555555" }}>
+                Start from a template
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {availableStarters.map((s) => {
+                  const active = loadedStarter?.key === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => loadStarter(s)}
+                      title={s.summary}
+                      className="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors"
+                      style={{
+                        backgroundColor: active ? "#2A0A0A" : "#222222",
+                        border: `1px solid ${active ? "#E02020" : "#333333"}`,
+                        color: active ? "#E02020" : "#CCCCCC",
+                      }}
+                    >
+                      {s.title}
+                    </button>
+                  );
+                })}
+              </div>
+              {loadedStarter && (
+                <div className="mt-4">
+                  <p className="text-xs" style={{ color: "#FBBF24" }}>
+                    {STARTER_NOTICE}
+                  </p>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {loadedStarter.reviewNotes.map((note) => (
+                      <li key={note} className="text-xs" style={{ color: "#888888" }}>
+                        • {note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-1">
             <label className="text-xs uppercase tracking-wider" style={{ color: "#555555" }}>
               Title
@@ -143,15 +277,53 @@ export default function TemplateModal({
               </span>
             </div>
             <textarea
+              ref={textareaRef}
               required
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={16}
               className="input font-mono"
               style={{ lineHeight: 1.6, resize: "vertical" }}
-              placeholder="Paste the waiver your attorney approved. Don't have one? Bring us the paper version you already use and we'll load it for you."
+              placeholder="Paste the document you already use, or pick a template above and edit it."
             />
           </div>
+
+          {/* A starter's blanks are the gym's own terms — how to cancel, how
+              long a freeze lasts — which nobody but the owner can supply. A
+              member must never be shown "[FILL IN: ...]" on the tablet, so the
+              document can't be saved while one remains. */}
+          {blanks.length > 0 && (
+            <div
+              className="rounded-lg p-4"
+              style={{ backgroundColor: "#2A1F0A", border: "1px solid #FBBF24" }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-sm" style={{ color: "#FBBF24" }}>
+                  {blanks.length === 1
+                    ? "1 blank to fill in before you can save."
+                    : `${blanks.length} blanks to fill in before you can save.`}
+                </p>
+                <button
+                  type="button"
+                  onClick={jumpToNextBlank}
+                  className="rounded-md px-3 py-1.5 text-xs font-semibold shrink-0"
+                  style={{ backgroundColor: "#FBBF24", color: "#0D0D0D" }}
+                >
+                  Go to next blank
+                </button>
+              </div>
+              <ul className="mt-2 flex flex-col gap-1">
+                {blanks.map((label) => (
+                  <li key={label} className="text-xs" style={{ color: "#FBBF24" }}>
+                    • {label}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs mt-2" style={{ color: "#888888" }}>
+                Replace each [FILL IN: …] in the text with your own terms, brackets and all.
+              </p>
+            </div>
+          )}
 
           {/* THE VISIBLE PLACEHOLDER REFERENCE. Generated from
               lib/documents.ts:PLACEHOLDER_KEYS, which is the same list the
@@ -247,7 +419,7 @@ export default function TemplateModal({
           <div className="flex gap-3 mt-2">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || blanks.length > 0}
               className="flex-1 rounded-lg font-semibold py-2 transition-colors disabled:opacity-50"
               style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
             >

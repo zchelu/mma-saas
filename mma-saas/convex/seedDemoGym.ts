@@ -5,9 +5,14 @@ import { validateRank, disciplineValidator } from "./beltTaxonomy";
 import {
   DEMO_GUARDIAN_SIGNATURE_PNG,
   DEMO_SIGNATURE_PNG,
-  DEMO_WAIVER_CONTENT,
-  DEMO_WAIVER_TITLE,
+  DEMO_WAIVER_MARKER,
 } from "./demoWaiverText";
+import {
+  blankExample,
+  fillBlanks,
+  STARTER_DOCUMENTS,
+  unfilledBlanks,
+} from "../lib/documentStarters";
 import {
   buildPlaceholderValues,
   isMinorOnDate,
@@ -23,9 +28,10 @@ import {
 // inside a mutation).
 //
 // It writes the rows it is given, PLUS the Documents & Waivers demo block at
-// the bottom, whose text, signer list and signature images originate here
-// rather than in the payload — see convex/demoWaiverText.ts for why that text
-// must never escape a demo gym.
+// the bottom: the starter library from lib/documentStarters.ts as the gym's
+// templates, and a few fabricated signed copies whose signer list and
+// signature images originate here rather than in the payload — see
+// convex/demoWaiverText.ts for how those are kept identifiable as fake.
 //
 // Refuses to run against a gym that already has members, rather than trying
 // to merge/dedupe like adminImportBatch does for repeated CSV imports — this
@@ -87,20 +93,20 @@ export const seedDemoGym = internalMutation({
     //
     // The members check above is not sufficient cover for the waiver block at
     // the bottom of this file. A real gym that has finished onboarding and
-    // pasted its own waiver, but hasn't imported its roster yet — or a
-    // mistyped --gym-id — would otherwise receive a SECOND isWaiver row
-    // titled "(DEMO)". That row cannot be removed from the product:
-    // deleteTemplate refuses any isWaiver row and updateTemplate cannot demote
-    // one, so it would take a Convex dashboard delete. Until then it gates the
-    // door, and every real member gets stopped at check-in and asked to sign
-    // text that says it is not a valid legal agreement.
+    // saved its own waiver, but hasn't imported its roster yet — or a
+    // mistyped --gym-id — would otherwise receive a SECOND isWaiver row. That
+    // row cannot be removed from the product: deleteTemplate refuses any
+    // isWaiver row and updateTemplate cannot demote one, so it would take a
+    // Convex dashboard delete. Until then it gates the door, and every real
+    // member gets stopped at check-in and asked to sign a waiver their gym
+    // never chose — alongside fabricated signature rows on real members.
     const existingTemplates = await ctx.db
       .query("documentTemplates")
       .withIndex("by_gym", (q) => q.eq("gymId", gymId))
       .collect();
     if (existingTemplates.length > 0) {
       throw new Error(
-        `Gym ${gymId} already has ${existingTemplates.length} document template(s) — refusing to seed a demo waiver on top of a real one.`
+        `Gym ${gymId} already has ${existingTemplates.length} document template(s) — refusing to seed demo documents on top of real ones.`
       );
     }
 
@@ -216,9 +222,17 @@ export const seedDemoGym = internalMutation({
 
     // --- Documents & Waivers demo data ------------------------------------
     //
-    // A gym owner on a sales call opens a member's Documents tab. If it's
-    // empty the feature looks unbuilt, so the demo gym ships with a waiver and
-    // a few signed copies of it.
+    // TEMPLATES. The demo gym gets the starter library exactly as a new gym
+    // would load it from /settings/documents, so a prospect sees the documents
+    // they'd actually start with rather than a mock. The only difference is
+    // that the [FILL IN: ...] blanks — the gym's own freeze and cancellation
+    // terms — are answered with each blank's own example, because a document
+    // with a blank left in it must never be put in front of a signer
+    // (documents.ts:validateTemplateFields refuses to save one).
+    //
+    // SIGNED COPIES. A gym owner on a sales call opens a member's Documents
+    // tab. If it's empty the feature looks unbuilt, so the demo gym also ships
+    // with a few signed copies of the waiver.
     //
     // THESE ARE FABRICATED SIGNATURE RECORDS, and that is a real thing to be
     // careful with — a signedDocuments row asserts that a named human accepted
@@ -227,24 +241,59 @@ export const seedDemoGym = internalMutation({
     // member may ever be given a fabricated consent record"), so these follow
     // the strictest reading of it that still leaves a demoable screen:
     //
-    //   - the template is titled "(DEMO)" and its text is topped and tailed
-    //     with a marker saying it is not a valid legal agreement, so the
-    //     FROZEN renderedContent on every seeded row says so too;
+    //   - the FROZEN renderedContent of every seeded row is topped and tailed
+    //     with DEMO_WAIVER_MARKER, saying it is not a valid legal agreement.
+    //     The TEMPLATE is left clean: anyone who signs it at the kiosk during
+    //     a demo is a real person really signing, and gets the real text;
     //   - the signature images literally read "DEMO" when rendered;
     //   - the whole block only runs behind this mutation's existing refusal to
-    //     seed a gym that already has members.
+    //     seed a gym that already has members or templates.
     //
-    // Nothing here is ever created for a real signup. Production ships with no
-    // template at all and an empty editor — see convex/demoWaiverText.ts.
-    const waiverTemplateId = await ctx.db.insert("documentTemplates", {
-      gymId,
-      title: DEMO_WAIVER_TITLE,
-      content: DEMO_WAIVER_CONTENT,
-      isWaiver: true,
-      requiresGuardianForMinors: true,
-      requiredAtSignup: true,
-      createdAt: Date.now(),
-    });
+    // Nothing here is ever created for a real signup. A real gym's templates
+    // exist only because its owner saved them — see lib/documentStarters.ts.
+    let waiverTemplateId: Id<"documentTemplates"> | undefined;
+    let waiverContent: string | undefined;
+    let documentTemplatesCreated = 0;
+    // createdAt drives display order after the waiver; a distinct value per
+    // row keeps that order stable instead of leaving it to insertion ties.
+    const templatesCreatedAt = Date.now();
+
+    for (const starter of STARTER_DOCUMENTS) {
+      const examples: Record<string, string> = {};
+      for (const label of unfilledBlanks(starter.content)) {
+        const example = blankExample(label);
+        if (example) examples[label] = example;
+      }
+      const content = fillBlanks(starter.content, examples);
+      const stillBlank = unfilledBlanks(content);
+      if (stillBlank.length > 0) {
+        throw new Error(
+          `Starter "${starter.title}" has a blank with no example to seed: ${stillBlank.join("; ")}`
+        );
+      }
+
+      const templateId = await ctx.db.insert("documentTemplates", {
+        gymId,
+        title: starter.title,
+        content,
+        isWaiver: starter.isWaiver,
+        requiresGuardianForMinors: starter.requiresGuardianForMinors,
+        // Same rule as documents.ts:createTemplate — the waiver always gates.
+        requiredAtSignup: starter.isWaiver ? true : starter.requiredAtSignup,
+        createdAt: templatesCreatedAt + documentTemplatesCreated,
+      });
+      documentTemplatesCreated++;
+      if (starter.isWaiver) {
+        waiverTemplateId = templateId;
+        waiverContent = content;
+      }
+    }
+
+    if (!waiverTemplateId || waiverContent === undefined) {
+      throw new Error("The starter library has no waiver — nothing to attach seeded signatures to.");
+    }
+    // What a seeded signature freezes: the waiver, marked top and bottom.
+    const seededWaiverText = `${DEMO_WAIVER_MARKER}\n\n${waiverContent}\n\n${DEMO_WAIVER_MARKER}`;
 
     // Four signed copies: three adults and one minor countersigned by a
     // guardian, so the guardian block on the member profile is demoable
@@ -307,7 +356,7 @@ export const seedDemoGym = internalMutation({
       // identical to a real one and the Documents tab is showing the real
       // rendering path, not a mock of it.
       const renderedContent = resolvePlaceholders(
-        DEMO_WAIVER_CONTENT,
+        seededWaiverText,
         buildPlaceholderValues({
           memberName: member.name,
           memberDob: member.dob,
@@ -346,6 +395,7 @@ export const seedDemoGym = internalMutation({
 
     return {
       waiverTemplateCreated: 1,
+      documentTemplatesCreated,
       signedDocumentsCreated,
       skippedSigners,
       classesCreated: classIds.length,

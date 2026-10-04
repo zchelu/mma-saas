@@ -22,9 +22,14 @@ import {
   reconcileSigningDate as reconcile,
   resolvePlaceholders,
 } from "../lib/documents";
+import { unfilledBlanks } from "../lib/documentStarters";
 
-// Documents & Waivers — the signing rail. The gym owner supplies their own
-// waiver text; this product never generates legal language and must not start.
+// Documents & Waivers — the signing rail. The gym owner supplies the text:
+// their own, or one of the starter templates in lib/documentStarters.ts that
+// they load into the editor, edit and save as theirs (decision of 2026-10-03,
+// recorded in that file's header). Nothing in THIS file ever writes template
+// text on a gym's behalf, and nothing added to it should — createTemplate and
+// updateTemplate store exactly what an authenticated owner submitted.
 //
 // TWO INVARIANTS, both enforced in signDocument below:
 //
@@ -209,6 +214,16 @@ function validateTemplateFields(fields: { title: string; content: string }) {
     // produces signed records attesting to nothing, which is worse than
     // having no waiver at all.
     throw new ConvexError("A document with no text can't be signed. Paste your waiver text in.");
+  }
+  // A starter template's "[FILL IN: ...]" blanks are the gym's own terms. The
+  // editor already blocks saving with one left in; this is the same rule where
+  // it can't be bypassed, because the next reader of this text is a member
+  // holding the tablet, and what they sign is frozen.
+  const blanks = unfilledBlanks(fields.content);
+  if (blanks.length > 0) {
+    throw new ConvexError(
+      `Fill in the blanks before saving. Still to do: ${blanks.join("; ")}`
+    );
   }
 }
 

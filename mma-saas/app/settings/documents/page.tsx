@@ -6,11 +6,28 @@ import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../components/app-header";
 import { ErrorToast, getErrorMessage } from "../../components/error-toast";
 import TemplateModal, { type TemplateDraft } from "./template-modal";
+import SelectField from "../../components/select-field";
+import {
+  STARTER_DOCUMENTS,
+  STARTER_NOTICE,
+  STARTER_WAIVER,
+  type StarterDocument,
+} from "@/lib/documentStarters";
 
-// Owner-facing document management. The gym pastes in their own waiver text;
-// KombatDesk supplies the signing rail and never the legal language. Nothing
-// on this screen offers to write, suggest or "improve" a waiver, and nothing
-// added to it should.
+const MINOR_AGE_OPTIONS = Array.from({ length: 13 }, (_, i) => 13 + i).map((n) => ({
+  value: String(n),
+  label: String(n),
+}));
+
+// Owner-facing document management. The gym pastes in its own text or starts
+// from one of the starter templates in lib/documentStarters.ts and edits it.
+//
+// This screen used to refuse to offer any text at all ("we never supply the
+// legal language"). That changed on 2026-10-03 — see the header of
+// lib/documentStarters.ts for the decision and its limits. What has NOT
+// changed: a starter only ever lands in the editor, the owner saves it as
+// their own document, and every place that offers one carries STARTER_NOTICE.
+// Nothing here writes a template into a gym on the owner's behalf.
 
 type Template = {
   _id: Id<"documentTemplates">;
@@ -34,6 +51,31 @@ export default function DocumentsSettingsPage() {
 
   const list = (templates ?? []) as Template[];
   const waiver = list.find((t) => t.isWaiver);
+
+  // Has this gym already saved a document under this starter's title? Matched
+  // on title because nothing on a template row records where its text came
+  // from — deliberately, since once saved it is the gym's own document. A
+  // renamed copy simply shows the starter as available again, which is fine.
+  function alreadyAdded(starter: StarterDocument): boolean {
+    const wanted = starter.title.trim().toLowerCase();
+    return list.some((t) => !t.isWaiver && t.title.trim().toLowerCase() === wanted);
+  }
+
+  function openStarter(starter: StarterDocument) {
+    if (starter.isWaiver && waiver) {
+      // One waiver per gym, and it can't be deleted — so the starter waiver
+      // loads INTO the existing one as an unsaved edit. Members who already
+      // signed keep the text they signed (signedDocuments.renderedContent).
+      setModal({ mode: "edit", template: waiver, starter });
+      return;
+    }
+    setModal({
+      mode: "create",
+      isWaiver: starter.isWaiver,
+      requiresGuardianForMinors: starter.requiresGuardianForMinors,
+      starter,
+    });
+  }
 
   async function handleDelete(t: Template) {
     if (!confirm(`Delete "${t.title}"? Documents members already signed are kept.`)) return;
@@ -66,10 +108,11 @@ export default function DocumentsSettingsPage() {
               Documents & Waivers
             </h1>
             <p className="text-sm mt-2 max-w-xl" style={{ color: "#888888" }}>
-              Your waiver, in your words. Members sign it on the tablet at the door — and
-              anyone who hasn&apos;t signed is stopped at check-in until they do. Other
-              documents are collected when a new member signs up; mark one
-              &ldquo;required&rdquo; and it stops people at the door too.
+              Paste your own waiver or start from a template and make it yours. Members
+              sign it on the tablet at the door — and anyone who hasn&apos;t signed is
+              stopped at check-in until they do. Other documents are collected when a new
+              member signs up; mark one &ldquo;required&rdquo; and it stops people at the
+              door too.
             </p>
           </div>
           <button
@@ -124,18 +167,13 @@ export default function DocumentsSettingsPage() {
                 state&apos;s rule — we can&apos;t advise on which it is.
               </p>
             </div>
-            <select
-              value={settings?.minorAgeThreshold ?? 18}
-              onChange={(e) => handleThresholdChange(e.target.value)}
+            <SelectField
+              value={String(settings?.minorAgeThreshold ?? 18)}
+              onChange={handleThresholdChange}
+              options={MINOR_AGE_OPTIONS}
               disabled={!settings}
-              className="input w-24 ml-auto"
-            >
-              {Array.from({ length: 13 }, (_, i) => 13 + i).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              className="w-24 ml-auto"
+            />
           </div>
         </section>
 
@@ -146,7 +184,10 @@ export default function DocumentsSettingsPage() {
                 Loading…
               </p>
             ) : list.length === 0 ? (
-              <EmptyState onAdd={() => setModal({ mode: "create", isWaiver: true, requiresGuardianForMinors: true })} />
+              <EmptyState
+                onAdd={() => setModal({ mode: "create", isWaiver: true, requiresGuardianForMinors: true })}
+                onUseStarter={() => openStarter(STARTER_WAIVER)}
+              />
             ) : (
               list.map((t, i) => (
                 <div
@@ -218,6 +259,64 @@ export default function DocumentsSettingsPage() {
             )}
           </div>
         </section>
+
+        {/* THE STARTER LIBRARY. Hidden until the template list has loaded, so
+            the buttons never act on a stale "no waiver yet" — opening the
+            waiver starter in create mode for a gym that already has a waiver
+            would run into createTemplate's one-waiver rule on save. */}
+        {templates !== undefined && (
+          <section className="mt-12">
+            <h2 className="text-lg" style={{ color: "#FFFFFF", fontWeight: 500 }}>
+              Starter templates
+            </h2>
+            <p className="text-xs mt-2 max-w-2xl" style={{ color: "#888888" }}>
+              {STARTER_NOTICE}
+            </p>
+            <div className="grid gap-4 mt-5 sm:grid-cols-2">
+              {STARTER_DOCUMENTS.map((s) => {
+                const added = alreadyAdded(s);
+                const replacesWaiver = s.isWaiver && !!waiver;
+                return (
+                  <div
+                    key={s.key}
+                    className="rounded-xl p-5 flex flex-col gap-3"
+                    style={{ backgroundColor: "#1A1A1A", border: "1px solid #333333" }}
+                  >
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="font-medium" style={{ color: "#FFFFFF" }}>
+                        {s.title}
+                      </span>
+                      {s.isWaiver ? (
+                        <Chip color="#E02020" bg="#2A0A0A">Waiver</Chip>
+                      ) : (
+                        <Chip color="#888888" bg="#222222">Document</Chip>
+                      )}
+                    </div>
+                    <p className="text-xs flex-1" style={{ color: "#888888" }}>
+                      {s.summary}
+                    </p>
+                    <button
+                      onClick={() => openStarter(s)}
+                      disabled={added}
+                      className="self-start rounded-lg text-xs font-semibold px-3 py-2 transition-colors disabled:opacity-50"
+                      style={{
+                        backgroundColor: "#222222",
+                        color: "#FFFFFF",
+                        border: "1px solid #333333",
+                      }}
+                    >
+                      {added
+                        ? "Added"
+                        : replacesWaiver
+                          ? "Load into my waiver"
+                          : "Use this template"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </main>
 
       {modal && <TemplateModal draft={modal} onClose={() => setModal(null)} />}
@@ -276,7 +375,7 @@ function DocIcon() {
   );
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
+function EmptyState({ onAdd, onUseStarter }: { onAdd: () => void; onUseStarter: () => void }) {
   return (
     <div className="flex flex-col items-center gap-4 py-20 text-center px-8">
       <div
@@ -290,18 +389,27 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
           No waiver yet
         </p>
         <p className="text-sm mt-1 max-w-md" style={{ color: "#555555" }}>
-          Paste in the waiver you already use. We won&apos;t write it for you — we don&apos;t
-          give legal advice — but once it&apos;s here, every member signs it on the tablet and
-          you never chase a piece of paper again.
+          Paste in the waiver you already use, or start from our template and edit it.
+          Once it&apos;s here, every member signs it on the tablet and you never chase a
+          piece of paper again.
         </p>
       </div>
-      <button
-        onClick={onAdd}
-        className="rounded-lg text-sm font-semibold px-4 py-2 transition-colors"
-        style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
-      >
-        + Add Your Waiver
-      </button>
+      <div className="flex flex-wrap justify-center gap-3">
+        <button
+          onClick={onAdd}
+          className="rounded-lg text-sm font-semibold px-4 py-2 transition-colors"
+          style={{ backgroundColor: "#E02020", color: "#FFFFFF" }}
+        >
+          + Add Your Waiver
+        </button>
+        <button
+          onClick={onUseStarter}
+          className="rounded-lg text-sm font-semibold px-4 py-2 transition-colors"
+          style={{ backgroundColor: "#1A1A1A", color: "#FFFFFF", border: "1px solid #333333" }}
+        >
+          Start from a template
+        </button>
+      </div>
     </div>
   );
 }
