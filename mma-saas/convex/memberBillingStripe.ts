@@ -22,6 +22,7 @@ import { action, internalAction, ActionCtx } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
+import { toDuesStatus } from "./connectDuesWebhookAction";
 
 const STRIPE_API_VERSION = "2026-06-24.dahlia";
 
@@ -305,10 +306,10 @@ export const createSubscriptionForMember = internalAction({
         // does not reliably set invoice_settings.default_payment_method. A
         // subscription created against a customer with an attached card and no
         // default lands in `incomplete` and never collects — which reaches the
-        // gym as a member who "signed up" and reaches us as duesStatus "unpaid"
-        // with no failure event to explain it. The webhook reads the id off the
-        // session's SetupIntent, so this does not depend on Checkout's implicit
-        // behaviour.
+        // gym as a member who "signed up" and reaches us as duesStatus
+        // "incomplete" with no failure event to explain it. The webhook reads
+        // the id off the session's SetupIntent, so this does not depend on
+        // Checkout's implicit behaviour.
         ...(defaultPaymentMethodId ? { default_payment_method: defaultPaymentMethodId } : {}),
         // NO application_fee_percent and NO transfer_data. Processing is passed
         // through at cost — a deliberate revenue decision, not an omission
@@ -330,7 +331,12 @@ export const createSubscriptionForMember = internalAction({
       gymId,
       memberId,
       stripeConnectSubscriptionId: subscription.id,
-      status: subscription.status === "active" ? "active" : "unpaid",
+      // toDuesStatus, not a two-way active/unpaid split: a card declined at
+      // creation lands this in Stripe's `incomplete`, and collapsing that into
+      // "unpaid" is the bug the Billing panel used to show for a repro member
+      // whose card was declined — "Unpaid" when the honest answer is "Payment
+      // failed, still retrying".
+      status: toDuesStatus(subscription.status),
     });
     return { created: true };
   },

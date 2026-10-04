@@ -1,11 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
 import { DISABLED_BUTTON_STYLE } from "../components/button-styles";
 import { useOrigin } from "../components/use-origin";
+import SelectField from "../components/select-field";
 
 // The member's Billing tab — dues, end to end, for one member.
 //
@@ -50,6 +51,10 @@ const DUES_PILL: Record<string, { label: string; background: string; color: stri
   active: { label: "Active", background: "#0A2A14", color: "#4ADE80" },
   past_due: { label: "Past due", background: "#2A1F0A", color: "#FBBF24" },
   unpaid: { label: "Unpaid", background: "#2A0A0A", color: "#F87171" },
+  // A card was attached but the first charge hasn't cleared yet — distinct
+  // from "unpaid" (Stripe has given up retrying). See
+  // connectDuesWebhookAction.ts:toDuesStatus.
+  incomplete: { label: "Payment failed", background: "#2A0A0A", color: "#F87171" },
   canceled: { label: "Canceled", background: "#222222", color: "#888888" },
 };
 
@@ -76,7 +81,7 @@ export default function MemberBillingDrawer({ memberId, memberName, onClose }: P
   const [copied, setCopied] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
 
-  const planList = plans ?? [];
+  const planList = useMemo(() => plans ?? [], [plans]);
 
   async function run(work: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -218,6 +223,16 @@ export default function MemberBillingDrawer({ memberId, memberName, onClose }: P
                   Send {memberName.trim().split(/\s+/)[0]} a link to save a card. Nothing is
                   charged until they do.
                 </p>
+              ) : billing.duesStatus === "incomplete_expired" ? (
+                // Stripe expired the setup link before the member attached a
+                // card — a dead end, not something that will resolve on its
+                // own. "the old link keeps working too" below would be false
+                // here, which is why this gets its own branch instead of
+                // falling into the generic "no card saved yet" copy.
+                <p className="text-sm" style={{ color: "#F87171" }}>
+                  Link expired, send a new one — the old one stopped working before{" "}
+                  {memberName.trim().split(/\s+/)[0]} saved a card.
+                </p>
               ) : !billing.hasSubscription ? (
                 // A Customer exists but no subscription. The link was created;
                 // the card was never saved. Deliberately NOT called pending or
@@ -349,7 +364,14 @@ function SubscriptionSummary({
             day: "numeric",
             year: "numeric",
           })}
-          . Stripe emails them about the card; you don&apos;t need to do anything here.
+          .{" "}
+          {/* incomplete = the FIRST charge failed. Stripe gives the member
+              ~23 hours to pay that invoice, then expires the subscription and
+              voids it — the owner has to send a new link. Renewal failures
+              (past_due/unpaid) are retried by Stripe, so the old copy holds. */}
+          {duesStatus === "incomplete"
+            ? "They have about a day to pay. After that the link expires and you send a new one."
+            : <>Stripe emails them about the card; you don&apos;t need to do anything here.</>}
         </p>
       )}
     </div>
@@ -379,6 +401,18 @@ function PlanPicker({
   disabled: boolean;
   onPick: (planId: Id<"gymPlans">) => void;
 }) {
+  const options = useMemo(
+    () =>
+      plans.map((plan) => ({
+        value: plan._id,
+        label: plan.name,
+        hint: `${formatPlanPrice(plan.amountCents, plan.interval)}${
+          plan.billable ? "" : " (not ready at Stripe)"
+        }`,
+      })),
+    [plans]
+  );
+
   if (loading) {
     return (
       <p className="text-sm" style={{ color: "#555555" }}>
@@ -399,25 +433,16 @@ function PlanPicker({
       <p className="text-xs uppercase tracking-widest" style={{ color: "#555555" }}>
         {hasSubscription ? "Change plan" : "Plan"}
       </p>
-      <select
-        className="input w-full"
+      <SelectField
+        className="w-full"
         value={currentPlanId ?? ""}
         disabled={disabled}
-        onChange={(e) => {
-          const next = e.target.value;
+        onChange={(next) => {
           if (next && next !== currentPlanId) onPick(next as Id<"gymPlans">);
         }}
-      >
-        <option value="" disabled>
-          Select a plan…
-        </option>
-        {plans.map((plan) => (
-          <option key={plan._id} value={plan._id}>
-            {plan.name} — {formatPlanPrice(plan.amountCents, plan.interval)}
-            {plan.billable ? "" : " (not ready at Stripe)"}
-          </option>
-        ))}
-      </select>
+        options={options}
+        placeholder="Select a plan…"
+      />
       {hasSubscription && (
         // Says what changeMemberPlan actually does, before it is done. The
         // proration is a real charge or credit on the member's next invoice.

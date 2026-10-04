@@ -94,7 +94,14 @@ export default defineSchema({
         v.literal("active"),
         v.literal("past_due"),
         v.literal("canceled"),
-        v.literal("unpaid")
+        v.literal("unpaid"),
+        // Split out from "unpaid"/"canceled" respectively so the billing
+        // drawer can tell a first charge still clearing (incomplete) and a
+        // setup link nobody finished before it expired (incomplete_expired)
+        // apart from an actual decline or an owner-initiated cancel. See
+        // convex/connectDuesWebhookAction.ts:toDuesStatus.
+        v.literal("incomplete"),
+        v.literal("incomplete_expired")
       )
     ),
     // When the most recent dues payment failed, and how many have failed in a

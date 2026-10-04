@@ -64,7 +64,13 @@ type WebhookResult = { status: "ok" } | { status: "invalid_signature" } | { stat
 
 // Our narrowed dues vocabulary. Must agree with schema.ts:members.duesStatus and
 // convex/memberBilling.ts:duesStatus.
-type DuesStatus = "active" | "past_due" | "canceled" | "unpaid";
+export type DuesStatus =
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "incomplete"
+  | "incomplete_expired";
 
 // Event types this handler acts on. Checked BEFORE the dedupe claim so the
 // events we ignore do not fill the table.
@@ -85,23 +91,35 @@ const HANDLED_EVENT_TYPES = new Set<Stripe.Event["type"]>([
   "customer.subscription.deleted",
 ]);
 
-// Stripe's eight subscription states, narrowed to our four.
+// Stripe's eight subscription states, narrowed to our six.
 //
-// LOSSY BY DESIGN, and the losses are the point:
-//   trialing -> active     the member is in good standing; nothing is owed yet
-//   incomplete -> unpaid   a card was attached but the first charge has not
-//                          cleared. NOT "active" — that is the state that would
-//                          let a gym believe a member is paying when no money
-//                          has moved.
-//   incomplete_expired,
-//   canceled -> canceled
-//   paused -> unpaid       v1 has no pause feature, so this can only arrive if
-//                          an owner paused the subscription in their own Stripe
-//                          dashboard. "unpaid" overstates it — nothing failed —
-//                          but it is the only value that does not tell the gym
-//                          money is arriving when none is. Revisit if a real gym
-//                          uses pause; a fifth duesStatus is the honest fix.
-function toDuesStatus(status: Stripe.Subscription.Status): DuesStatus {
+// trialing -> active             the member is in good standing; nothing is
+//                                 owed yet.
+// incomplete -> incomplete       a card was attached but the first charge has
+//                                 not cleared yet. NOT "active" — that is the
+//                                 state that would let a gym believe a member
+//                                 is paying when no money has moved. NOT
+//                                 "unpaid" either any more: that collapsed a
+//                                 charge still retrying into the same bucket
+//                                 as one Stripe has given up on, and the
+//                                 drawer could only ever say "Unpaid" for
+//                                 both.
+// incomplete_expired -> incomplete_expired   the setup link expired before a
+//                                 card was ever attached — nothing to retry,
+//                                 the owner has to send a new one. Used to
+//                                 collapse into "canceled", which reads as an
+//                                 owner's deliberate action rather than a
+//                                 member who never finished checkout.
+// canceled -> canceled
+// unpaid -> unpaid                Stripe has exhausted its retry schedule.
+// paused -> unpaid                v1 has no pause feature, so this can only
+//                                 arrive if an owner paused the subscription
+//                                 in their own Stripe dashboard. "unpaid"
+//                                 overstates it — nothing failed — but it is
+//                                 the only value that does not tell the gym
+//                                 money is arriving when none is. Revisit if a
+//                                 real gym uses pause.
+export function toDuesStatus(status: Stripe.Subscription.Status): DuesStatus {
   switch (status) {
     case "active":
     case "trialing":
@@ -109,9 +127,11 @@ function toDuesStatus(status: Stripe.Subscription.Status): DuesStatus {
     case "past_due":
       return "past_due";
     case "canceled":
-    case "incomplete_expired":
       return "canceled";
+    case "incomplete_expired":
+      return "incomplete_expired";
     case "incomplete":
+      return "incomplete";
     case "unpaid":
     case "paused":
       return "unpaid";
@@ -188,13 +208,18 @@ async function applySubscriptionState(
     return;
   }
 
-  // A cancelled subscription clears the id so the drawer stops offering to
-  // manage it; the Customer and planId survive on purpose (spec §9 — a member
-  // who pauses over the summer must not re-enter their card).
+  // A subscription that will never collect again clears the id so the drawer
+  // stops offering to manage it; the Customer and planId survive on purpose
+  // (spec §9 — a member who pauses over the summer must not re-enter their
+  // card). The status passed through distinguishes an owner's deliberate
+  // cancel from a setup link nobody finished before Stripe expired it, so the
+  // drawer can tell the owner which one happened instead of showing "Canceled"
+  // for both.
   if (subscription.status === "canceled" || subscription.status === "incomplete_expired") {
     await ctx.runMutation(internal.memberBilling.clearMemberDuesSubscription, {
       gymId,
       memberId: member._id,
+      status: subscription.status === "incomplete_expired" ? "incomplete_expired" : "canceled",
     });
     return;
   }

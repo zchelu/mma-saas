@@ -90,6 +90,12 @@ export const getAll = query({
       // dues running can only be moved through Stripe, so the dropdown is
       // disabled rather than offering a write assignMemberPlan would refuse.
       hasDuesSubscription: !!m.stripeConnectSubscriptionId,
+      // Drives the roster's "Payment failed"/"Past due"/"Unpaid" badge — a
+      // fact members.status (active/inactive, set by the owner) cannot carry.
+      // A member can be "active" on the roster and still not paying; without
+      // this the table had no way to say so. Same value memberBilling's
+      // billing drawer reads, just shipped to the row that doesn't open it.
+      duesStatus: m.duesStatus ?? null,
     }));
   },
 });

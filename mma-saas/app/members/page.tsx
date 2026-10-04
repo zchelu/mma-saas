@@ -12,6 +12,7 @@ import ConsentAttestationPanel from "./consent-attestation-panel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
 import { isTextEligibleMember } from "../../lib/memberEligibility";
 import { textState, TextStatePill } from "../components/text-state-pill";
+import SelectField from "../components/select-field";
 
 type Member = {
   _id: Id<"members">;
@@ -26,6 +27,9 @@ type Member = {
   // Plan column renders; the two are unrelated on purpose.
   planId?: Id<"gymPlans">;
   hasDuesSubscription?: boolean;
+  // Billing state from Stripe, independent of `status` above — see the
+  // "Payment failed"/"Past due"/"Unpaid" badge this drives next to Status.
+  duesStatus?: "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "incomplete_expired" | null;
   lastVisit?: string;
   dob?: string;
   dobUnverified?: boolean;
@@ -56,6 +60,29 @@ function SortIcon({ col, sortCol, sortDir }: { col: ActiveSortCol; sortCol: Sort
   if (sortCol !== col) return <span className="ml-1 text-xs" style={{ color: "#555555" }}>↕</span>;
   return <span className="ml-1 text-xs" style={{ color: "#FFFFFF" }}>{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
+
+const STATUS_FILTER_OPTIONS = [
+  { value: "all", label: "All Status" },
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+];
+
+const TEXTS_FILTER_OPTIONS = [
+  { value: "all", label: "All texts" },
+  { value: "on", label: "Texts on" },
+  { value: "not_on", label: "Texts not on" },
+];
+
+// Membership status (above) is the owner's own flag; this is Stripe's. A
+// member can be "active" on the roster and still not paying, which is exactly
+// the gap this badge exists to close — so it renders next to Status rather
+// than replacing it. "active"/"canceled" dues aren't alert-worthy here: the
+// drawer is where the full picture (plan, amount, failure count) lives.
+const DUES_ALERT_PILL: Record<string, { label: string; background: string; color: string }> = {
+  incomplete: { label: "Payment failed", background: "#2A0A0A", color: "#F87171" },
+  past_due: { label: "Past due", background: "#2A1F0A", color: "#FBBF24" },
+  unpaid: { label: "Unpaid", background: "#2A0A0A", color: "#F87171" },
+};
 
 export default function MembersPage() {
   const members = useQuery(api.members.getAll);
@@ -216,24 +243,20 @@ export default function MembersPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="input flex-1 max-w-xs"
           />
-          <select
+          <SelectField
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-            className="input w-36"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-          <select
+            onChange={(v) => setStatusFilter(v as typeof statusFilter)}
+            options={STATUS_FILTER_OPTIONS}
+            className="w-36"
+            title="Status"
+          />
+          <SelectField
             value={textsFilter}
-            onChange={(e) => setTextsFilter(e.target.value as typeof textsFilter)}
-            className="input w-44"
-          >
-            <option value="all">All texts</option>
-            <option value="on">Texts on</option>
-            <option value="not_on">Texts not on</option>
-          </select>
+            onChange={(v) => setTextsFilter(v as typeof textsFilter)}
+            options={TEXTS_FILTER_OPTIONS}
+            className="w-44"
+            title="Texts"
+          />
         </div>
 
         <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid #333333" }}>
@@ -313,16 +336,30 @@ export default function MembersPage() {
                     <td className="px-6 py-4" style={{ color: "#888888" }}>{m.plan}</td>
                     <td className="px-6 py-4" style={{ color: "#888888" }}>{m.beltRank || "—"}</td>
                     <td className="px-6 py-4">
-                      <span
-                        className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                        style={
-                          m.status === "active"
-                            ? { backgroundColor: "#0A2A14", color: "#4ADE80" }
-                            : { backgroundColor: "#2A0A0A", color: "#F87171" }
-                        }
-                      >
-                        {m.status}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                          style={
+                            m.status === "active"
+                              ? { backgroundColor: "#0A2A14", color: "#4ADE80" }
+                              : { backgroundColor: "#2A0A0A", color: "#F87171" }
+                          }
+                        >
+                          {m.status}
+                        </span>
+                        {m.duesStatus && DUES_ALERT_PILL[m.duesStatus] && (
+                          <span
+                            className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                            style={{
+                              backgroundColor: DUES_ALERT_PILL[m.duesStatus].background,
+                              color: DUES_ALERT_PILL[m.duesStatus].color,
+                            }}
+                            title="Billing state from Stripe — see the Billing panel for the full picture."
+                          >
+                            {DUES_ALERT_PILL[m.duesStatus].label}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <TextStatePill state={textState(m)} />

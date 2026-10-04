@@ -27,7 +27,9 @@ export const duesStatus = v.union(
   v.literal("active"),
   v.literal("past_due"),
   v.literal("canceled"),
-  v.literal("unpaid")
+  v.literal("unpaid"),
+  v.literal("incomplete"),
+  v.literal("incomplete_expired")
 );
 
 // Resolves a member for a billing operation, or null.
@@ -279,22 +281,33 @@ export const recordDuesFailure = internalMutation({
   },
 });
 
-// Clears dues state after a cancellation Stripe has confirmed.
+// Clears dues state after Stripe confirms the subscription will never collect
+// again — either an owner-initiated cancel, or a setup link that expired
+// before a card was ever attached.
 //
 // The Customer id SURVIVES on purpose. It holds the member's saved card, and a
 // member who pauses over the summer and comes back in September should not have
 // to re-enter it — re-entry is where the whole migration objection lives
 // (spec §9). planId survives too, so the roster still shows what they were on.
 export const clearMemberDuesSubscription = internalMutation({
-  args: { gymId: v.id("gyms"), memberId: v.id("members") },
-  handler: async (ctx, { gymId, memberId }) => {
+  args: {
+    gymId: v.id("gyms"),
+    memberId: v.id("members"),
+    // Defaults to "canceled" so the pre-existing owner-cancel caller
+    // (memberBillingStripe.cancelMemberDues) and the cancel branch of the
+    // dues webhook need no change. The webhook's incomplete_expired branch
+    // passes "incomplete_expired" explicitly so the drawer can tell "you
+    // canceled this" apart from "nobody finished the setup link in time".
+    status: v.optional(v.union(v.literal("canceled"), v.literal("incomplete_expired"))),
+  },
+  handler: async (ctx, { gymId, memberId, status }) => {
     const member = await ctx.db.get(memberId);
     if (!member || member.gymId !== gymId) {
       throw new Error(`No member ${memberId} for gym ${gymId}`);
     }
     await ctx.db.patch(memberId, {
       stripeConnectSubscriptionId: undefined,
-      duesStatus: "canceled",
+      duesStatus: status ?? "canceled",
     });
   },
 });

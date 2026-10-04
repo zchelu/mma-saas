@@ -1,9 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { ErrorToast, getErrorMessage } from "../components/error-toast";
+import SelectField from "../components/select-field";
+import { formatPlanPrice } from "../../lib/money";
 
 type Member = {
   _id: Id<"members">;
@@ -43,13 +45,39 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
   // So the plan is a SECOND call, after the member itself saves.
   const assignMemberPlan = useMutation(api.memberBilling.assignMemberPlan);
   const plans = useQuery(api.gymPlans.listPlans);
+  const planNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of plans ?? []) map.set(p._id, p.name);
+    return map;
+  }, [plans]);
+  const planOptions = useMemo(
+    () => [
+      { value: "", label: "— none —" },
+      ...(plans ?? []).map((p) => ({
+        value: p._id,
+        label: p.name,
+        // Price first — it is what the owner is choosing between. The Stripe
+        // warning is appended rather than replacing it, so a plan that isn't
+        // finished still shows what it will cost once it is.
+        hint: [
+          formatPlanPrice(p.amountCents, p.interval),
+          p.billable ? null : "not ready at Stripe",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      })),
+    ],
+    [plans]
+  );
 
   const [name, setName] = useState(member?.name ?? "");
-  // The free-text roster label. Left exactly as it was ON PURPOSE: it is what
-  // the /members table's Plan column renders, and it is NOT derived from planId
-  // and never synced to it. Two writers for one displayed string is how that
-  // string goes quietly stale — a gym that renames a plan at Stripe would have
-  // the roster disagree with the invoice and no way to tell which is right.
+  // The free-text roster label. It is what the /members table's Plan column
+  // renders, and it is seeded from the selected Membership plan's name ONLY at
+  // the moment that dropdown is changed below (one-shot convenience, not a
+  // binding) — it never re-syncs after that and the field stays freely
+  // editable. A continuous sync is how this string goes quietly stale — a gym
+  // that renames a plan at Stripe later would have the roster disagree with
+  // the invoice and no way to tell which is right.
   const [plan, setPlan] = useState(member?.plan ?? "");
   // null is a real, submittable choice — "— none —" takes a member off dues.
   const [planId, setPlanId] = useState<Id<"gymPlans"> | null>(member?.planId ?? null);
@@ -117,9 +145,15 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
       // from server time. A browser-supplied timestamp is why one member carried
       // a consent time earlier than its own creation time.
 
+      // Plan is optional once a Membership plan is picked, so an owner who
+      // clears it would otherwise save a blank roster label. Fall back to the
+      // selected plan's name — same one-shot seed as the dropdown's onChange.
+      const rosterPlan =
+        plan.trim() || (planId ? planNameById.get(planId) ?? "" : "");
+
       const fields = {
         name,
-        plan,
+        plan: rosterPlan,
         status,
         email: email || undefined,
         phone: trimmedPhone || undefined,
@@ -254,20 +288,23 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
               are separate facts: this one is the money object every dues
               function reads (members.planId), that one is the roster label. */}
           <Field label="Membership plan">
-            <select
+            <SelectField
               value={planId ?? ""}
               disabled={hasDuesSubscription || plans === undefined}
-              onChange={(e) => setPlanId(e.target.value ? (e.target.value as Id<"gymPlans">) : null)}
-              className="input"
-            >
-              <option value="">— none —</option>
-              {(plans ?? []).map((p) => (
-                <option key={p._id} value={p._id}>
-                  {p.name}
-                  {p.billable ? "" : " (not ready at Stripe)"}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => {
+                const next = v ? (v as Id<"gymPlans">) : null;
+                setPlanId(next);
+                // Fills the free-text Plan field below so picking a plan here
+                // is enough to save — see the comment on `plan` above for why
+                // this doesn't become a lasting binding.
+                if (next) {
+                  const name = planNameById.get(next);
+                  if (name) setPlan(name);
+                }
+              }}
+              options={planOptions}
+              title="Membership plan"
+            />
           </Field>
           {hasDuesSubscription ? (
             // assignMemberPlan refuses outright while a subscription is live,
@@ -285,7 +322,19 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
           ) : null}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Plan">
-              <input required value={plan} onChange={(e) => setPlan(e.target.value)} className="input" placeholder="BJJ Monthly" />
+              {/* Not required once a Membership plan is picked — that selection
+                  auto-fills this field (see the onChange above), so demanding
+                  it too just re-blocks the save it already satisfied. Still
+                  required with no Membership plan selected: it's the only
+                  label the roster and kiosk have for a member on no dues
+                  plan. */}
+              <input
+                required={!planId}
+                value={plan}
+                onChange={(e) => setPlan(e.target.value)}
+                className="input"
+                placeholder="BJJ Monthly"
+              />
             </Field>
             <Field label="Belt Rank">
               <input value={beltRank} onChange={(e) => setBeltRank(e.target.value)} className="input" placeholder="Blue Belt" />
@@ -361,10 +410,15 @@ export default function MemberModal({ member, hasDuesSubscription = false, onClo
             </div>
           )}
           <Field label="Status">
-            <select value={status} onChange={(e) => setStatus(e.target.value as "active" | "inactive")} className="input">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+            <SelectField
+              value={status}
+              onChange={(v) => setStatus(v as "active" | "inactive")}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              title="Status"
+            />
           </Field>
           {saveError && <ErrorToast message={saveError} />}
           <div className="flex gap-3 mt-2">
