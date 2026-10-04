@@ -249,6 +249,19 @@ export default function TemplateModal({
                       </li>
                     ))}
                   </ul>
+                  {/* Signed-ness is keyed on the template row, not on its text
+                      (there is no template versioning — see signDocument's
+                      one-per-member-per-document rule). So replacing an
+                      existing document's text never re-asks anyone. For a typo
+                      that is the point; for swapping a waiver for a whole
+                      membership contract it means the existing roster has not
+                      agreed to the new terms, and the owner has to be told. */}
+                  {draft.mode === "edit" && (
+                    <p className="text-xs mt-3" style={{ color: "#FBBF24" }}>
+                      Heads up: members who already signed this document won&apos;t be asked to
+                      sign the new text. Their signed copies keep the old wording.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
